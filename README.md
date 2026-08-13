@@ -126,15 +126,16 @@ The plugin declares `checkpoint/snapshot`, `checkpoint/bound`, `checkpoint/prune
 
 ## Web UI anchor
 
-The plugin already returns the new session id in the command result (`session: <id>`) and the Web shell can navigate there. The checkpoint strip is planned as a session-projection unit keyed `checkpoints` (fold `checkpoint/snapshot|bound|prune|rewind` into a whole-value list, `stateVersion` 0) plus a read-only panel in the shell — a follow-up once a harness build ships the `checkpoint/*` vocabulary; see [ARCHITECTURE.md](ARCHITECTURE.md#todo-web-ui-checkpoint-strip).
+The plugin returns the new session id in the command result (`session: <id>`) and the Web shell can navigate there. The **session-projection unit `checkpoints` is shipped**: whenever `ctx.sessionProjections` exists, the plugin registers the unit (folds `checkpoint/snapshot|bound|prune|rewind` into a whole-value list, `stateVersion` 0) — it stays an empty list on rc.6 hosts until a harness build ships the `checkpoint/*` vocabulary, then fills in with zero plugin changes. What remains a shell-side follow-up: the **read-only panel** rendering that projection (see [ARCHITECTURE.md](ARCHITECTURE.md#todo-web-ui-checkpoint-strip)).
 
 ## Tests
 
 ```sh
 npm install
-npm test                 # 53 unit tests: snapshot creation/dedup/concurrency, git & non-git paths,
+npm test                 # 58 unit tests: snapshot creation/dedup/concurrency, git & non-git paths,
                          # ≤N boundary mapping, prune quotas, two-phase failure matrix, approval
-                         # rejection, adaptive event gate (real Cordis + real SessionStore/CommandRuntime)
+                         # rejection, adaptive event gate, checkpoints projection unit
+                         # (real Cordis + real SessionStore/CommandRuntime/SessionProjectionRegistry)
 npm run test:integration # assembled-headless verification: agent modifies 2 files across 2 turns,
                          # /rewind list → restore → file contents + fork context asserted
 ```

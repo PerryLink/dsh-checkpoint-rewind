@@ -48,12 +48,13 @@ Design record for the `/rewind` capability-seam plugin. Companion to [README.md]
 
 **D7 — Pruning is a pure plan, applied oldest-first.** `prunePlan(entries, {maxSnapshots, maxSnapshotBytes})` computes the delete list (per-session tail + global byte quota) without I/O; the consumer executes delete-then-discard per id, containing per-id failures. `pruneOnTurnEnd` runs the same policy at `turn/end`.
 
-## TODO — Web UI checkpoint strip
+**D8 — Projection unit shipped, panel deferred.** `lib/projection.mjs` contributes the session-projection unit `checkpoints` (`init` empty map → `apply` folds `checkpoint/snapshot|bound|prune|rewind` → `view` sorted whole list; zod-validated wire payload; `stateVersion: 0`). `index.mjs` registers it whenever `ctx.sessionProjections` exists (optional capability; registration is an effect). On rc.6 hosts the unit serves an empty list because D6's adaptive gate suppresses the events it folds; once a host build ships the vocabulary the strip populates with zero plugin changes. The shell-side read-only panel remains a follow-up (see below).
 
-Anchor for the optional follow-up (deliberately out of this package's current scope; the harness's `apps/web` shell owns panels):
+## TODO — Web UI checkpoint strip (shell-side)
 
-1. **Projection unit** `checkpoints` on `ctx.sessionProjections` (inject `sessionProjections`, register when present): `init()` → empty list; `apply(state, event)` folds `checkpoint/snapshot` (append record), `checkpoint/bound` (fill `stepEndSeq`/`forkSeq`), `checkpoint/prune` (drop ids), `checkpoint/rewind` (mark outcome); `view(state)` → whole-list wire value; `stateVersion: 0`. Blocked on the same rc.6 event-registration surface as D6 — the unit only receives events once a host build knows them.
-2. **Read-only panel** in the Web shell that renders the projection and calls the existing `/rewind` command; navigation to the returned `session: <id>` uses the shell's session list API (the command result already carries the id).
+The only remaining piece is owned by the harness's `apps/web` shell, out of this package's scope:
+
+1. **Read-only panel** that renders the `checkpoints` projection and calls the existing `/rewind` command; navigation to the returned `session: <id>` uses the shell's session list API (the command result already carries the id).
 
 ## Test matrix
 
@@ -64,4 +65,5 @@ Anchor for the optional follow-up (deliberately out of this package's current sc
 | git provider | `test/providers/git.test.mjs` | scripted command sequences, clean-tree `commit-tree` fallback, content dedup, restore+leftovers, **verb whitelist**, real-git round trip (capability-gated) |
 | copy provider | `test/providers/copy.test.mjs` | capture/manifest, excludes, hardlink reuse, dedup, overwrite restore + leftover report, corrupt/traversing manifest rejection, orphan cleanup, concurrency |
 | Plugin assembly | `test/index.test.mjs` | real Cordis + real SessionStore/CommandRuntime: snapshot triggers, step-window + concurrent dedup, boundary backfill, quota pruning, `/rewind` list, denial path, restore-failure (no fork, checkpoint kept), fork-failure (files restored, reported), full restore+fork with seed equality, command lifecycle reconstruction, rc.6 adaptive gate |
-| Assembled headless | `dev/integration/rewind-headless.mjs` | real storage hub (JSON backend) + real storage-domain + real user-questions: agent mutates 2 files across 2 turns → list → restore → file contents + fork context asserted; git flow asserts HEAD/reflog untouched |
+| Projection unit | `test/projection.test.mjs` | pure folds (snapshot/bound/prune/rewind, unknown-id no-ops keep the state reference, wire schema), live-registry wiring (real SessionProjectionRegistry: synthetic events → `snapshot().values.checkpoints`), headless mount without the registry |
+| Assembled headless | `test/integration/rewind-headless.mjs` | real storage hub (JSON backend) + real storage-domain + real user-questions: agent mutates 2 files across 2 turns → list → restore → file contents + fork context asserted; git flow asserts HEAD/reflog untouched |

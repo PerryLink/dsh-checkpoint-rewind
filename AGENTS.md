@@ -66,7 +66,7 @@ npm run test:integration   # 组装式 headless 集成验证（test/integration/
 ## 质量约定
 
 - 文件以恰好一个换行结尾；空 `catch` 说明吞掉什么且 `try` 只包一条语句；不注释显而易见的事实。
-- `lib/` 不依赖 DSH 包；**唯一例外** `lib/domain.mjs`（领域 spec 必须用宿主 `defineDomain`/`domainTable` 保持同一实例），`zod` 仅允许出现在该文件（持久边界校验器）。
+- `lib/` 不依赖 DSH 包；**例外** `lib/domain.mjs`（领域 spec 必须用宿主 `defineDomain`/`domainTable` 保持同一实例），`zod` 仅允许出现在 `lib/domain.mjs` 与 `lib/projection.mjs`（持久边界校验器）。
 - 测试描述行为而非背书正确性；fixtures 用合成数据，永不掺真实用户工作区；git provider 用 scripted runner 测试命令序列，真实 git 测试检测环境能力后运行/跳过（跳过要说明原因）。
 - 复用他人代码处标注 license 与出处（THIRD_PARTY_NOTICES.md + 文件头注释）。
 

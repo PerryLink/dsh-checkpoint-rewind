@@ -126,13 +126,13 @@ headless 运行打印同样的结果并附带续接指引；Web shell 可用返�
 
 ## Web UI 锚点
 
-插件已在命令结果中返回新会话 id（`session: <id>`），Web shell 可据此跳转。检查点条计划为会话投影单元 `checkpoints`（折叠 `checkpoint/snapshot|bound|prune|rewind` 为全量列表值，`stateVersion` 0）+ shell 只读面板——待宿主构建携带 `checkpoint/*` 词汇后跟进；见 [ARCHITECTURE.md](ARCHITECTURE.md#todo-web-ui-checkpoint-strip)。
+插件已在命令结果中返回新会话 id（`session: <id>`），Web shell 可据此跳转。**会话投影单元 `checkpoints` 已随插件交付**：只要 `ctx.sessionProjections` 存在即注册（折叠 `checkpoint/snapshot|bound|prune|rewind` 为全量列表值，`stateVersion` 0）——rc.6 宿主上恒为空列表，宿主构建携带 `checkpoint/*` 词汇后无需改插件即自动填充。留给 shell 的跟进只剩**只读面板**的渲染（见 [ARCHITECTURE.md](ARCHITECTURE.md#todo-web-ui-checkpoint-strip)）。
 
 ## 测试
 
 ```sh
 npm install
-npm test                 # 53 个单测：快照创建/去重/并发、git 与非 git 路径、≤N 边界映射、
+npm test                 # 58 个单测：快照创建/去重/并发、git 与非 git 路径、≤N 边界映射、
                          # 配额清理、两段式恢复失败矩阵、approval 拒绝路径、自适应事件门
                          # （真 Cordis + 真 SessionStore/CommandRuntime）
 npm run test:integration # 组装式 headless 验证：agent 跨两轮改 2 个文件 → /rewind 列表 →

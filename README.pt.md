@@ -126,13 +126,13 @@ O plugin declara `checkpoint/snapshot`, `checkpoint/bound`, `checkpoint/prune` e
 
 ## Âncora Web UI
 
-O plugin já devolve o id da nova sessão no resultado do comando (`session: <id>`) e o shell Web pode navegar até lá. A faixa de checkpoints está planejada como unidade de projeção de sessão `checkpoints` (dobra `checkpoint/snapshot|bound|prune|rewind` num valor de lista completa, `stateVersion` 0) mais um painel somente-leitura no shell — um acompanhamento pendente de um build do harness com o vocabulário `checkpoint/*`; veja [ARCHITECTURE.md](ARCHITECTURE.md#todo-web-ui-checkpoint-strip).
+O plugin já devolve o id da nova sessão no resultado do comando (`session: <id>`) e o shell Web pode navegar até lá. A **unidade de projeção de sessão `checkpoints` já é distribuída**: quando `ctx.sessionProjections` existe, o plugin registra a unidade (dobra `checkpoint/snapshot|bound|prune|rewind` num valor de lista completa, `stateVersion` 0) — permanece uma lista vazia em hosts rc.6 até que um build do harness traga o vocabulário `checkpoint/*`, e então é preenchida sem mudanças no plugin. O acompanhamento restante é do shell: o **painel somente-leitura** que renderiza essa projeção (veja [ARCHITECTURE.md](ARCHITECTURE.md#todo-web-ui-checkpoint-strip)).
 
 ## Testes
 
 ```sh
 npm install
-npm test                 # 53 testes unitários: criação/dedup/concorrência de snapshots, caminhos git e não-git,
+npm test                 # 58 testes unitários: criação/dedup/concorrência de snapshots, caminhos git e não-git,
                          # mapeamento de limite ≤N, cotas de poda, matriz de falhas de duas fases, rejeição de
                          # aprovação, porta adaptativa de eventos (Cordis real + SessionStore/CommandRuntime reais)
 npm run test:integration # verificação headless montada: o agente modifica 2 arquivos em 2 turnos,

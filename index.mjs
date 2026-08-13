@@ -48,6 +48,7 @@ import {
   sortOldestFirst,
 } from './lib/checkpoints.mjs'
 import { confirmRewind, makeEventGate, maybeAppendSessionEvent } from './lib/gate.mjs'
+import { checkpointsProjectionDefinition } from './lib/projection.mjs'
 import { SnapshotProviderRegistry } from './lib/providers/registry.mjs'
 import { makeGitProvider } from './lib/providers/git.mjs'
 import { makeCopyProvider } from './lib/providers/copy.mjs'
@@ -392,6 +393,16 @@ export function apply(ctx, config = {}) {
     return next()
   }, { prepend: true })
 
+  // --- 会话投影单元 'checkpoints'（可选能力：注册表存在才注册，注册即 effect）。
+  // rc.6 上恒为空列表（checkpoint/* 事件被自适应门跳过）；宿主收录词汇后自动填充。
+  const projections = ctx.get('sessionProjections')
+  if (projections !== undefined) {
+    ctx.effect(
+      () => projections.register(checkpointsProjectionDefinition),
+      `${PLUGIN_NAME}.projection.checkpoints`,
+    )
+  }
+
   // --- /rewind 命令（Consumer）。
   ctx.commands.register({
     name: COMMAND_NAME,
@@ -541,4 +552,5 @@ export {
   resolveSnapshotDir,
   workspaceKeyOf,
   checkpointsDomainSpec,
+  checkpointsProjectionDefinition,
 }

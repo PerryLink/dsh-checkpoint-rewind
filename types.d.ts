@@ -63,6 +63,29 @@ declare module '@deepseek-ai/dsh-session' {
   }
 }
 
+declare module '@deepseek-ai/dsh-session-projection' {
+  interface SessionProjectionMap {
+    /**
+     * Web UI 检查点条的全量列表值（最新在尾）。
+     * 折叠 checkpoint/snapshot|bound|prune|rewind 事件得到；rc.6 宿主
+     * 未收录该词汇时恒为空列表（见 README「会话事件」）。
+     */
+    checkpoints: Array<{
+      id: string
+      turn: number
+      step: number
+      time: number
+      provider: 'git' | 'copy'
+      triggerTool: string
+      files: number
+      bytes: number
+      stepEndSeq?: number
+      forkSeq?: number
+      rewindOutcome?: 'denied' | 'failed' | 'restored-no-fork' | 'restored+forked'
+    }>
+  }
+}
+
 export interface Config {
   enabled?: boolean
   provider?: 'auto' | 'git' | 'copy'

@@ -126,13 +126,13 @@ headless रन वही परिणाम छापते हैं और �
 
 ## Web UI एंकर
 
-प्लगइन पहले से ही कमांड परिणाम में नया सत्र id लौटाता है (`session: <id>`) और Web shell वहाँ नेविगेट कर सकता है। चेकपॉइंट-पट्टी की योजना सत्र-प्रोजेक्शन इकाई `checkpoints` के रूप में है (`checkpoint/snapshot|bound|prune|rewind` को संपूर्ण-सूची मान में मोड़ना, `stateVersion` 0) + shell में केवल-पढ़ने वाला पैनल — यह तब तक अनुवर्ती कार्य है जब तक कोई harness बिल्ड `checkpoint/*` शब्दावली नहीं लाता; देखें [ARCHITECTURE.md](ARCHITECTURE.md#todo-web-ui-checkpoint-strip)।
+प्लगइन पहले से ही कमांड परिणाम में नया सत्र id लौटाता है (`session: <id>`) और Web shell वहाँ नेविगेट कर सकता है। **सत्र-प्रोजेक्शन इकाई `checkpoints` अब साथ वितरित होती है**: जहाँ `ctx.sessionProjections` मौजूद है, प्लगइन इकाई पंजीकृत करता है (`checkpoint/snapshot|bound|prune|rewind` को संपूर्ण-सूची मान में मोड़ना, `stateVersion` 0) — rc.6 होस्ट पर यह खाली सूची रहती है जब तक कोई harness बिल्ड `checkpoint/*` शब्दावली नहीं लाता, फिर बिना किसी प्लगइन बदलाव के भर जाती है। शेष अनुवर्ती कार्य shell का है: उस प्रोजेक्शन को दिखाने वाला **केवल-पढ़ने वाला पैनल** (देखें [ARCHITECTURE.md](ARCHITECTURE.md#todo-web-ui-checkpoint-strip))।
 
 ## परीक्षण
 
 ```sh
 npm install
-npm test                 # 53 यूनिट टेस्ट: स्नैपशॉट निर्माण/डिडप/समवर्ती, git व गैर-git पथ, ≤N सीमा मैपिंग,
+npm test                 # 58 यूनिट टेस्ट: स्नैपशॉट निर्माण/डिडप/समवर्ती, git व गैर-git पथ, ≤N सीमा मैपिंग,
                          # कोटा-प्रूनिंग, दो-चरणीय विफलता मैट्रिक्स, स्वीकृति-अस्वीकार, अनुकूली इवेंट द्वार
                          # (असली Cordis + असली SessionStore/CommandRuntime)
 npm run test:integration # असेंबल्ड headless सत्यापन: एजेंट 2 टर्न में 2 फ़ाइलें बदलता है → /rewind सूची →
