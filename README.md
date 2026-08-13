@@ -9,8 +9,16 @@ A capability-seam plugin that adds **workspace file snapshots + session-boundary
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-green.svg)](#)
 [![Harness](https://img.shields.io/badge/dsh-0.1.0--rc.6-8a2be2.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-60%2F60-brightgreen.svg)](#tests)
 
 > **Topics**: `dsh` · `dsh-plugin` · `deepseek-harness` · `rewind` · `checkpoint` · `session-fork` · `workspace-safety` · `undo` · `cordis-plugin`
+
+**TL;DR**
+
+- 📸 **Snapshot before every mutation** — every write path (`write`, `edit`, `str_replace_editor`, `bash`, …) is captured first, silently, via `fs/*-intent` + `tools/pre-execute` pass-through listeners.
+- 🧵 **git-first, no history risk** — snapshots are unreferenced git objects (`stash create` / `commit-tree`); restore is worktree-only. Non-git directories fall back to incremental directory snapshots.
+- ⏪ **One command to go back** — `/rewind` lists checkpoints; `/rewind <id>` confirms, restores files, then forks the session at the checkpoint's turn boundary and returns the new session id.
+- 🔒 **Fail-closed by design** — restore requires human confirmation; no answerer means no restore. No `git reset --hard`, no `git clean`, no message-level editing, ever.
 
 ---
 
@@ -33,6 +41,12 @@ The difference in one sentence: **dsh-checkpoint-rewind captures the *workspace 
 - **Two-phase rewind transaction** — `/rewind <id>` asks for confirmation (userQuestions / approval seam, **fail-closed when no answerer**), restores files first, then forks; a restore failure never forks, a fork failure reports "files restored, session not forked" and leaves the checkpoint intact.
 - **Durable registry + quotas** — checkpoint records live in `ctx.storageDomain` (domain `checkpoints`; SQLite backend = rows, JSON backend = a human-readable file); `maxSnapshots` (per session, default 50), `maxSnapshotBytes` (global, default 512 MiB), `pruneOnTurnEnd`, oldest-first.
 - **Reconstructable by design** — `/rewind` output rides the harness's own `command/run` + `command/done` events; `checkpoint/snapshot|bound|prune|rewind` session events are declared and appended automatically once a host build knows them (rc.6 adaptive gate).
+- **Web-ready projection** — a session-projection unit `checkpoints` is registered whenever `ctx.sessionProjections` exists, so a shell panel can render the checkpoint strip from the event log with zero plugin changes.
+
+## Requirements
+
+- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) `0.1.0-rc.6` (npm `next`), Node `^22.19 || >=24`
+- `git` (only for the git provider; without a git repo the copy provider takes over automatically)
 
 ## Quick start
 
@@ -78,6 +92,30 @@ Open the new session to continue from before that turn; this session keeps its l
 
 Headless runs print the same result with resume guidance; the Web shell can use the returned `session:` id to navigate (see [Web UI](#web-ui-anchor)).
 
+## Demo
+
+A real assembled-headless run (`npm run test:integration`): the agent modifies `a.txt` in turn 1 and `b.txt` in turn 2, then a `/rewind` restores both files and forks the session. (Transcript is verbatim output.)
+
+```console
+[rewind-integration] copy flow: mounted; workspace C:\Users\me\Temp\dsh-rewind-int-ws-mpnQDg
+[rewind-integration]   /rewind list:
+    rewind: 2 checkpoints (newest last):
+    #5889f233-6730-44dd-98dd-3b24cca09e77 · (copy) · turn 1 step 1 · 2026/8/14 04:30:18 · trigger: fs/write-intent · 2 files · 10 B · fork: ready
+    #03fb9ea6-8b50-4284-b768-98d5acb155f0 · (copy) · turn 2 step 1 · 2026/8/14 04:30:18 · trigger: fs/write-intent · 2 files · 10 B · fork: ready
+    run "/rewind <id>" to restore files and fork the session from that checkpoint
+[rewind-integration]   [user-questions] asked: Restore the workspace files to this checkpoint and fork the session?
+[rewind-integration]   /rewind result: rewind: restored 2 file(s) from checkpoint 5889f233-… (provider copy)
+and forked a new session at seq 3 (end of turn 1).
+session: session-1
+Open the new session to continue from before that turn; this session keeps its later history.
+[rewind-integration]   fork ok: child session-1 seedLength 4 parent integration-session
+[rewind-integration] copy flow: PASS
+[rewind-integration] git flow: mounted; workspace C:\Users\me\Temp\dsh-rewind-int-git-MhDhwe
+[rewind-integration]   git restore ok; HEAD intact: 9c21ee5e
+[rewind-integration] git flow: PASS
+[rewind-integration] integration: ALL PASS
+```
+
 ## Configuration
 
 Everything is a `Config` field (cordis.yml can change it; nothing is hardcoded):
@@ -118,7 +156,33 @@ Everything is a `Config` field (cordis.yml can change it; nothing is hardcoded):
 
 ## How it works
 
-`checkpoint/snapshot` (creation) → `checkpoint/bound` (step/end and turn/end backfill) → `/rewind` (list / confirm / two-phase restore). Full decision record, event vocabulary, and the provider seam contract: [ARCHITECTURE.md](ARCHITECTURE.md).
+`checkpoint/snapshot` (creation) → `checkpoint/bound` (step/end and turn/end backfill) → `/rewind` (list / confirm / two-phase restore):
+
+```mermaid
+flowchart LR
+  subgraph capture["per mutation"]
+    A["fs/write-intent · fs/edit-intent<br/>tools/pre-execute (prepend, pass-through)"] --> B["ProviderRegistry.resolve(auto)"]
+    B --> C["git: stash create / commit-tree<br/>(unreferenced objects)"]
+    B --> D["copy: incremental dir + hardlinks"]
+    C --> E[("checkpoints domain<br/>(ctx.storageDomain)")]
+    D --> E
+    E --> F["checkpoint/snapshot event (adaptive)"]
+  end
+  subgraph session["session events"]
+    G["step/end"] --> H["backfill stepEndSeq (step mapping ≤N)"]
+    I["turn/end"] --> J["backfill forkSeq (fork boundary)"]
+    H --> E
+    J --> E
+  end
+  K["/rewind <id>"] --> L{"confirm (userQuestions / approval)<br/>fail-closed"}
+  L -->|allow| M["phase 1: provider.restore(ref)"]
+  M -->|ok| N["phase 2: ctx.sessions.fork(session, forkSeq)"]
+  N --> O["new session id → Web UI / headless resume"]
+  M -->|fail| P["no fork · checkpoint kept · error"]
+  N -->|fail| Q["files restored · 'session not forked' reported"]
+```
+
+Full decision record, event vocabulary, and the provider seam contract: [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Session events (rc.6 note)
 
@@ -128,11 +192,21 @@ The plugin declares `checkpoint/snapshot`, `checkpoint/bound`, `checkpoint/prune
 
 The plugin returns the new session id in the command result (`session: <id>`) and the Web shell can navigate there. The **session-projection unit `checkpoints` is shipped**: whenever `ctx.sessionProjections` exists, the plugin registers the unit (folds `checkpoint/snapshot|bound|prune|rewind` into a whole-value list, `stateVersion` 0) — it stays an empty list on rc.6 hosts until a harness build ships the `checkpoint/*` vocabulary, then fills in with zero plugin changes. What remains a shell-side follow-up: the **read-only panel** rendering that projection (see [ARCHITECTURE.md](ARCHITECTURE.md#todo-web-ui-checkpoint-strip)).
 
+## FAQ
+
+**Does this replace git?** No — it *uses* git where available. In a git repo you get byte-perfect, deduplicated snapshot objects without touching history; in any other directory the copy provider does the same with plain files. Regular commits remain your long-term history.
+
+**Why not `git reset --hard`?** Because destroying state is not the job of a safety net. The plugin only creates unreferenced objects and performs worktree-only restores, so a bad rewind can never lose history, the index, or files created after the checkpoint.
+
+**Can I rewind to a step in the middle of a turn?** File restoration is step-precise (nearest snapshot ≤ N). The session fork, however, respects the harness's fork granularity: the child session ends at the checkpoint's `turn/end`, because `ctx.sessions.fork` rejects prefixes inside an open turn. Files and conversation stay consistent at that boundary.
+
+**What happens if nobody can answer the confirmation?** Nothing is touched — the plugin fails closed (`unavailable`/`rejected`), keeps the checkpoint, and returns an explanatory error.
+
 ## Tests
 
 ```sh
 npm install
-npm test                 # 58 unit tests: snapshot creation/dedup/concurrency, git & non-git paths,
+npm test                 # 60 unit tests: snapshot creation/dedup/concurrency, git & non-git paths,
                          # ≤N boundary mapping, prune quotas, two-phase failure matrix, approval
                          # rejection, adaptive event gate, checkpoints projection unit
                          # (real Cordis + real SessionStore/CommandRuntime/SessionProjectionRegistry)
@@ -146,5 +220,5 @@ Apache License 2.0 — see [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD
 
 ## Related plugins
 
-- [dsh-memento](https://github.com/…/dsh-memento) — bounded, approval-gated cross-session memory (same plugin conventions).
+- **dsh-memento** — bounded, approval-gated cross-session memory (same plugin conventions).
 - [Anionex/dsh-turn-rewind](https://github.com/Anionex/dsh-turn-rewind) · [LingLambda/dsh-undo](https://github.com/LingLambda/dsh-undo) — the alternatives this plugin differentiates from (table above).

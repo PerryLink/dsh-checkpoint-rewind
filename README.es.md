@@ -9,8 +9,16 @@ Un plugin de capability-seam que añade **instantáneas de archivos del workspac
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-green.svg)](#)
 [![Harness](https://img.shields.io/badge/dsh-0.1.0--rc.6-8a2be2.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-60%2F60-brightgreen.svg)](#pruebas)
 
 > **Topics**: `dsh` · `dsh-plugin` · `deepseek-harness` · `rewind` · `checkpoint` · `session-fork` · `workspace-safety` · `undo` · `cordis-plugin`
+
+**TL;DR**
+
+- 📸 **Instantánea antes de cada mutación** — todos los caminos de escritura (`write`, `edit`, `str_replace_editor`, `bash`, …) se capturan primero, en silencio, vía listeners pass-through `fs/*-intent` + `tools/pre-execute`.
+- 🧵 **git primero, sin riesgo histórico** — las instantáneas son objetos git sin referencia (`stash create` / `commit-tree`); la restauración es solo-worktree. Directorios sin git degradan a instantáneas incrementales de directorio.
+- ⏪ **Un comando para volver** — `/rewind` lista checkpoints; `/rewind <id>` confirma, restaura archivos, luego bifurca la sesión en el límite de turno del checkpoint y devuelve el id de la nueva sesión.
+- 🔒 **Fail-closed por diseño** — restaurar requiere confirmación humana; sin respondedor no hay restauración. Nada de `git reset --hard`, nada de `git clean`, nunca edición de mensajes.
 
 ---
 
@@ -33,6 +41,12 @@ La diferencia en una frase: **dsh-checkpoint-rewind captura el *estado del works
 - **Transacción de rewind en dos fases** — `/rewind <id>` pide confirmación (seam userQuestions / approval, **fail-closed sin respondedor**), restaura archivos primero y luego bifurca; un fallo de restauración nunca bifurca, un fallo de fork informa «archivos restaurados, sesión no bifurcada» y conserva el checkpoint.
 - **Registro durable + cuotas** — los registros viven en `ctx.storageDomain` (dominio `checkpoints`; backend SQLite = filas, backend JSON = archivo legible); `maxSnapshots` (por sesión, 50 por defecto), `maxSnapshotBytes` (global, 512 MiB por defecto), `pruneOnTurnEnd`, primero-lo-más-antiguo.
 - **Reconstruible por diseño** — la salida de `/rewind` viaja en los eventos propios del harness `command/run` + `command/done`; los eventos `checkpoint/snapshot|bound|prune|rewind` están declarados y se añaden automáticamente cuando un build del host los conozca (puerta adaptativa rc.6).
+- **Proyección lista para la Web** — una unidad de proyección de sesión `checkpoints` se registra siempre que exista `ctx.sessionProjections`, de modo que un panel del shell puede renderizar la franja de checkpoints desde el log de eventos sin cambios en el plugin.
+
+## Requisitos
+
+- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) `0.1.0-rc.6` (npm `next`), Node `^22.19 || >=24`
+- `git` (solo para el provider git; sin repositorio git el provider copy toma el relevo automáticamente)
 
 ## Inicio rápido
 
@@ -78,6 +92,30 @@ Open the new session to continue from before that turn; this session keeps its l
 
 Las ejecuciones headless imprimen el mismo resultado con guía de reanudación; el shell Web puede navegar con el `session:` devuelto (ver [ancla Web UI](#ancla-web-ui)).
 
+## Demo
+
+Una ejecución headless ensamblada real (`npm run test:integration`): el agente modifica `a.txt` en el turno 1 y `b.txt` en el turno 2, luego un `/rewind` restaura ambos archivos y bifurca la sesión. (Transcripción literal.)
+
+```console
+[rewind-integration] copy flow: mounted; workspace C:\Users\me\Temp\dsh-rewind-int-ws-mpnQDg
+[rewind-integration]   /rewind list:
+    rewind: 2 checkpoints (newest last):
+    #5889f233-6730-44dd-98dd-3b24cca09e77 · (copy) · turn 1 step 1 · 2026/8/14 04:30:18 · trigger: fs/write-intent · 2 files · 10 B · fork: ready
+    #03fb9ea6-8b50-4284-b768-98d5acb155f0 · (copy) · turn 2 step 1 · 2026/8/14 04:30:18 · trigger: fs/write-intent · 2 files · 10 B · fork: ready
+    run "/rewind <id>" to restore files and fork the session from that checkpoint
+[rewind-integration]   [user-questions] asked: Restore the workspace files to this checkpoint and fork the session?
+[rewind-integration]   /rewind result: rewind: restored 2 file(s) from checkpoint 5889f233-… (provider copy)
+and forked a new session at seq 3 (end of turn 1).
+session: session-1
+Open the new session to continue from before that turn; this session keeps its later history.
+[rewind-integration]   fork ok: child session-1 seedLength 4 parent integration-session
+[rewind-integration] copy flow: PASS
+[rewind-integration] git flow: mounted; workspace C:\Users\me\Temp\dsh-rewind-int-git-MhDhwe
+[rewind-integration]   git restore ok; HEAD intact: 9c21ee5e
+[rewind-integration] git flow: PASS
+[rewind-integration] integration: ALL PASS
+```
+
 ## Configuración
 
 Todo es un campo de `Config` (cambiable desde cordis.yml; nada está hardcodeado):
@@ -118,7 +156,33 @@ Todo es un campo de `Config` (cambiable desde cordis.yml; nada está hardcodeado
 
 ## Cómo funciona
 
-`checkpoint/snapshot` (creación) → `checkpoint/bound` (relleno de step/end y turn/end) → `/rewind` (listar / confirmar / restaurar en dos fases). Registro completo de decisiones, vocabulario de eventos y contrato del provider seam: [ARCHITECTURE.md](ARCHITECTURE.md).
+`checkpoint/snapshot` (creación) → `checkpoint/bound` (relleno de step/end y turn/end) → `/rewind` (listar / confirmar / restaurar en dos fases):
+
+```mermaid
+flowchart LR
+  subgraph capture["por mutación"]
+    A["fs/write-intent · fs/edit-intent<br/>tools/pre-execute (prepend, pass-through)"] --> B["ProviderRegistry.resolve(auto)"]
+    B --> C["git: stash create / commit-tree<br/>(objetos sin referencia)"]
+    B --> D["copy: directorio incremental + hardlinks"]
+    C --> E[("dominio checkpoints<br/>(ctx.storageDomain)")]
+    D --> E
+    E --> F["evento checkpoint/snapshot (adaptativo)"]
+  end
+  subgraph session["eventos de sesión"]
+    G["step/end"] --> H["relleno stepEndSeq (mapeo de paso ≤N)"]
+    I["turn/end"] --> J["relleno forkSeq (límite del fork)"]
+    H --> E
+    J --> E
+  end
+  K["/rewind <id>"] --> L{"confirmar (userQuestions / approval)<br/>fail-closed"}
+  L -->|allow| M["fase 1: provider.restore(ref)"]
+  M -->|ok| N["fase 2: ctx.sessions.fork(session, forkSeq)"]
+  N --> O["nuevo id de sesión → Web UI / reanudación headless"]
+  M -->|fail| P["sin fork · checkpoint conservado · error"]
+  N -->|fail| Q["archivos restaurados · «sesión no bifurcada» reportado"]
+```
+
+Registro completo de decisiones, vocabulario de eventos y contrato del provider seam: [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Eventos de sesión (nota rc.6)
 
@@ -128,13 +192,24 @@ El plugin declara `checkpoint/snapshot`, `checkpoint/bound`, `checkpoint/prune` 
 
 El plugin ya devuelve el id de la nueva sesión en el resultado del comando (`session: <id>`) y el shell Web puede navegar allí. La **unidad de proyección de sesión `checkpoints` ya se distribuye**: cuando `ctx.sessionProjections` existe, el plugin registra la unidad (pliega `checkpoint/snapshot|bound|prune|rewind` en un valor de lista completa, `stateVersion` 0) — permanece como lista vacía en hosts rc.6 hasta que un build del harness incluya el vocabulario `checkpoint/*`, y entonces se llena sin cambios en el plugin. El seguimiento restante es del shell: el **panel de solo lectura** que renderiza esa proyección (ver [ARCHITECTURE.md](ARCHITECTURE.md#todo-web-ui-checkpoint-strip)).
 
+## FAQ
+
+**¿Sustituye a git?** No — lo *usa*. En un repositorio git obtienes objetos de instantánea byte-exactos y deduplicados sin tocar el historial; en cualquier otro directorio el provider copy hace lo mismo con archivos normales. Tus commits habituales siguen siendo tu historial a largo plazo.
+
+**¿Por qué no `git reset --hard`?** Porque destruir estado no es el trabajo de una red de seguridad. El plugin solo crea objetos sin referencia y restaura solo el worktree, así que un rewind fallido jamás pierde historial, índice ni archivos creados después del checkpoint.
+
+**¿Puedo volver a un paso en mitad de un turno?** La restauración de archivos es precisa a nivel de paso (instantánea más cercana ≤ N). El fork de sesión respeta la granularidad del harness: la sesión hija termina en el `turn/end` del checkpoint, porque `ctx.sessions.fork` rechaza prefijos dentro de un turno abierto. Archivos y conversación permanecen consistentes en ese límite.
+
+**¿Qué pasa si nadie puede responder a la confirmación?** No se toca nada — el plugin cierra en falso (`unavailable`/`rejected`), conserva el checkpoint y devuelve un error explicativo.
+
 ## Pruebas
 
 ```sh
 npm install
-npm test                 # 58 tests unitarios: creación/dedup/concurrencia de instantáneas, rutas git y no-git,
+npm test                 # 60 tests unitarios: creación/dedup/concurrencia de instantáneas, rutas git y no-git,
                          # mapeo de límite ≤N, cuotas de poda, matriz de fallos de dos fases, rechazo de
-                         # aprobación, puerta adaptativa de eventos (Cordis real + SessionStore/CommandRuntime reales)
+                         # aprobación, puerta adaptativa de eventos, unidad de proyección checkpoints
+                         # (Cordis real + SessionStore/CommandRuntime/SessionProjectionRegistry reales)
 npm run test:integration # verificación headless ensamblada: el agente modifica 2 archivos en 2 turnos,
                          # /rewind lista → restaura → contenidos y contexto del fork asegurados
 ```
@@ -145,5 +220,5 @@ Apache License 2.0 — ver [LICENSE](LICENSE) y [THIRD_PARTY_NOTICES.md](THIRD_P
 
 ## Plugins relacionados
 
-- [dsh-memento](https://github.com/…/dsh-memento) — memoria entre sesiones acotada y con puerta de aprobación (mismas convenciones de plugin).
+- **dsh-memento** — memoria entre sesiones acotada y con puerta de aprobación (mismas convenciones de plugin).
 - [Anionex/dsh-turn-rewind](https://github.com/Anionex/dsh-turn-rewind) · [LingLambda/dsh-undo](https://github.com/LingLambda/dsh-undo) — las alternativas de las que este plugin se diferencia (tabla de arriba).

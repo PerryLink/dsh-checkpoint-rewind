@@ -9,8 +9,16 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-green.svg)](#)
 [![Harness](https://img.shields.io/badge/dsh-0.1.0--rc.6-8a2be2.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-60%2F60-brightgreen.svg)](#测试)
 
 > **Topics**: `dsh` · `dsh-plugin` · `deepseek-harness` · `rewind` · `checkpoint` · `session-fork` · `workspace-safety` · `undo` · `cordis-plugin`
+
+**TL;DR**
+
+- 📸 **每次变更前快照** —— 所有写入路径（`write`、`edit`、`str_replace_editor`、`bash`……）经 `fs/*-intent` + `tools/pre-execute` 直通监听先行捕获，静默无感。
+- 🧵 **git 优先、零历史风险** —— 快照是未引用的 git 对象（`stash create` / `commit-tree`）；恢复仅动工作树。非 git 目录自动降级为增量目录快照。
+- ⏪ **一条命令回退** —— `/rewind` 列出检查点；`/rewind <id>` 经确认后先恢复文件，再在检查点轮次边界 fork 会话并返回新会话 id。
+- 🔒 **设计即失败关闭** —— 恢复必须经人工确认，无回答者即不恢复。绝不 `git reset --hard`、绝不 `git clean`、绝不编辑对话消息。
 
 ---
 
@@ -33,6 +41,12 @@
 - **两段式回退事务** —— `/rewind <id>` 先经确认（userQuestions / approval seam，**无回答者失败关闭**），先恢复文件、再 fork；恢复失败绝不 fork，fork 失败报告"文件已恢复、会话未派生"且保留检查点。
 - **持久注册表 + 配额** —— 检查点记录存 `ctx.storageDomain`（域 `checkpoints`；SQLite 后端 = 表行，JSON 后端 = 可读文件）；`maxSnapshots`（每会话，默认 50）、`maxSnapshotBytes`（全局，默认 512 MiB）、`pruneOnTurnEnd`，最旧优先清理。
 - **天然可重建** —— `/rewind` 输出走 harness 自有的 `command/run` + `command/done` 事件；`checkpoint/snapshot|bound|prune|rewind` 会话事件已声明，宿主构建收录后自动追加（rc.6 自适应门）。
+- **Web 就绪的投影** —— 只要 `ctx.sessionProjections` 存在即注册投影单元 `checkpoints`，shell 面板可直接从事件日志渲染检查点条，插件无需任何改动。
+
+## 要求
+
+- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) `0.1.0-rc.6`（npm `next`），Node `^22.19 || >=24`
+- `git`（仅 git provider 需要；非 git 目录自动改走 copy provider）
 
 ## 快速开始
 
@@ -78,6 +92,30 @@ Open the new session to continue from before that turn; this session keeps its l
 
 headless 运行打印同样的结果并附带续接指引；Web shell 可用返回的 `session:` id 完成跳转（见 [Web UI 锚点](#web-ui-锚点)）。
 
+## 演示
+
+一次真实的组装式 headless 运行（`npm run test:integration`）：agent 在第 1 轮改 `a.txt`、第 2 轮改 `b.txt`，随后一条 `/rewind` 恢复两个文件并 fork 会话（下方为逐字转录）。
+
+```console
+[rewind-integration] copy flow: mounted; workspace C:\Users\me\Temp\dsh-rewind-int-ws-mpnQDg
+[rewind-integration]   /rewind list:
+    rewind: 2 checkpoints (newest last):
+    #5889f233-6730-44dd-98dd-3b24cca09e77 · (copy) · turn 1 step 1 · 2026/8/14 04:30:18 · trigger: fs/write-intent · 2 files · 10 B · fork: ready
+    #03fb9ea6-8b50-4284-b768-98d5acb155f0 · (copy) · turn 2 step 1 · 2026/8/14 04:30:18 · trigger: fs/write-intent · 2 files · 10 B · fork: ready
+    run "/rewind <id>" to restore files and fork the session from that checkpoint
+[rewind-integration]   [user-questions] asked: Restore the workspace files to this checkpoint and fork the session?
+[rewind-integration]   /rewind result: rewind: restored 2 file(s) from checkpoint 5889f233-… (provider copy)
+and forked a new session at seq 3 (end of turn 1).
+session: session-1
+Open the new session to continue from before that turn; this session keeps its later history.
+[rewind-integration]   fork ok: child session-1 seedLength 4 parent integration-session
+[rewind-integration] copy flow: PASS
+[rewind-integration] git flow: mounted; workspace C:\Users\me\Temp\dsh-rewind-int-git-MhDhwe
+[rewind-integration]   git restore ok; HEAD intact: 9c21ee5e
+[rewind-integration] git flow: PASS
+[rewind-integration] integration: ALL PASS
+```
+
 ## 配置
 
 全部为 `Config` 字段（cordis.yml 可改；无硬编码）：
@@ -118,7 +156,33 @@ headless 运行打印同样的结果并附带续接指引；Web shell 可用返�
 
 ## 工作原理
 
-`checkpoint/snapshot`（创建）→ `checkpoint/bound`（step/end 与 turn/end 补记）→ `/rewind`（列出 / 确认 / 两段式恢复）。完整决策记录、事件词汇与 provider 契约见 [ARCHITECTURE.md](ARCHITECTURE.md)。
+`checkpoint/snapshot`（创建）→ `checkpoint/bound`（step/end 与 turn/end 补记）→ `/rewind`（列出 / 确认 / 两段式恢复）：
+
+```mermaid
+flowchart LR
+  subgraph capture["每次变更"]
+    A["fs/write-intent · fs/edit-intent<br/>tools/pre-execute（prepend 直通）"] --> B["ProviderRegistry.resolve(auto)"]
+    B --> C["git: stash create / commit-tree<br/>（未引用对象）"]
+    B --> D["copy: 增量目录 + hardlink"]
+    C --> E[("checkpoints 存储域<br/>（ctx.storageDomain）")]
+    D --> E
+    E --> F["checkpoint/snapshot 事件（自适应门）"]
+  end
+  subgraph session["会话事件"]
+    G["step/end"] --> H["补记 stepEndSeq（步骤映射 ≤N）"]
+    I["turn/end"] --> J["补记 forkSeq（fork 边界）"]
+    H --> E
+    J --> E
+  end
+  K["/rewind <id>"] --> L{"确认（userQuestions / approval）<br/>失败关闭"}
+  L -->|allow| M["阶段 1：provider.restore(ref)"]
+  M -->|ok| N["阶段 2：ctx.sessions.fork(session, forkSeq)"]
+  N --> O["新会话 id → Web UI / headless 续接"]
+  M -->|fail| P["不 fork · 检查点保留 · 报错"]
+  N -->|fail| Q["文件已恢复 · 报告“会话未派生”"]
+```
+
+完整决策记录、事件词汇与 provider 契约见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
 ## 会话事件（rc.6 说明）
 
@@ -128,13 +192,23 @@ headless 运行打印同样的结果并附带续接指引；Web shell 可用返�
 
 插件已在命令结果中返回新会话 id（`session: <id>`），Web shell 可据此跳转。**会话投影单元 `checkpoints` 已随插件交付**：只要 `ctx.sessionProjections` 存在即注册（折叠 `checkpoint/snapshot|bound|prune|rewind` 为全量列表值，`stateVersion` 0）——rc.6 宿主上恒为空列表，宿主构建携带 `checkpoint/*` 词汇后无需改插件即自动填充。留给 shell 的跟进只剩**只读面板**的渲染（见 [ARCHITECTURE.md](ARCHITECTURE.md#todo-web-ui-checkpoint-strip)）。
 
+## FAQ
+
+**它能替代 git 吗？** 不能——它*使用* git。git 仓库里得到字节级精确、去重的快照对象且不动历史；任何其他目录由 copy provider 用普通文件做到同样效果。常规提交仍是你长期的历史。
+
+**为什么不用 `git reset --hard`？** 因为毁掉状态不是安全网该干的事。插件只创建未引用对象并做 worktree-only 恢复，坏回退永远不会丢失历史、索引或检查点之后新建的文件。
+
+**能回到一轮中间的某个步骤吗？** 文件恢复是步骤级精确的（最近的 ≤N 快照）。会话 fork 则遵循 harness 的 fork 粒度：子会话止于该检查点的 `turn/end`，因为 `ctx.sessions.fork` 拒绝开放轮次内的前缀。文件与会话在该边界保持一致。
+
+**没人能回答确认时会怎样？** 什么都不动——插件失败关闭（`unavailable`/`rejected`），保留检查点并返回解释性错误。
+
 ## 测试
 
 ```sh
 npm install
-npm test                 # 58 个单测：快照创建/去重/并发、git 与非 git 路径、≤N 边界映射、
-                         # 配额清理、两段式恢复失败矩阵、approval 拒绝路径、自适应事件门
-                         # （真 Cordis + 真 SessionStore/CommandRuntime）
+npm test                 # 60 个单测：快照创建/去重/并发、git 与非 git 路径、≤N 边界映射、
+                         # 配额清理、两段式恢复失败矩阵、approval 拒绝路径、自适应事件门、
+                         # checkpoints 投影单元（真 Cordis + 真 SessionStore/CommandRuntime/SessionProjectionRegistry）
 npm run test:integration # 组装式 headless 验证：agent 跨两轮改 2 个文件 → /rewind 列表 →
                          # 回退 → 断言文件内容与 fork 上下文
 ```
@@ -145,5 +219,5 @@ Apache License 2.0 —— 见 [LICENSE](LICENSE) 与 [THIRD_PARTY_NOTICES.md](TH
 
 ## 相关插件
 
-- [dsh-memento](https://github.com/…/dsh-memento) —— 有界、带审批门的跨会话记忆（同一插件族约定）。
+- **dsh-memento** —— 有界、带审批门的跨会话记忆（同一插件族约定）。
 - [Anionex/dsh-turn-rewind](https://github.com/Anionex/dsh-turn-rewind) · [LingLambda/dsh-undo](https://github.com/LingLambda/dsh-undo) —— 本插件差异化定位的对照物（见上表）。
