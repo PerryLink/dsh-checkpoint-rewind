@@ -1,0 +1,8 @@
+# dsh-checkpoint-rewind bundle patch: mount the checkpoint/rewind plugin.
+- insert:
+    - id: checkpoint-rewind
+      name: dsh-checkpoint-rewind
+      config:
+        enabled: true
+        provider: auto
+        confirmVia: auto
