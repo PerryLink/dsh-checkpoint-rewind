@@ -1,6 +1,6 @@
 # AGENTS.md
 
-`dsh-checkpoint-rewind` 是 DeepSeek Harness 的能力接缝插件：为 DSH 补上 Claude Code `/rewind` 等价能力 —— **git 优先的工作区文件快照 + 会话边界回退（fork 种子会话）+ 一键恢复**。别的回退插件卖 Change Ledger（`Anionex/dsh-turn-rewind`）或纯上下文回退（`LingLambda/dsh-undo`），本插件卖 **git 对象级快照 + fork 种子会话 + 两段式恢复事务**。DSH 哲学是 **everything is a plugin**——本仓库只做插件，不碰引擎。改代码前先读 `README.md`（对外契约）、`ARCHITECTURE.md`（设计决策）与 `test/`（现有行为）。
+`dsh-checkpoint-rewind` 是 DeepSeek Harness 的能力接缝插件：为 DSH 补上 Claude Code `/rewind` 等价能力 —— **git 优先的工作区文件快照 + 会话边界回退（fork 种子会话）+ 一键恢复**。别的回退插件卖 Change Ledger（`Anionex/dsh-turn-rewind`）或纯上下文回退（`LingLambda/dsh-undo`），本插件卖 **git 对象级快照 + fork 种子会话 + 三段式恢复事务（保护检查点 → 恢复 → fork）**。DSH 哲学是 **everything is a plugin**——本仓库只做插件，不碰引擎。改代码前先读 `README.md`（对外契约）、`ARCHITECTURE.md`（设计决策）与 `test/`（现有行为）。
 
 ## 仓库布局：发布面 / 本地工程面
 
@@ -37,7 +37,7 @@ dev/                 ❌ 本地工程面：冒烟脚本、夹具、演示——�
 
 ```sh
 npm install          # 安装 peer 依赖（@deepseek-ai/dsh-session@0.1.0-rc.6、schemastery、zod 等）
-npm test             # node --test 跑 test/*.test.mjs
+npm test             # node --test 跑 test/**/*.test.mjs（含 test/providers/ 单测套件；集成验证单独跑）
 npm run test:integration   # 组装式 headless 集成验证（test/integration/，不进发布包）
 ```
 
@@ -55,15 +55,15 @@ npm run test:integration   # 组装式 headless 集成验证（test/integration/
 - **只消费公开服务**：`sessions` / `storageDomain` / `commands`（`inject` 声明）；`userQuestions` / `approval` 按需可选查找（缺失 = 失败关闭）。不修改 DSH 引擎 / agent-loop / apiproxy / 官方 UI 包。
 - **注册即 effect**：一切贡献走 `ctx.effect()` / `ctx.on()` / 服务 `register()`（返回 disposer）；provider 注册的 disposer 交给 `ctx.effect()`；绝不手动收尾。
 - **waterfall 直通**：`fs/write-intent` / `fs/edit-intent` / `tools/pre-execute` 的监听必须调用 `next()` 并原样返回（快照是旁路观察，决策槽仍归策略插件）。
-- **模型可见 ⟺ 落盘**：回退结果与检查点列表由 `command/run` + `command/done`（宿主已知事件，命令运行时自动落盘）+ 领域记录重建；`checkpoint/*` 事件在宿主收录该类型时追加（自适应门）。
-- **恢复必须先确认**：`/rewind <id>` 覆盖用户文件前必须经确认门（`userQuestions` / `approval`，ask 语义）；任何回答者缺失/抛错 → 拒绝，绝不静默放行。
-- **git 安全边界**：只允许 `stash create` / `commit-tree` / `restore --worktree` 一类无副作用原语（白名单 + 运行时断言）；绝不 `reset --hard` / `clean` / 改写索引或历史。
+- **模型可见 ⟺ 落盘**：回退结果与检查点列表由 `command/run` + `command/done`（宿主已知事件，命令运行时自动落盘）+ 领域记录重建；`checkpoint/*` 事件经自适应门追加（宿主收录该类型或支持 `ignorable` 信封时自动开启）。
+- **恢复必须先确认**：`/rewind <id>`（及 `/rewind clear`）在覆盖用户文件/删除检查点前必须经确认门（`userQuestions` / `approval`，ask 语义）；任何回答者缺失/抛错 → 拒绝，绝不静默放行。
+- **git 安全边界**：只允许 `stash create` / `commit-tree` / `restore --worktree` 一类无副作用原语（白名单 + 运行时断言）；恢复必须是**显式路径**分块（`git restore … -- .` 会删除检查点之后 `git add` 的新文件，禁止发出）；绝不 `reset --hard` / `clean` / 改写索引或历史。
 - **失败要大声**：非法配置加载期抛错；领域打开失败/恢复失败/fork 失败返回结构化错误文本；绝不静默吞、绝不静默截断。
 - **本地优先**：零网络、零凭据；文件快照只写 `snapshotDir`（默认 `$DSH_HOME/dsh-checkpoint-rewind/`）。
 
 ## 会话事件的 rc.6 约束（必读）
 
-本插件在 `types.d.ts` 声明了 `checkpoint/snapshot|bound|prune|rewind` 的 SessionEventMap 合并，但**运行时经自适应门决定是否 append**：rc.6 无插件事件注册面（`KNOWN_SESSION_EVENT_TYPES` 不含 checkpoint/*，且 `Session.append` 无法标记 `ignorable`），append 未注册类型会让该会话下次加载被持久化层拒绝。审计链由宿主已知事件（`command/run` + `command/done`、`approval/*`）+ `checkpoints` 存储领域承担；未来 harness 收录 checkpoint/* 后自动开启。**不要"顺手"取消这个自适应门。**
+本插件在 `types.d.ts` 声明了 `checkpoint/snapshot|bound|prune|rewind` 的 SessionEventMap 合并，但**运行时经自适应门决定是否 append**：rc.6 无插件事件注册面（`KNOWN_SESSION_EVENT_TYPES` 不含 checkpoint/*，`Session.append` 静默丢弃未知选项键、无法盖章 `ignorable`），append 未注册类型会让该会话下次加载被持久化层拒绝。门 = 类型被宿主收录 **或** 运行时探测证明宿主 append 盖章 `ignorable` 信封（探测在独立 detached store 上做，绝不接入宿主持久化）。审计链由宿主已知事件（`command/run` + `command/done`、`approval/*`）+ `checkpoints` 存储领域承担。**不要"顺手"取消这个自适应门，也不要让探测会话进宿主持久化。**
 
 ## 质量约定
 
