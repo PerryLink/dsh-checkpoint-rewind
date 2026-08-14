@@ -18,9 +18,9 @@ async function makeWorkspace(files) {
   return cwd
 }
 
-async function makeProvider() {
+async function makeProvider(opts = {}) {
   const snapshotDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-rewind-copy-snap-'))
-  const provider = makeCopyProvider({ snapshotDir, excludeGlobs: ['node_modules'] })
+  const provider = makeCopyProvider({ snapshotDir, excludeGlobs: ['node_modules'], verifyByHash: opts.verifyByHash === true })
   return { provider, snapshotDir }
 }
 
@@ -80,6 +80,92 @@ describe('copy provider', () => {
     assert.equal(await fs.readFile(path.join(secondDir, 'a.txt'), 'utf8'), 'A1')
   })
 
+  it('bytes 是增量记账：hardlink 复用文件不计入（仅实拷贝字节）', async () => {
+    const cwd = await makeWorkspace({ 'a.txt': 'A1', 'b.txt': 'B1' })
+    const { provider, snapshotDir } = await makeProvider()
+    const ws = { cwd, key: cwd }
+    const first = await provider.snapshot(ws, { triggerTool: 'bash' })
+    assert.equal(first.bytes, 4, '首次捕获全量实拷贝（A1 + B1）')
+    await fs.writeFile(path.join(cwd, 'b.txt'), 'B2!')
+    const second = await provider.snapshot(ws, { triggerTool: 'bash', previousRef: first.ref })
+    assert.ok(second, 'second snapshot exists')
+    const [statA1, statA2] = await Promise.all([
+      fs.stat(path.join(snapshotBaseDir(snapshotDir, cwd), first.ref, 'a.txt')),
+      fs.stat(path.join(snapshotBaseDir(snapshotDir, cwd), second.ref, 'a.txt')),
+    ])
+    if (statA1.nlink >= 2 && statA2.nlink >= 2) {
+      assert.equal(second.bytes, 3, 'hardlink 复用的 a.txt 不计增量，只计变更的 b.txt')
+    } else {
+      assert.ok(second.bytes <= 5, '无 hardlink 平台退化为实拷贝（全量）')
+    }
+  })
+
+  it('verifyByHash：同内容不同 mtime 仍按哈希去重', async () => {
+    const cwd = await makeWorkspace({ 'a.txt': 'A1' })
+    const { provider } = await makeProvider({ verifyByHash: true })
+    const ws = { cwd, key: cwd }
+    const first = await provider.snapshot(ws, { triggerTool: 'bash' })
+    // 重写同内容（mtime 变化、size 相同）：哈希比对 → 去重 null。
+    await fs.writeFile(path.join(cwd, 'a.txt'), 'A1')
+    const second = await provider.snapshot(ws, { triggerTool: 'bash', previousRef: first.ref })
+    assert.equal(second, null)
+  })
+
+  it('verifyByHash：mtime 被精确保留的同尺寸内容变更被检出（快检盲区覆盖）', async () => {
+    const cwd = await makeWorkspace({ 'a.txt': 'AAAA' })
+    const { provider } = await makeProvider({ verifyByHash: true })
+    const ws = { cwd, key: cwd }
+    const file = path.join(cwd, 'a.txt')
+    // 把 mtime 预截断到整数毫秒：后续可精确还原（utimes 整数 ms 往返无损）。
+    const before = await fs.stat(file)
+    const exactMs = Math.trunc(before.mtimeMs)
+    await fs.utimes(file, before.atime, new Date(exactMs))
+    const first = await provider.snapshot(ws, { triggerTool: 'bash' })
+    await fs.writeFile(file, 'BBBB')
+    await fs.utimes(file, before.atime, new Date(exactMs)) // 快检字段全等
+    const second = await provider.snapshot(ws, { triggerTool: 'bash', previousRef: first.ref })
+    assert.ok(second, '哈希比对检出内容变更（快检会漏）')
+    const restore = await provider.restore(ws, second.ref)
+    assert.equal(restore.restored, 1)
+    assert.equal(await fs.readFile(file, 'utf8'), 'BBBB')
+  })
+
+  it('默认快检模式的文档化边界：mtime 精确还原的同尺寸变更被漏检（去重为 null）', async () => {
+    const cwd = await makeWorkspace({ 'a.txt': 'AAAA' })
+    const { provider } = await makeProvider()
+    const ws = { cwd, key: cwd }
+    const file = path.join(cwd, 'a.txt')
+    const before = await fs.stat(file)
+    const exactMs = Math.trunc(before.mtimeMs)
+    await fs.utimes(file, before.atime, new Date(exactMs))
+    const first = await provider.snapshot(ws, { triggerTool: 'bash' })
+    await fs.writeFile(file, 'BBBB')
+    await fs.utimes(file, before.atime, new Date(exactMs))
+    const second = await provider.snapshot(ws, { triggerTool: 'bash', previousRef: first.ref })
+    assert.equal(second, null, 'size+mtime+mode 快检视为未变（rsync -t / touch -r 可达的已知盲区）')
+  })
+
+  it('restore：verifyByHash 清单内容被篡改 → 哈希不匹配响亮失败', async () => {
+    const cwd = await makeWorkspace({ 'a.txt': 'A1' })
+    const { provider, snapshotDir } = await makeProvider({ verifyByHash: true })
+    const ws = { cwd, key: cwd }
+    const snapshot = await provider.snapshot(ws, { triggerTool: 'bash' })
+    await fs.writeFile(path.join(snapshotBaseDir(snapshotDir, cwd), snapshot.ref, 'a.txt'), 'CORRUPT')
+    await assert.rejects(() => provider.restore(ws, snapshot.ref), /content hash mismatch/)
+  })
+
+  it('restore 尽力恢复文件 mode（非 Windows 平台）', { skip: process.platform === 'win32' }, async () => {
+    const cwd = await makeWorkspace({ 'a.txt': 'A1' })
+    const { provider } = await makeProvider()
+    const ws = { cwd, key: cwd }
+    const file = path.join(cwd, 'a.txt')
+    await fs.chmod(file, 0o700)
+    const snapshot = await provider.snapshot(ws, { triggerTool: 'bash' })
+    await fs.chmod(file, 0o644)
+    await provider.restore(ws, snapshot.ref)
+    assert.equal((await fs.stat(file)).mode & 0o777, 0o700)
+  })
+
   it('restore 覆盖回滚：捕获文件恢复、快照后新建文件保留并报告', async () => {
     const cwd = await makeWorkspace({ 'a.txt': 'A1' })
     const { provider } = await makeProvider()
@@ -131,13 +217,20 @@ describe('copy provider', () => {
     const cwd = await makeWorkspace({ 'a.txt': 'A1' })
     const { provider } = await makeProvider()
     const ws = { cwd, key: cwd }
+    // previousRef 由消费方（插件）在捕获前查表注入；并发裸调无 ref 可传，
+    // 这里验证 provider 自身的串行化与各自完整性（去重语义见 previousRef 测试）。
     const [first, second] = await Promise.all([
       provider.snapshot(ws, { triggerTool: 'bash' }),
       provider.snapshot(ws, { triggerTool: 'bash' }),
     ])
-    // 串行化后第二个必然是对第一个的去重（内容未变）。
     assert.ok(first, 'first snapshot exists')
-    assert.equal(second, null)
+    assert.ok(second, 'second snapshot exists')
+    await fs.writeFile(path.join(cwd, 'a.txt'), 'A2')
+    const r1 = await provider.restore(ws, first.ref)
+    const r2 = await provider.restore(ws, second.ref)
+    assert.equal(r1.restored, 1)
+    assert.equal(r2.restored, 1)
+    assert.equal(await fs.readFile(path.join(cwd, 'a.txt'), 'utf8'), 'A1')
   })
 
   it('available 恒可用（兜底语义）', async () => {
