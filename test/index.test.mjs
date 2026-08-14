@@ -32,6 +32,14 @@ function approvingQuestions() {
   }
 }
 
+function deletingQuestions() {
+  return {
+    async ask() {
+      return { answers: [{ id: 'rewind-confirm', selected: ['Delete'] }] }
+    },
+  }
+}
+
 function rejectingQuestions() {
   return {
     async ask() {
@@ -85,6 +93,19 @@ describe('配置与挂载', () => {
 
   it('非法 provider 在加载期响亮抛错', async () => {
     await assert.rejects(() => mountPlugin({ config: { provider: 'rsync' } }), /provider/)
+  })
+
+  it('非法 mutationTools 元素（非字符串）在加载期响亮抛错', async () => {
+    await assert.rejects(() => mountPlugin({ config: { mutationTools: ['bash', 42] } }), /mutationTools/)
+  })
+
+  it('非法 preRewindCheckpoint 在加载期响亮抛错', async () => {
+    await assert.rejects(() => mountPlugin({ config: { preRewindCheckpoint: 'always' } }), /preRewindCheckpoint/)
+  })
+
+  it('probeIgnorableAppend：rc.6 宿主不支持 ignorable 信封 → false（自适应门保持关闭）', async () => {
+    const { probeIgnorableAppend } = await import('../index.mjs')
+    assert.equal(probeIgnorableAppend(), false)
   })
 
   it('plugin 卸载时 provider 注册被撤销（effect disposer）', async () => {
@@ -238,11 +259,11 @@ describe('配额清理', () => {
     await app.dispose()
   })
 
-  it('超出 maxSnapshotBytes 全局配额时最旧优先清理', async () => {
+  it('超出 maxSnapshotBytes 全局配额时最旧优先清理（软配额：最新一条保留）', async () => {
     const filler = 'x'.repeat(600)
     const cwd = await makeWorkspace({ 'a.txt': filler, 'b.txt': filler })
     const snapshotDir = await makeSnapDir()
-    // 每次快照 ≈ 1200 字节；配额 1500 → 最多保留 1 条。
+    // 增量记账：第一次 ≈ 1200 字节实拷贝；后续只计变更文件 ≈ 600 字节。
     const app = await mountPlugin({ cwd, config: { provider: 'copy', snapshotDir, maxSnapshots: 50, maxSnapshotBytes: 1500 } })
     for (let step = 1; step <= 3; step += 1) {
       openStep(app.session, 1, step)
@@ -256,10 +277,24 @@ describe('配额清理', () => {
     })
     await settle()
     const records = await recordsOf(app.records)
+    const steps = records.map(([, record]) => record.step)
+    assert.equal(steps.includes(1), false, '最旧的（step 1）被清理')
+    assert.ok(steps.includes(3), '最新一条总是保留')
     const bytes = records.reduce((sum, [, record]) => sum + record.bytes, 0)
     assert.ok(bytes <= 1500, `total bytes ${bytes} within quota`)
-    assert.equal(records.length, 1, '只保留最新一条')
-    assert.equal(records[0][1].step, 3, '最新的保留')
+    await app.dispose()
+  })
+
+  it('单条检查点超过字节配额不被自清理（保留下限：大工作区可用）', async () => {
+    const filler = 'x'.repeat(2000)
+    const cwd = await makeWorkspace({ 'a.txt': filler })
+    const snapshotDir = await makeSnapDir()
+    const app = await mountPlugin({ cwd, config: { provider: 'copy', snapshotDir, maxSnapshots: 50, maxSnapshotBytes: 1024 } })
+    openStep(app.session, 1, 1)
+    await dispatchWriteIntent(app.root, app.agent, 'write')
+    const records = await waitForRecords(app.records, 1)
+    assert.equal(records.length, 1, '超过配额的唯一检查点仍保留（软配额下限）')
+    assert.equal(records[0][1].bytes, 2000)
     await app.dispose()
   })
 })
@@ -323,10 +358,11 @@ describe('/rewind 命令', () => {
     await app.dispose()
   })
 
-  it('approval 通道（approval.request 抛错如无开放轮次）→ 失败关闭', async () => {
+  it('approval 通道（无开放轮次）→ 前置检测失败关闭，不调 request', async () => {
     const cwd = await makeWorkspace({ 'a.txt': 'A1' })
     const snapshotDir = await makeSnapDir()
-    const approval = { request: async () => { throw new Error('no open turn') } }
+    const calls = []
+    const approval = { request: async () => { calls.push(1); return 'allowed-once' } }
     const app = await mountPlugin({ cwd, approval, config: { provider: 'copy', snapshotDir, confirmVia: 'approval' } })
     openStep(app.session, 1, 1)
     await dispatchWriteIntent(app.root, app.agent, 'bash')
@@ -335,11 +371,13 @@ describe('/rewind 命令', () => {
     const id = (await recordsOf(app.records))[0][1].id
     const result = await command(app, `/rewind ${id}`)
     assert.equal(result?.result.kind, 'error')
-    assert.match(result?.result.text, /no open turn/)
+    assert.match(result?.result.text, /requires an open turn/)
+    assert.match(result?.result.text, /mount userQuestions/)
+    assert.equal(calls.length, 0, '绝不调用无轮次必抛的 approval.request')
     await app.dispose()
   })
 
-  it('恢复失败 → 不 fork、不清快照、报错并保留现场', async () => {
+  it('恢复失败 → 不 fork、目标检查点保留、报错并保留现场（含保护检查点）', async () => {
     const cwd = await makeWorkspace({ 'a.txt': 'A1' })
     const snapshotDir = await makeSnapDir()
     const app = await mountPlugin({ cwd, userQuestions: approvingQuestions(), config: { provider: 'copy', snapshotDir } })
@@ -348,12 +386,15 @@ describe('/rewind 命令', () => {
     await waitForRecords(app.records, 1)
     closeStep(app.session, 1, 1, true)
     const record = (await recordsOf(app.records))[0][1]
-    // 破坏快照存储：删除快照目录 → restore 失败。
+    // 破坏快照存储：删除快照目录 → 目标 restore 失败（guard 捕获会重建目录）。
+    await fs.writeFile(path.join(cwd, 'a.txt'), 'A2')
     await fs.rm(path.join(snapshotDir), { recursive: true, force: true })
     const result = await command(app, `/rewind ${record.id}`)
     assert.equal(result?.result.kind, 'error')
     assert.match(result?.result.text, /No session was forked/)
-    assert.equal((await recordsOf(app.records)).length, 1)
+    const records = await recordsOf(app.records)
+    assert.ok(records.some(([, r]) => r.id === record.id), '目标检查点保留')
+    assert.ok(records.some(([, r]) => r.triggerTool === 'rewind'), 'pre-rewind 保护检查点已捕获')
     assert.equal(app.root.sessions.list().length, 1)
     await app.dispose()
   })
@@ -372,6 +413,7 @@ describe('/rewind 命令', () => {
     assert.equal(result?.result.kind, 'error')
     assert.match(result?.result.text, /session was NOT forked/)
     assert.match(result?.result.text, /no closed turn boundary/)
+    assert.match(result?.result.text, /rewind guard: [0-9a-f-]{36}/, '结果携带可撤销本次回退的保护检查点')
     assert.equal(await fs.readFile(path.join(cwd, 'a.txt'), 'utf8'), 'A1', '文件已恢复')
     assert.equal(app.root.sessions.list().length, 1, '未派生新会话')
     await app.dispose()
@@ -399,8 +441,11 @@ describe('/rewind 命令', () => {
     const result = await command(app, `/rewind ${first.id}`)
     assert.equal(result?.result.kind, 'success')
     assert.match(result?.result.text, /session: session-\d+/)
+    assert.match(result?.result.text, /rewind guard: [0-9a-f-]{36}/, '结果携带保护检查点 id')
     assert.equal(await fs.readFile(path.join(cwd, 'a.txt'), 'utf8'), 'A1')
     assert.equal(await fs.readFile(path.join(cwd, 'b.txt'), 'utf8'), 'B1')
+    const guard = (await recordsOf(app.records)).find(([, record]) => record.triggerTool === 'rewind')
+    assert.ok(guard, 'pre-rewind 保护检查点已落盘（可撤销本次回退）')
     const childId = /session: (session-\d+)/.exec(result.result.text)?.[1]
     assert.ok(childId, '命令结果携带新 sessionId')
     const child = app.root.sessions.get(childId)
@@ -450,6 +495,214 @@ describe('/rewind 命令', () => {
     await waitForRecords(app.records, 1)
     const custom = app.session.events.filter((event) => event.type.startsWith('checkpoint/'))
     assert.equal(custom.length, 0)
+    await app.dispose()
+  })
+})
+
+describe('/rewind 寻址', () => {
+  it('唯一前缀寻址（8 位短 id）→ 回退成功', async () => {
+    const cwd = await makeWorkspace({ 'a.txt': 'A1' })
+    const snapshotDir = await makeSnapDir()
+    const app = await mountPlugin({ cwd, userQuestions: approvingQuestions(), config: { provider: 'copy', snapshotDir } })
+    openStep(app.session, 1, 1)
+    await dispatchWriteIntent(app.root, app.agent, 'bash')
+    await waitForRecords(app.records, 1)
+    await fs.writeFile(path.join(cwd, 'a.txt'), 'A2')
+    closeStep(app.session, 1, 1, true)
+    const id = (await recordsOf(app.records))[0][1].id
+    const result = await command(app, `/rewind ${id.slice(0, 8)}`)
+    assert.equal(result?.result.kind, 'success')
+    assert.equal(await fs.readFile(path.join(cwd, 'a.txt'), 'utf8'), 'A1')
+    await app.dispose()
+  })
+
+  it('歧义前缀 → 错误列出候选 id', async () => {
+    const app = await mountPlugin({})
+    const base = { sessionId: 'session-under-test', cwd: 'C:/work/proj', seq: 0, time: 1, provider: 'copy', triggerTool: 'bash', turn: 1, step: 1, files: 1, bytes: 1, ref: 'x' }
+    app.records.set('aaaaaaaa-0000-0000-0000-000000000001', { ...base, id: 'aaaaaaaa-0000-0000-0000-000000000001' })
+    app.records.set('aaaaaaaa-0000-0000-0000-000000000002', { ...base, id: 'aaaaaaaa-0000-0000-0000-000000000002' })
+    const result = await command(app, '/rewind aaaaaaaa')
+    assert.equal(result?.result.kind, 'error')
+    assert.match(result?.result.text, /matches 2 checkpoints/)
+    assert.match(result?.result.text, /aaaaaaaa-0000-0000-0000-000000000001/)
+    await app.dispose()
+  })
+
+  it('/rewind latest → 回退最新检查点', async () => {
+    const cwd = await makeWorkspace({ 'a.txt': 'A1' })
+    const snapshotDir = await makeSnapDir()
+    const app = await mountPlugin({ cwd, userQuestions: approvingQuestions(), config: { provider: 'copy', snapshotDir } })
+    openStep(app.session, 1, 1)
+    await dispatchWriteIntent(app.root, app.agent, 'bash')
+    await waitForRecords(app.records, 1)
+    await fs.writeFile(path.join(cwd, 'a.txt'), 'A2')
+    closeStep(app.session, 1, 1, true)
+    const result = await command(app, '/rewind latest')
+    assert.equal(result?.result.kind, 'success')
+    assert.equal(await fs.readFile(path.join(cwd, 'a.txt'), 'utf8'), 'A1')
+    await app.dispose()
+  })
+
+  it('/rewind step <N> → 映射到 ≤N 最近检查点', async () => {
+    const cwd = await makeWorkspace({ 'a.txt': 'A1' })
+    const snapshotDir = await makeSnapDir()
+    const app = await mountPlugin({ cwd, userQuestions: approvingQuestions(), config: { provider: 'copy', snapshotDir } })
+    openStep(app.session, 1, 1)
+    await dispatchWriteIntent(app.root, app.agent, 'bash')
+    await waitForRecords(app.records, 1)
+    await fs.writeFile(path.join(cwd, 'a.txt'), 'A2')
+    closeStep(app.session, 1, 1, true)
+    openStep(app.session, 1, 2)
+    await dispatchWriteIntent(app.root, app.agent, 'bash')
+    await waitForRecords(app.records, 2)
+    await fs.writeFile(path.join(cwd, 'a.txt'), 'A3')
+    closeStep(app.session, 1, 2, true)
+    const result = await command(app, '/rewind step 1')
+    assert.equal(result?.result.kind, 'success')
+    assert.equal(await fs.readFile(path.join(cwd, 'a.txt'), 'utf8'), 'A1', 'step 1 → 其 step/end 前的最近检查点')
+    await app.dispose()
+  })
+
+  it('/rewind step <N>：该步号未闭合 → 明确报错', async () => {
+    const cwd = await makeWorkspace({ 'a.txt': 'A1' })
+    const snapshotDir = await makeSnapDir()
+    const app = await mountPlugin({ cwd, config: { provider: 'copy', snapshotDir } })
+    openStep(app.session, 1, 1)
+    await dispatchWriteIntent(app.root, app.agent, 'bash')
+    await waitForRecords(app.records, 1)
+    closeStep(app.session, 1, 1, true)
+    const result = await command(app, '/rewind step 3')
+    assert.equal(result?.result.kind, 'error')
+    assert.match(result?.result.text, /step 3 has not ended or does not exist/)
+    await app.dispose()
+  })
+
+  it('/rewind step x → 用法提示', async () => {
+    const app = await mountPlugin({})
+    const usage = await command(app, '/rewind step x')
+    assert.equal(usage?.result.kind, 'error')
+    assert.match(usage?.result.text, /usage: \/rewind step <positive-integer>/)
+    await app.dispose()
+  })
+})
+
+describe('/rewind clear', () => {
+  it('确认后清空本会话检查点（记录 + 存储），工作区文件不动', async () => {
+    const cwd = await makeWorkspace({ 'a.txt': 'A1' })
+    const snapshotDir = await makeSnapDir()
+    const app = await mountPlugin({ cwd, userQuestions: deletingQuestions(), config: { provider: 'copy', snapshotDir } })
+    openStep(app.session, 1, 1)
+    await dispatchWriteIntent(app.root, app.agent, 'write')
+    await waitForRecords(app.records, 1)
+    closeStep(app.session, 1, 1, true)
+    const result = await command(app, '/rewind clear')
+    assert.equal(result?.result.kind, 'success')
+    assert.match(result?.result.text, /cleared 1 checkpoint/)
+    assert.equal((await recordsOf(app.records)).length, 0)
+    assert.equal(await fs.readFile(path.join(cwd, 'a.txt'), 'utf8'), 'A1', '工作区文件不动')
+    for (const dir of await fs.readdir(snapshotDir)) {
+      assert.equal((await fs.readdir(path.join(snapshotDir, dir))).length, 0, '快照存储已 discard')
+    }
+    await app.dispose()
+  })
+
+  it('确认拒绝 → 检查点保留', async () => {
+    const cwd = await makeWorkspace({ 'a.txt': 'A1' })
+    const snapshotDir = await makeSnapDir()
+    const app = await mountPlugin({ cwd, userQuestions: rejectingQuestions(), config: { provider: 'copy', snapshotDir } })
+    openStep(app.session, 1, 1)
+    await dispatchWriteIntent(app.root, app.agent, 'write')
+    await waitForRecords(app.records, 1)
+    const result = await command(app, '/rewind clear')
+    assert.equal(result?.result.kind, 'error')
+    assert.match(result?.result.text, /clear cancelled/)
+    assert.equal((await recordsOf(app.records)).length, 1)
+    await app.dispose()
+  })
+
+  it('无检查点时 clear → 成功空操作', async () => {
+    const app = await mountPlugin({})
+    const result = await command(app, '/rewind clear')
+    assert.equal(result?.result.kind, 'success')
+    assert.match(result?.result.text, /no checkpoints to clear/)
+    await app.dispose()
+  })
+})
+
+describe('pre-rewind 保护检查点', () => {
+  it('warn 模式（默认）：guard 捕获失败只警告，回退继续', async () => {
+    const cwd = await makeWorkspace({ 'a.txt': 'A1' })
+    const snapshotDir = await makeSnapDir()
+    const app = await mountPlugin({ cwd, userQuestions: approvingQuestions(), config: { provider: 'copy', snapshotDir } })
+    openStep(app.session, 1, 1)
+    await dispatchWriteIntent(app.root, app.agent, 'bash')
+    await waitForRecords(app.records, 1)
+    await fs.writeFile(path.join(cwd, 'a.txt'), 'A2')
+    closeStep(app.session, 1, 1, true)
+    const record = (await recordsOf(app.records))[0][1]
+    // 把快照根换成文件：guard 捕获与目标恢复都无法建目录。
+    await fs.rm(path.join(snapshotDir), { recursive: true, force: true })
+    await fs.writeFile(snapshotDir, 'not a dir')
+    const result = await command(app, `/rewind ${record.id}`)
+    assert.equal(result?.result.kind, 'error')
+    assert.match(result?.result.text, /No session was forked/)
+    assert.equal((await recordsOf(app.records)).filter(([, r]) => r.triggerTool === 'rewind').length, 0, 'guard 捕获失败仅警告（不阻断）')
+    await app.dispose()
+  })
+
+  it('require 模式：guard 捕获失败 → 中止回退、文件不动', async () => {
+    const cwd = await makeWorkspace({ 'a.txt': 'A1' })
+    const snapshotDir = await makeSnapDir()
+    const app = await mountPlugin({ cwd, userQuestions: approvingQuestions(), config: { provider: 'copy', snapshotDir, preRewindCheckpoint: 'require' } })
+    openStep(app.session, 1, 1)
+    await dispatchWriteIntent(app.root, app.agent, 'bash')
+    await waitForRecords(app.records, 1)
+    await fs.writeFile(path.join(cwd, 'a.txt'), 'A2')
+    closeStep(app.session, 1, 1, true)
+    const record = (await recordsOf(app.records))[0][1]
+    // 破坏 guard 捕获路径：把 snapshotDir 换成文件（mkdir 必失败）。
+    await fs.rm(path.join(snapshotDir), { recursive: true, force: true })
+    await fs.writeFile(snapshotDir, 'not a dir')
+    const result = await command(app, `/rewind ${record.id}`)
+    assert.equal(result?.result.kind, 'error')
+    assert.match(result?.result.text, /aborted — the pre-rewind guard checkpoint could not be captured/)
+    assert.equal(await fs.readFile(path.join(cwd, 'a.txt'), 'utf8'), 'A2', '文件未被改动')
+    await app.dispose()
+  })
+
+  it('off 模式：跳过 guard（结果不带 guard 行）', async () => {
+    const cwd = await makeWorkspace({ 'a.txt': 'A1' })
+    const snapshotDir = await makeSnapDir()
+    const app = await mountPlugin({ cwd, userQuestions: approvingQuestions(), config: { provider: 'copy', snapshotDir, preRewindCheckpoint: 'off' } })
+    openStep(app.session, 1, 1)
+    await dispatchWriteIntent(app.root, app.agent, 'bash')
+    await waitForRecords(app.records, 1)
+    await fs.writeFile(path.join(cwd, 'a.txt'), 'A2')
+    closeStep(app.session, 1, 1, true)
+    const record = (await recordsOf(app.records))[0][1]
+    const result = await command(app, `/rewind ${record.id}`)
+    assert.equal(result?.result.kind, 'success')
+    assert.ok(!result?.result.text.includes('rewind guard:'), 'off 模式无 guard 行')
+    assert.equal((await recordsOf(app.records)).filter(([, r]) => r.triggerTool === 'rewind').length, 0)
+    await app.dispose()
+  })
+})
+
+describe('默认变更工具清单', () => {
+  it('pwsh 与 terminal_send 在 tools/pre-execute 上触发快照', async () => {
+    const cwd = await makeWorkspace({ 'a.txt': 'A1' })
+    const snapshotDir = await makeSnapDir()
+    const app = await mountPlugin({ cwd, config: { provider: 'copy', snapshotDir } })
+    openStep(app.session, 1, 1)
+    await dispatchPreExecute(app.root, app.agent, 'pwsh')
+    await waitForRecords(app.records, 1)
+    await fs.writeFile(path.join(cwd, 'a.txt'), 'A2')
+    closeStep(app.session, 1, 1)
+    openStep(app.session, 1, 2)
+    await dispatchPreExecute(app.root, app.agent, 'terminal_send')
+    await waitForRecords(app.records, 2)
+    const records = await recordsOf(app.records)
+    assert.deepEqual(records.map(([, record]) => record.triggerTool).sort(), ['pwsh', 'terminal_send'])
     await app.dispose()
   })
 })

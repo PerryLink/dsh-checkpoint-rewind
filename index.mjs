@@ -4,20 +4,22 @@
 // - 快照：每次变更型工具执行前（fs/write-intent、fs/edit-intent、tools/pre-execute
 //   的变更工具子集，均为 prepend 直通监听）捕获工作区状态。provider seam：
 //   git（stash create / commit-tree 未引用对象，不动工作树/索引/历史）优先，
-//   copy（目录增量拷贝）兜底。
+//   copy（目录增量拷贝 + hardlink 复用）兜底。配额记账是增量字节。
 // - 边界：快照后补记关联 —— step/end 到达时补 stepEndSeq（"回到第 N 步"映射），
 //   turn/end 到达时补 forkSeq（fork 边界）。
-// - /rewind：无参列出最近检查点；<id> 经确认门（userQuestions/approval，
-//   失败关闭）后两段式回退：先恢复文件，再 ctx.sessions.fork 派生新会话。
+// - /rewind：无参列出最近检查点（短 id + 相对时间）；<id 前缀> / step <N> /
+//   latest 寻址；clear 清空本会话检查点；<目标> 经确认门（userQuestions/approval，
+//   失败关闭）后三段式：pre-rewind 保护检查点 → 恢复文件 → ctx.sessions.fork。
 // - 记录存 ctx.storageDomain 域 'checkpoints'；checkpoint/* 会话事件经自适应门
-//   append（宿主构建收录该类型才写，见 lib/gate.mjs）。
+//   append（宿主收录该类型或支持 ignorable 信封才写，见 lib/gate.mjs）。
 //
 // 只消费公开服务：sessions / storageDomain / commands（inject 声明），
-// userQuestions / approval 按需可选查找（失败关闭）。
+// userQuestions / approval / sessionProjections 按需可选查找（失败关闭）。
 
 import { randomUUID } from 'node:crypto'
+import { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
-import { KNOWN_SESSION_EVENT_TYPES } from '@deepseek-ai/dsh-session'
+import SessionStore, { KNOWN_SESSION_EVENT_TYPES } from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import {
   COMMAND_NAME,
@@ -25,12 +27,16 @@ import {
   DEFAULTS,
   LIMITS,
   PLUGIN_NAME,
+  PRE_REWIND_MODES,
+  PRE_REWIND_TRIGGER,
   PRUNE_REASONS,
+  PROVIDERS,
   PROVIDER_MODES,
   REWIND_OUTCOMES,
   SESSION_EVENTS,
 } from './lib/constants.mjs'
 import {
+  ambiguousCheckpoint,
   badConfig,
   checkpointNotFound,
   forkFailed,
@@ -45,8 +51,11 @@ import {
   formatCheckpointList,
   formatRewindSummary,
   nearestCheckpointAtOrBefore,
+  parseRewindInput,
   prunePlan,
+  resolveRecordByPrefix,
   sortOldestFirst,
+  stepEndSeqOf,
 } from './lib/checkpoints.mjs'
 import { confirmRewind, makeEventGate, maybeAppendSessionEvent } from './lib/gate.mjs'
 import { checkpointsProjectionDefinition } from './lib/projection.mjs'
@@ -60,6 +69,38 @@ export const name = PLUGIN_NAME
 export const inject = ['sessions', 'storageDomain', 'commands']
 
 /**
+ * 宿主 append 是否盖章 ignorable 信封（运行时能力探测）。
+ * 在全新 detached Context 上构造 SessionStore（绝不接入宿主持久化，探测
+ * 会话不落盘）：追加一条带 { ignorable: true } 的探测事件并回读信封标记。
+ * rc.6 的 append 静默丢弃未知选项键 → 标记缺失 → false（门保持关闭）；
+ * 支持 ignorable 信封的宿主 → true（checkpoint/* 以 ignorable 落盘）。
+ * @returns {boolean} 宿主支持 ignorable 信封。
+ */
+export function probeIgnorableAppend() {
+  try {
+    const store = new SessionStore(new Context())
+    const session = store.create()
+    const event = session.append(SESSION_EVENTS.SNAPSHOT, {
+      id: 'probe',
+      sessionId: 'probe',
+      cwd: '/',
+      seq: 0,
+      time: 0,
+      provider: PROVIDERS.COPY,
+      triggerTool: 'probe',
+      turn: 1,
+      step: 1,
+      files: 0,
+      bytes: 0,
+      ref: 'probe',
+    }, { ignorable: true })
+    return event?.ignorable === true
+  } catch {
+    return false
+  }
+}
+
+/**
  * 插件配置（Schemastery，全部可 cordis.yml 覆盖；无硬编码 tunable）。
  * @typedef {object} Config
  * @property {boolean} [enabled] 整体开关；false 时不注册任何东西。
@@ -67,12 +108,14 @@ export const inject = ['sessions', 'storageDomain', 'commands']
  * @property {string} [gitBin] git 可执行路径（默认 'git'）。
  * @property {string} [snapshotDir] copy provider 快照根目录；空 = $DSH_HOME/dsh-checkpoint-rewind。
  * @property {number} [maxSnapshots] 每会话保留的检查点上限（默认 50）。
- * @property {number} [maxSnapshotBytes] 全部检查点内容字节总配额（默认 512 MiB）。
+ * @property {number} [maxSnapshotBytes] 全部检查点增量字节总配额（默认 512 MiB；软配额，每会话最新一条总是保留）。
  * @property {boolean} [pruneOnTurnEnd] turn 结束时执行配额清理（默认 true）。
  * @property {string[]} [mutationTools] tools/pre-execute 上视为变更型的工具名。
  * @property {string[]} [excludeGlobs] copy provider 遍历排除的目录/文件名。
  * @property {'auto'|'userQuestions'|'approval'} [confirmVia] 回退确认通道（auto 优先 userQuestions）。
  * @property {number} [listLimit] /rewind 无参列出的最近检查点数（默认 10）。
+ * @property {'warn'|'require'|'off'} [preRewindCheckpoint] 回退前的保护检查点策略（默认 warn）。
+ * @property {boolean} [verifyByHash] copy provider 内容哈希校验（复用比对 + 恢复校验；默认 false）。
  */
 export const Config = Schema.object({
   enabled: Schema.boolean().default(DEFAULTS.ENABLED),
@@ -86,6 +129,8 @@ export const Config = Schema.object({
   excludeGlobs: Schema.array(Schema.string()).default([...DEFAULTS.EXCLUDE_GLOBS]),
   confirmVia: Schema.union(Object.values(CONFIRM_CHANNELS)).default(DEFAULTS.CONFIRM_VIA),
   listLimit: Schema.number().default(DEFAULTS.LIST_LIMIT),
+  preRewindCheckpoint: Schema.union(Object.values(PRE_REWIND_MODES)).default(DEFAULTS.PRE_REWIND_CHECKPOINT),
+  verifyByHash: Schema.boolean().default(DEFAULTS.VERIFY_BY_HASH),
 })
 
 /**
@@ -106,6 +151,8 @@ export function resolveConfig(config = {}) {
     excludeGlobs: config.excludeGlobs ?? [...DEFAULTS.EXCLUDE_GLOBS],
     confirmVia: config.confirmVia ?? DEFAULTS.CONFIRM_VIA,
     listLimit: config.listLimit ?? DEFAULTS.LIST_LIMIT,
+    preRewindCheckpoint: config.preRewindCheckpoint ?? DEFAULTS.PRE_REWIND_CHECKPOINT,
+    verifyByHash: config.verifyByHash ?? DEFAULTS.VERIFY_BY_HASH,
   }
   if (resolved.enabled === false) return resolved
   if (!Object.values(PROVIDER_MODES).includes(resolved.provider)) {
@@ -113,6 +160,9 @@ export function resolveConfig(config = {}) {
   }
   if (!Object.values(CONFIRM_CHANNELS).includes(resolved.confirmVia)) {
     throw badConfig(`confirmVia ${JSON.stringify(resolved.confirmVia)} must be one of auto|userQuestions|approval`)
+  }
+  if (!Object.values(PRE_REWIND_MODES).includes(resolved.preRewindCheckpoint)) {
+    throw badConfig(`preRewindCheckpoint ${JSON.stringify(resolved.preRewindCheckpoint)} must be one of warn|require|off`)
   }
   if (typeof resolved.gitBin !== 'string' || resolved.gitBin.length === 0) {
     throw badConfig('gitBin must be a non-empty string')
@@ -125,6 +175,15 @@ export function resolveConfig(config = {}) {
   }
   if (!Number.isInteger(resolved.listLimit) || resolved.listLimit < LIMITS.MIN_LIST_LIMIT || resolved.listLimit > LIMITS.MAX_LIST_LIMIT) {
     throw badConfig(`listLimit must be an integer in [${LIMITS.MIN_LIST_LIMIT}, ${LIMITS.MAX_LIST_LIMIT}]`)
+  }
+  if (typeof resolved.verifyByHash !== 'boolean') {
+    throw badConfig('verifyByHash must be a boolean')
+  }
+  if (!Array.isArray(resolved.mutationTools) || resolved.mutationTools.some(tool => typeof tool !== 'string' || tool.length === 0)) {
+    throw badConfig('mutationTools must be an array of non-empty strings')
+  }
+  if (!Array.isArray(resolved.excludeGlobs) || resolved.excludeGlobs.some(glob => typeof glob !== 'string' || glob.length === 0)) {
+    throw badConfig('excludeGlobs must be an array of non-empty strings')
   }
   return resolved
 }
@@ -140,7 +199,7 @@ export function apply(ctx, config = {}) {
 
   const logger = ctx.logger(PLUGIN_NAME)
   const warn = (message) => logger.warn(message)
-  const eventGate = makeEventGate(KNOWN_SESSION_EVENT_TYPES)
+  const eventGate = makeEventGate(KNOWN_SESSION_EVENT_TYPES, probeIgnorableAppend())
   const appendEvent = (session, type, data) => maybeAppendSessionEvent(session, type, data, eventGate, warn)
 
   // --- provider seam：两个 provider 经 registry 注册（注册即 effect，卸载撤销）。
@@ -151,7 +210,11 @@ export function apply(ctx, config = {}) {
     if (snapshotDirCache === undefined) snapshotDirCache = resolveSnapshotDir(resolved.snapshotDir)
     return snapshotDirCache
   }
-  const unregCopy = registry.register(makeCopyProvider({ snapshotDir: getSnapshotDir, excludeGlobs: resolved.excludeGlobs }))
+  const unregCopy = registry.register(makeCopyProvider({
+    snapshotDir: getSnapshotDir,
+    excludeGlobs: resolved.excludeGlobs,
+    verifyByHash: resolved.verifyByHash,
+  }))
   ctx.effect(() => () => {
     unregGit()
     unregCopy()
@@ -199,10 +262,15 @@ export function apply(ctx, config = {}) {
         break
       }
       case 'step/end': {
+        const state = ensureState(session)
+        state.step = undefined // 步骤闭合后不再是当前步骤
         backfillStepEnd(session, event.data.turn, event.data.step, event.seq)
         break
       }
       case 'turn/end': {
+        const state = ensureState(session)
+        state.turn = undefined
+        state.step = undefined
         backfillTurnEnd(session, event.data.turn, event.seq)
         if (resolved.pruneOnTurnEnd) pruneAll(session, PRUNE_REASONS.TURN_END)
         break
@@ -213,7 +281,8 @@ export function apply(ctx, config = {}) {
   })
 
   /**
-   * 当前开放 turn/step。事件跟踪失效（插件晚于会话挂载）时回退折叠日志尾部。
+   * 当前开放 turn/step。事件跟踪失效（插件晚于会话挂载）时回退折叠日志尾部；
+   * 已闭合的 step/turn 一律返回 undefined（没有可关联的边界）。
    * @param {import('@deepseek-ai/dsh-session').Session} session - 会话。
    * @returns {{turn: number, step: number}|undefined} 开放步骤或 undefined。
    */
@@ -225,19 +294,45 @@ export function apply(ctx, config = {}) {
     let turn
     let step
     let turnEnded = false
+    let stepEnded = true
     for (const event of session.events) {
       if (event.type === 'turn/start') {
         turn = event.data.turn
         step = undefined
         turnEnded = false
+        stepEnded = true
       } else if (event.type === 'turn/end') {
         turnEnded = true
       } else if (event.type === 'step/start') {
         turn = event.data.turn
         step = event.data.step
+        stepEnded = false
+      } else if (event.type === 'step/end') {
+        stepEnded = true
       }
     }
-    if (turnEnded || turn === undefined || step === undefined) return undefined
+    if (turnEnded || stepEnded || turn === undefined || step === undefined) return undefined
+    return { turn, step }
+  }
+
+  /**
+   * 最近一个出现过的 turn/step（开放或已闭合；pre-rewind 保护检查点的定位用）。
+   * @param {import('@deepseek-ai/dsh-session').Session} session - 会话。
+   * @returns {{turn: number, step: number}|undefined} 最近位置或 undefined。
+   */
+  function latestStepOf(session) {
+    let turn
+    let step
+    for (const event of session.events) {
+      if (event.type === 'turn/start') {
+        turn = event.data.turn
+        step = undefined
+      } else if (event.type === 'step/start') {
+        turn = event.data.turn
+        step = event.data.step
+      }
+    }
+    if (turn === undefined || step === undefined) return undefined
     return { turn, step }
   }
 
@@ -308,9 +403,12 @@ export function apply(ctx, config = {}) {
           ref: result.ref,
         }
         await table.put(record.id, record)
+        if (record.bytes > resolved.maxSnapshotBytes) {
+          warn(`checkpoint ${record.id} alone exceeds maxSnapshotBytes (${record.bytes} > ${resolved.maxSnapshotBytes}); the per-session newest-retained floor keeps it, older checkpoints will be pruned`)
+        }
         appendEvent(session, SESSION_EVENTS.SNAPSHOT, record)
         logger.info(`checkpoint ${record.id} captured (${record.provider}, turn ${record.turn} step ${record.step}, ${record.files} files, ${record.bytes} bytes, trigger ${record.triggerTool})`)
-        await pruneAll(session, PRUNE_REASONS.MAX_SNAPSHOT_BYTES)
+        await pruneAll(session)
       } catch (error) {
         warn(`checkpoint capture failed (trigger ${triggerTool}): ${messageOf(error)}`)
       } finally {
@@ -320,6 +418,57 @@ export function apply(ctx, config = {}) {
     })()
     state.inFlight = run
     await run
+  }
+
+  /**
+   * pre-rewind 保护检查点：确认通过后、restore 之前捕获当前工作区状态，
+   * 让本次回退可撤回（/rewind <guard-id> 即可撤销）。命令运行于轮次之间，
+   * 定位用 latestStepOf（最近出现的 turn/step），不要求开放步骤。
+   * 与最新检查点内容一致时 provider 去重返回 null → 无需额外保护。
+   * @param {import('@deepseek-ai/dsh-session').Session} session - 会话。
+   * @returns {Promise<{record: object}|undefined>} 捕获的记录；跳过/去重为 undefined。
+   */
+  async function captureRewindGuard(session) {
+    if (resolved.preRewindCheckpoint === PRE_REWIND_MODES.OFF) return undefined
+    const cwd = session.header?.cwd
+    if (typeof cwd !== 'string' || cwd.length === 0) return undefined
+    const pos = latestStepOf(session)
+    if (pos === undefined) return undefined // 无轮次历史：没有检查点可回退，无需保护
+    const table = await tablePromise
+    const provider = await registry.resolve(resolved.provider, { cwd, key: workspaceKeyOf(cwd) })
+    const previous = latestRecordFor(table, session.id, cwd)
+    const previousRef = previous !== undefined && previous.provider === provider.name ? previous.ref : undefined
+    const workspace = { cwd, key: workspaceKeyOf(cwd) }
+    let result
+    try {
+      result = await provider.snapshot(workspace, { triggerTool: PRE_REWIND_TRIGGER, previousRef })
+    } catch (error) {
+      // 保护检查点不能依赖上一检查点的存储完整性（去重基线不可读时
+      // 整条捕获会失败）：退化为无基线重捕，保证回退仍可撤回。
+      if (previousRef === undefined) throw error
+      logger.warn(`rewind guard: dedup baseline unreadable (${messageOf(error)}), capturing without dedup`)
+      result = await provider.snapshot(workspace, { triggerTool: PRE_REWIND_TRIGGER })
+    }
+    if (result === null) return undefined // 最新检查点已覆盖当前状态：无需额外保护
+    const record = {
+      id: randomUUID(),
+      sessionId: session.id,
+      cwd,
+      seq: session.seq,
+      time: Date.now(),
+      provider: provider.name,
+      triggerTool: PRE_REWIND_TRIGGER,
+      turn: pos.turn,
+      step: pos.step,
+      files: result.files,
+      bytes: result.bytes,
+      ref: result.ref,
+    }
+    await table.put(record.id, record)
+    appendEvent(session, SESSION_EVENTS.SNAPSHOT, record)
+    logger.info(`rewind guard checkpoint ${record.id} captured (${record.provider}, ${record.files} files, ${record.bytes} bytes)`)
+    await pruneAll(session)
+    return { record }
   }
 
   /** step/end 补记：该 step 内未关联的检查点获得 stepEndSeq（"回到第 N 步"映射）。 */
@@ -346,32 +495,50 @@ export function apply(ctx, config = {}) {
     }).catch(error => warn(`checkpoint turn/end backfill failed: ${messageOf(error)}`))
   }
 
-  /** 配额清理：每会话保留最近 maxSnapshots，全局字节不超 maxSnapshotBytes，最旧优先。 */
+  /**
+   * 删除记录及其 provider 存储（先记录后 discard，逐条隔离失败）。
+   * @param {Array<{key: string, value: object}>} entries - 全表快照条目。
+   * @param {string[]} ids - 待删记录 id。
+   * @returns {Promise<void>} 完成（单条失败已警告）。
+   */
+  async function removeRecords(entries, ids) {
+    for (const id of ids) {
+      const record = entries.find(entry => entry.key === id)?.value
+      try {
+        const table = await tablePromise
+        await table.delete(id)
+      } catch (error) {
+        warn(`checkpoint ${id} record deletion failed: ${messageOf(error)}`)
+        continue
+      }
+      if (record === undefined) continue
+      const provider = registry.get(record.provider)
+      if (provider === undefined) continue
+      try {
+        await provider.discard({ cwd: record.cwd, key: workspaceKeyOf(record.cwd) }, record.ref)
+      } catch (error) {
+        warn(`checkpoint ${id} storage discard failed (record removed; files may linger until cleanup): ${messageOf(error)}`)
+      }
+    }
+  }
+
+  /**
+   * 配额清理：每会话保留最近 maxSnapshots，全局增量字节不超 maxSnapshotBytes
+   * （软配额，每会话最新一条总是保留），最旧优先。
+   * @param {import('@deepseek-ai/dsh-session').Session} triggerSession - 触发会话（事件归属）。
+   * @param {string} [reason] - 覆盖触发原因（turn/end 用）；缺省按计划实际规则。
+   * @returns {Promise<void>} 完成。
+   */
   function pruneAll(triggerSession, reason) {
     return schedule(async () => {
       const table = await tablePromise
       const entries = [...table.entries()].map(([key, value]) => ({ key, value }))
       const plan = prunePlan(entries, { maxSnapshots: resolved.maxSnapshots, maxSnapshotBytes: resolved.maxSnapshotBytes })
       if (plan.ids.length === 0) return
-      for (const id of plan.ids) {
-        const record = entries.find(entry => entry.key === id)?.value
-        try {
-          await table.delete(id)
-        } catch (error) {
-          warn(`checkpoint ${id} record deletion failed: ${messageOf(error)}`)
-          continue
-        }
-        if (record === undefined) continue
-        const provider = registry.get(record.provider)
-        if (provider === undefined) continue
-        try {
-          await provider.discard({ cwd: record.cwd, key: workspaceKeyOf(record.cwd) }, record.ref)
-        } catch (error) {
-          warn(`checkpoint ${id} storage discard failed (record removed; files may linger until cleanup): ${messageOf(error)}`)
-        }
-      }
-      appendEvent(triggerSession, SESSION_EVENTS.PRUNE, { ids: plan.ids, reason })
-      logger.info(`pruned ${plan.ids.length} checkpoint(s) (${reason})`)
+      await removeRecords(entries, plan.ids)
+      const eventReason = reason ?? (plan.byRule.maxSnapshots.length > 0 ? PRUNE_REASONS.MAX_SNAPSHOTS : PRUNE_REASONS.MAX_SNAPSHOT_BYTES)
+      appendEvent(triggerSession, SESSION_EVENTS.PRUNE, { ids: plan.ids, reason: eventReason })
+      logger.info(`pruned ${plan.ids.length} checkpoint(s) (${eventReason})`)
     }).catch(error => warn(`checkpoint prune failed: ${messageOf(error)}`))
   }
 
@@ -394,21 +561,19 @@ export function apply(ctx, config = {}) {
     return next()
   }, { prepend: true })
 
-  // --- 会话投影单元 'checkpoints'（可选能力：注册表存在才注册，注册即 effect）。
-  // rc.6 上恒为空列表（checkpoint/* 事件被自适应门跳过）；宿主收录词汇后自动填充。
-  const projections = ctx.get('sessionProjections')
-  if (projections !== undefined) {
-    ctx.effect(
-      () => projections.register(checkpointsProjectionDefinition),
-      `${PLUGIN_NAME}.projection.checkpoints`,
-    )
-  }
+  // --- 会话投影单元 'checkpoints'（可选能力：宿主装配注册表时经 inject 注册，
+  // 无注册表的 headless 组装不受影响；注册随插件 fiber 卸载撤销）。
+  // rc.6 上恒为空列表（checkpoint/* 事件被自适应门跳过）；宿主收录词汇或
+  // 支持 ignorable 信封后自动填充。
+  ctx.inject(['sessionProjections'], (projectionCtx) => {
+    projectionCtx.sessionProjections.register(checkpointsProjectionDefinition)
+  })
 
   // --- /rewind 命令（Consumer）。
   ctx.commands.register({
     name: COMMAND_NAME,
     description: 'List workspace checkpoints, or restore one: files + a forked session from its turn boundary (Claude Code /rewind equivalent).',
-    input: { hint: '[checkpoint-id]' },
+    input: { hint: '[checkpoint-id-prefix | step <N> | latest | clear]' },
     async handler(invocation) {
       return handleRewind(invocation)
     },
@@ -442,16 +607,47 @@ export function apply(ctx, config = {}) {
       .filter(([, record]) => record.sessionId === session.id && workspaceKeyOf(record.cwd) === workspaceKeyOf(cwd))
       .map(([, record]) => record)
 
-    const input = rawInput.trim()
-    if (input === '') {
+    const parsed = parseRewindInput(rawInput)
+    if (parsed.kind === 'invalid') {
+      return { kind: 'error', text: `rewind: ${parsed.message}` }
+    }
+    if (parsed.kind === 'list') {
       const newest = sortOldestFirst(mine).slice(-resolved.listLimit)
-      return { kind: 'success', text: formatCheckpointList(newest) }
+      return { kind: 'success', text: formatCheckpointList(newest, { now: Date.now(), total: mine.length }) }
+    }
+    if (parsed.kind === 'clear') {
+      return handleClear(mine, session, agent, signal)
     }
 
-    const record = mine.find(entry => entry.id === input)
-    if (record === undefined) {
-      const err = checkpointNotFound(input)
-      return { kind: 'error', text: `rewind: ${err.message}` }
+    let record
+    if (parsed.kind === 'latest') {
+      record = sortOldestFirst(mine).at(-1)
+      if (record === undefined) {
+        return { kind: 'error', text: 'rewind: no checkpoints yet' }
+      }
+    } else if (parsed.kind === 'step') {
+      const seq = stepEndSeqOf(session.events, parsed.step)
+      if (seq === undefined) {
+        return {
+          kind: 'error',
+          text: `rewind: step ${parsed.step} has not ended or does not exist (steps restart per turn; run /rewind to list checkpoints)`,
+        }
+      }
+      record = nearestCheckpointAtOrBefore(mine, seq)
+      if (record === undefined) {
+        return { kind: 'error', text: `rewind: no checkpoint at or before step ${parsed.step}` }
+      }
+    } else {
+      const resolvedId = resolveRecordByPrefix(mine, parsed.input)
+      if (resolvedId.record !== undefined) {
+        record = resolvedId.record
+      } else if (resolvedId.notFound === true) {
+        const err = checkpointNotFound(parsed.input)
+        return { kind: 'error', text: `rewind: ${err.message}` }
+      } else {
+        const err = ambiguousCheckpoint(parsed.input, resolvedId.ambiguous ?? [])
+        return { kind: 'error', text: `rewind: ${err.message}` }
+      }
     }
 
     // 确认门：覆盖用户文件必须先经 ask 语义，无回答者失败关闭。
@@ -465,9 +661,32 @@ export function apply(ctx, config = {}) {
       const err = rewindDenied(verdict.reason)
       return { kind: 'error', text: `rewind: ${err.message}` }
     }
-    logger.info(`rewind approved (${verdict.channel}): checkpoint ${record.id}, phase 1 = restore files`)
+    logger.info(`rewind approved (${verdict.channel}): checkpoint ${record.id}, phase 0.5 = pre-rewind guard`)
 
-    // 两段式事务，顺序固定：先文件恢复，后会话 fork。
+    // 阶段 0.5：保护当前状态 —— 先捕获 pre-rewind 检查点，让本次回退可撤回。
+    let guard
+    try {
+      guard = await captureRewindGuard(session)
+    } catch (error) {
+      const message = messageOf(error)
+      if (resolved.preRewindCheckpoint === PRE_REWIND_MODES.REQUIRE) {
+        appendEvent(session, SESSION_EVENTS.REWIND, {
+          checkpointId: record.id, sessionId: session.id, outcome: REWIND_OUTCOMES.FAILED,
+          error: `pre-rewind checkpoint failed: ${message}`,
+        })
+        logger.error(`rewind aborted (pre-rewind checkpoint required): ${message}`)
+        return {
+          kind: 'error',
+          text: `rewind: aborted — the pre-rewind guard checkpoint could not be captured (${message}). No files were changed.`,
+        }
+      }
+      logger.warn(`pre-rewind guard checkpoint failed (continuing without reversibility): ${message}`)
+    }
+    const guardLine = guard?.record !== undefined
+      ? `\nrewind guard: ${guard.record.id} (run "/rewind ${guard.record.id.slice(0, 8)}" to undo this rewind)`
+      : ''
+
+    // 三段式事务，顺序固定：保护检查点 → 文件恢复 → 会话 fork。
     const provider = registry.get(record.provider)
     if (provider === undefined) {
       const err = providerUnavailable(record.provider, 'provider no longer registered')
@@ -488,7 +707,7 @@ export function apply(ctx, config = {}) {
       logger.error(`rewind phase 1 failed (checkpoint ${record.id}, provider ${record.provider}): ${message}`)
       return {
         kind: 'error',
-        text: `rewind: failed to restore files from checkpoint ${record.id} (${message}). No session was forked and the checkpoint was kept; the workspace may be partially restored.`,
+        text: `rewind: failed to restore files from checkpoint ${record.id} (${message}). No session was forked and the checkpoint was kept; the workspace may be partially restored.${guardLine}`,
       }
     }
     logger.info(`rewind phase 1 ok: restored ${restore.restored} file(s) from checkpoint ${record.id} (${record.provider})`)
@@ -509,25 +728,26 @@ export function apply(ctx, config = {}) {
       const message = `files restored (${restore.restored} file(s), provider ${record.provider}) but the session was NOT forked: ${forkError}`
       appendEvent(session, SESSION_EVENTS.REWIND, {
         checkpointId: record.id, sessionId: session.id, outcome: REWIND_OUTCOMES.RESTORED_NO_FORK,
-        provider: record.provider, restored: restore.restored, leftovers: restore.leftovers, error: forkError,
+        provider: record.provider, restored: restore.restored, leftovers: restore.leftovers,
+        preCheckpointId: guard?.record?.id, error: forkError,
       })
       logger.warn(`rewind phase 2 failed (checkpoint ${record.id}): ${forkError} — files already restored`)
       const err = forkFailed(forkError)
       return {
         kind: 'error',
-        text: `rewind: ${message}.\nYour current session is intact (its later history is unchanged); continue here or run /rewind again once the checkpoint's turn has closed.`,
+        text: `rewind: ${message}.\nYour current session is intact (its later history is unchanged); continue here or run /rewind again once the checkpoint's turn has closed.${guardLine}`,
       }
     }
     const notes = restore.notes ?? []
     appendEvent(session, SESSION_EVENTS.REWIND, {
       checkpointId: record.id, sessionId: session.id, outcome: REWIND_OUTCOMES.RESTORED_FORKED,
       provider: record.provider, restored: restore.restored, leftovers: restore.leftovers,
-      childSessionId: child.id, forkSeq: record.forkSeq,
+      preCheckpointId: guard?.record?.id, childSessionId: child.id, forkSeq: record.forkSeq,
     })
     // 把回退事实注入子会话（模型可见 ⟺ 已记录：user/message 直接落在子会话日志里）。
     // 子会话以边界前缀为种子，其中后续轮次的工具结果已不再与磁盘一致——
     // 没有这条通知，模型会沿用过期上下文继续。
-    injectRewindNotice(child, record, restore)
+    injectRewindNotice(child, record, restore, guard)
     logger.info(`rewind ok: checkpoint ${record.id} → restored ${restore.restored} file(s), forked session ${child.id} at seq ${record.forkSeq}`)
     return {
       kind: 'success',
@@ -537,8 +757,43 @@ export function apply(ctx, config = {}) {
         `session: ${child.id}`,
         'Open the new session to continue from before that turn; this session keeps its later history.',
         ...notes,
-      ].join('\n'),
+      ].join('\n') + guardLine,
     }
+  }
+
+  /**
+   * /rewind clear：删除本会话本工作区的全部检查点（记录 + provider 存储），
+   * 经同一确认门（自定义问题与标签），绝不触碰工作区文件。
+   * @param {object[]} mine - 本会话记录。
+   * @param {import('@deepseek-ai/dsh-session').Session} session - 会话。
+   * @param {object} agent - 命令所属 agent（确认门路由与审计归属）。
+   * @param {AbortSignal} signal - 取消信号。
+   * @returns {Promise<import('@deepseek-ai/dsh-commands').CommandResult>} 命令结果。
+   */
+  async function handleClear(mine, session, agent, signal) {
+    if (mine.length === 0) {
+      return { kind: 'success', text: 'rewind: no checkpoints to clear' }
+    }
+    const verdict = await confirmRewind({
+      ctx,
+      confirmVia: resolved.confirmVia,
+      summary: `${mine.length} checkpoint(s) for this session and workspace will be deleted (snapshot storage discarded; workspace files are NOT touched).`,
+      question: 'Delete all checkpoints for this session?',
+      approveLabel: 'Delete',
+      approveDescription: 'Remove every checkpoint record and discard their snapshot storage.',
+    }, agent, signal)
+    if (!verdict.allowed) {
+      appendEvent(session, SESSION_EVENTS.REWIND, {
+        checkpointId: 'clear', sessionId: session.id, outcome: REWIND_OUTCOMES.DENIED, error: verdict.reason,
+      })
+      logger.info(`rewind clear denied (${verdict.channel}: ${verdict.reason})`)
+      return { kind: 'error', text: `rewind: clear cancelled: ${verdict.reason}` }
+    }
+    const entries = mine.map(record => ({ key: record.id, value: record }))
+    await removeRecords(entries, mine.map(record => record.id))
+    appendEvent(session, SESSION_EVENTS.PRUNE, { ids: mine.map(record => record.id), reason: PRUNE_REASONS.CLEAR })
+    logger.info(`rewind clear: removed ${mine.length} checkpoint(s)`)
+    return { kind: 'success', text: `rewind: cleared ${mine.length} checkpoint(s) (snapshot storage discarded)` }
   }
 
   /**
@@ -547,13 +802,17 @@ export function apply(ctx, config = {}) {
    * @param {import('@deepseek-ai/dsh-session').Session} child - fork 子会话。
    * @param {object} record - 检查点记录。
    * @param {{restored: number, leftovers: string[]}} restore - 恢复结果。
+   * @param {{record: object}|undefined} guard - pre-rewind 保护检查点。
    */
-  function injectRewindNotice(child, record, restore) {
+  function injectRewindNotice(child, record, restore, guard) {
     const text = [
       `Workspace files were restored to checkpoint ${record.id} by /rewind`,
       `(provider ${record.provider}, ${restore.restored} file(s), state before turn ${record.turn} step ${record.step}).`,
       restore.leftovers.length > 0
         ? `${restore.leftovers.length} file(s) created after the checkpoint were left in place.`
+        : '',
+      guard?.record !== undefined
+        ? `This rewind captured a guard checkpoint ${guard.record.id} in the original session; restore it there to undo this rewind.`
         : '',
       'Tool results after that point no longer reflect the files on disk; re-check the workspace before continuing.',
     ].filter(line => line.length > 0).join('\n')
@@ -576,6 +835,9 @@ export {
   makeCopyProvider,
   prunePlan,
   nearestCheckpointAtOrBefore,
+  parseRewindInput,
+  resolveRecordByPrefix,
+  stepEndSeqOf,
   formatCheckpointList,
   formatRewindSummary,
   confirmRewind,

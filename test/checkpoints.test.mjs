@@ -5,9 +5,13 @@ import assert from 'node:assert/strict'
 import {
   formatBytes,
   formatCheckpointList,
+  formatRelativeAge,
   nearestCheckpointAtOrBefore,
+  parseRewindInput,
   prunePlan,
+  resolveRecordByPrefix,
   sortOldestFirst,
+  stepEndSeqOf,
 } from '../lib/checkpoints.mjs'
 
 function record(overrides) {
@@ -122,6 +126,105 @@ describe('prunePlan（配额清理计划）', () => {
     const plan = prunePlan(entries, { maxSnapshots: 1, maxSnapshotBytes: 100 })
     assert.deepEqual(plan.ids, ['c1'])
   })
+
+  it('字节配额是软配额：每会话最新一条总是保留（大工作区不自我清理）', () => {
+    const entries = [
+      { key: 'big', value: record({ id: 'big', time: 100, bytes: 500 }) },
+    ]
+    const plan = prunePlan(entries, { maxSnapshots: 10, maxSnapshotBytes: 100 })
+    assert.deepEqual(plan.ids, [], '唯一（最新）一条不受字节配额删除')
+  })
+
+  it('keepNewestPerSession: false 时字节配额可删除最新一条', () => {
+    const entries = [
+      { key: 'big', value: record({ id: 'big', time: 100, bytes: 500 }) },
+    ]
+    const plan = prunePlan(entries, { maxSnapshots: 10, maxSnapshotBytes: 100, keepNewestPerSession: false })
+    assert.deepEqual(plan.ids, ['big'])
+  })
+
+  it('byRule 拆分触发规则（maxSnapshots 与 maxSnapshotBytes 各自成列）', () => {
+    const entries = [
+      { key: 'a1', value: record({ id: 'a1', sessionId: 'a', time: 100, bytes: 10 }) },
+      { key: 'a2', value: record({ id: 'a2', sessionId: 'a', time: 200, bytes: 10 }) },
+      { key: 'b1', value: record({ id: 'b1', sessionId: 'b', time: 150, bytes: 50 }) },
+      { key: 'b2', value: record({ id: 'b2', sessionId: 'b', time: 250, bytes: 50 }) },
+    ]
+    const plan = prunePlan(entries, { maxSnapshots: 1, maxSnapshotBytes: 20 })
+    // a1/b1 由每会话上限删除；b2 是 b 的最新保留项，字节配额无法再删它。
+    assert.deepEqual(plan.byRule.maxSnapshots, ['a1', 'b1'])
+    assert.deepEqual(plan.byRule.maxSnapshotBytes, [])
+    assert.deepEqual(plan.ids, ['a1', 'b1'])
+  })
+})
+
+describe('parseRewindInput（/rewind 寻址语法）', () => {
+  it('空输入 → list；latest/last → latest；clear → clear', () => {
+    assert.deepEqual(parseRewindInput(''), { kind: 'list' })
+    assert.deepEqual(parseRewindInput('  '), { kind: 'list' })
+    assert.deepEqual(parseRewindInput('latest'), { kind: 'latest' })
+    assert.deepEqual(parseRewindInput('LAST'), { kind: 'latest' })
+    assert.deepEqual(parseRewindInput('clear'), { kind: 'clear' })
+  })
+
+  it('step <N> → step；非法 step 语法 → invalid', () => {
+    assert.deepEqual(parseRewindInput('step 3'), { kind: 'step', step: 3 })
+    assert.deepEqual(parseRewindInput('  STEP 12 '), { kind: 'step', step: 12 })
+    assert.deepEqual(parseRewindInput('step 0'), { kind: 'step', step: 0 })
+    assert.deepEqual(parseRewindInput('step abc').kind, 'invalid')
+    assert.deepEqual(parseRewindInput('step').kind, 'invalid')
+  })
+
+  it('其余输入 → id', () => {
+    assert.deepEqual(parseRewindInput('abc123'), { kind: 'id', input: 'abc123' })
+    assert.deepEqual(parseRewindInput('  a1b2c3d4  '), { kind: 'id', input: 'a1b2c3d4' })
+  })
+})
+
+describe('stepEndSeqOf（/rewind step <N> 的 ≤N 边界）', () => {
+  const events = [
+    { type: 'turn/start', data: { turn: 1 }, seq: 0 },
+    { type: 'step/start', data: { turn: 1, step: 1 }, seq: 1 },
+    { type: 'step/end', data: { turn: 1, step: 1 }, seq: 2 },
+    { type: 'step/start', data: { turn: 1, step: 2 }, seq: 3 },
+    { type: 'step/end', data: { turn: 1, step: 2 }, seq: 4 },
+    { type: 'turn/end', data: { turn: 1 }, seq: 5 },
+    { type: 'turn/start', data: { turn: 2 }, seq: 6 },
+    { type: 'step/start', data: { turn: 2, step: 1 }, seq: 7 },
+    { type: 'step/end', data: { turn: 2, step: 1 }, seq: 8 },
+  ]
+
+  it('取全日志最近一条该步号的 step/end seq（步号按轮次重复）', () => {
+    assert.equal(stepEndSeqOf(events, 1), 8)
+    assert.equal(stepEndSeqOf(events, 2), 4)
+  })
+
+  it('该步号从未闭合 → undefined', () => {
+    assert.equal(stepEndSeqOf(events, 3), undefined)
+    assert.equal(stepEndSeqOf([], 1), undefined)
+  })
+})
+
+describe('resolveRecordByPrefix（id 唯一前缀寻址）', () => {
+  const records = [
+    record({ id: 'a1b2c3d4-0000' }),
+    record({ id: 'a1b2c3d4-1111' }),
+  ]
+
+  it('唯一前缀命中（大小写不敏感）', () => {
+    const resolved = resolveRecordByPrefix(records, 'a1b2c3d4-0000')
+    assert.equal(resolved.record?.id, 'a1b2c3d4-0000')
+    assert.equal(resolveRecordByPrefix(records, 'A1B2C3D4-1').record?.id, 'a1b2c3d4-1111')
+  })
+
+  it('无匹配 → notFound', () => {
+    assert.deepEqual(resolveRecordByPrefix(records, 'nope'), { notFound: true })
+  })
+
+  it('多匹配 → ambiguous 列出候选', () => {
+    const resolved = resolveRecordByPrefix(records, 'a1b2')
+    assert.deepEqual(resolved.ambiguous, ['a1b2c3d4-0000', 'a1b2c3d4-1111'])
+  })
 })
 
 describe('formatBytes / formatCheckpointList', () => {
@@ -151,5 +254,36 @@ describe('formatBytes / formatCheckpointList', () => {
 
   it('空列表给出明确提示', () => {
     assert.equal(formatCheckpointList([]), 'rewind: no checkpoints yet')
+  })
+
+  it('列表展示短 id（前 8 位，可作寻址前缀）', () => {
+    const text = formatCheckpointList([record({ id: 'a1b2c3d4e5f6a7b8', time: 1700000000000 })], { timeFormatter: () => 'T' })
+    assert.match(text, /#a1b2c3d4/)
+    assert.ok(!text.includes('e5f6a7b8'), '列表不展示完整 id')
+  })
+
+  it('total 超过展示数时给出 older checkpoints 提示', () => {
+    const text = formatCheckpointList([record({ id: 'cp-1' })], { timeFormatter: () => 'T', total: 7 })
+    assert.match(text, /and 6 older checkpoint/)
+    assert.equal(formatCheckpointList([record({ id: 'cp-1' })], { total: 1 }).includes('older'), false)
+  })
+
+  it('1 小时内的条目带相对时间后缀，更早的不带', () => {
+    const now = 1700000000000
+    const recent = formatCheckpointList([record({ id: 'cp-1', time: now - 60000 })], { timeFormatter: () => 'T', now })
+    assert.match(recent, /T \(1 min ago\)/)
+    const justNow = formatCheckpointList([record({ id: 'cp-1', time: now - 1000 })], { timeFormatter: () => 'T', now })
+    assert.match(justNow, /T \(just now\)/)
+    const old = formatCheckpointList([record({ id: 'cp-1', time: now - 3600000 })], { timeFormatter: () => 'T', now })
+    assert.ok(!old.includes('ago'))
+  })
+})
+
+describe('formatRelativeAge', () => {
+  it('小于 1 分钟 just now；1 小时内 N min ago；超过 1 小时空串', () => {
+    assert.equal(formatRelativeAge(30000), ' (just now)')
+    assert.equal(formatRelativeAge(3 * 60000), ' (3 min ago)')
+    assert.equal(formatRelativeAge(60 * 60000), '')
+    assert.equal(formatRelativeAge(-1000), '')
   })
 })

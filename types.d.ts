@@ -42,12 +42,13 @@ declare module '@deepseek-ai/dsh-session' {
     /** 配额清理（log-only）：被删检查点 id 与触发原因。 */
     'checkpoint/prune': {
       ids: string[]
-      reason: 'maxSnapshots' | 'maxSnapshotBytes' | 'turnEnd'
+      reason: 'maxSnapshots' | 'maxSnapshotBytes' | 'turnEnd' | 'clear'
     }
     /**
-     * /rewind 回退动作结果（log-only）：两段式事务的关键字段。
+     * /rewind 回退动作结果（log-only）：三段式事务的关键字段。
      * outcome: denied（确认门拒绝）| failed（文件恢复失败，未 fork）
      * | restored-no-fork（文件已恢复但会话未派生）| restored+forked（全成功）。
+     * preCheckpointId：本次回退前捕获的保护检查点（可用来撤销回退）。
      */
     'checkpoint/rewind': {
       checkpointId: string
@@ -56,6 +57,7 @@ declare module '@deepseek-ai/dsh-session' {
       provider?: 'git' | 'copy'
       restored?: number
       leftovers?: string[]
+      preCheckpointId?: string
       childSessionId?: string
       forkSeq?: number
       error?: string
@@ -82,6 +84,7 @@ declare module '@deepseek-ai/dsh-session-projection' {
       stepEndSeq?: number
       forkSeq?: number
       rewindOutcome?: 'denied' | 'failed' | 'restored-no-fork' | 'restored+forked'
+      preCheckpointId?: string
     }>
   }
 }
@@ -98,4 +101,6 @@ export interface Config {
   excludeGlobs?: string[]
   confirmVia?: 'auto' | 'userQuestions' | 'approval'
   listLimit?: number
+  preRewindCheckpoint?: 'warn' | 'require' | 'off'
+  verifyByHash?: boolean
 }

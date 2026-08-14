@@ -75,10 +75,12 @@ async function mount(opts) {
     maxSnapshots: 50,
     maxSnapshotBytes: 512 * 1024 * 1024,
     pruneOnTurnEnd: true,
-    mutationTools: ['bash', 'write', 'edit', 'str_replace_editor'],
+    mutationTools: ['bash', 'write', 'edit', 'str_replace_editor', 'pwsh', 'terminal_send'],
     excludeGlobs: ['node_modules', '.git', 'dist', 'build'],
     confirmVia: 'auto',
     listLimit: 10,
+    preRewindCheckpoint: 'warn',
+    verifyByHash: false,
     ...opts.config,
   }
   const plugin = { name: checkpointRewind.name, inject: checkpointRewind.inject, apply: (ctx) => checkpointRewind.apply(ctx, config) }
@@ -130,10 +132,11 @@ async function mainCopyFlow() {
   assert.match(list.text, /trigger: fs\/write-intent/)
   log('  /rewind list:\n' + list.text.split('\n').map((line) => `    ${line}`).join('\n'))
 
-  const firstId = /#([0-9a-f-]{36})/.exec(list.text)?.[1]
-  assert.ok(firstId, 'list carries checkpoint ids')
+  const firstId = /#([0-9a-f]{8})/.exec(list.text)?.[1]
+  assert.ok(firstId, 'list carries short checkpoint ids (usable as addressing prefix)')
   const rewind = await executeCommand(root, agent, `/rewind ${firstId}`)
   assert.equal(rewind.kind, 'success', rewind.text)
+  assert.match(rewind.text, /rewind guard: [0-9a-f-]{36}/, '结果携带可撤销本次回退的保护检查点')
   log('  /rewind result:', rewind.text)
 
   assert.equal(await fs.readFile(fileA, 'utf8'), 'A-v1\n', 'a.txt 恢复')
@@ -182,7 +185,7 @@ async function gitFlowIfAvailable() {
   await agentMutates(root, agent, 1, 1, fileA, 'A-v2\n')
   const list = await executeCommand(root, agent, '/rewind')
   assert.match(list.text, /\(git\)/, 'auto 解析为 git provider 并在列表标注')
-  const firstId = /#([0-9a-f-]{36})/.exec(list.text)?.[1]
+  const firstId = /#([0-9a-f]{8})/.exec(list.text)?.[1]
   assert.ok(firstId)
 
   await fs.writeFile(fileA, 'A-v3\n')
