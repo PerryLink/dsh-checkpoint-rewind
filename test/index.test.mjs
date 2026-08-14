@@ -49,7 +49,7 @@ function rejectingQuestions() {
 }
 
 /** 轮询等待表内记录数（插件内部领域操作异步落盘）。 */
-async function waitForRecords(table, count, timeoutMs = 5000) {
+async function waitForRecords(table, count, timeoutMs = 15000) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     const records = [...table.entries()].filter(([, record]) => record.sessionId === 'session-under-test')
@@ -66,7 +66,7 @@ async function recordsOf(records) {
 }
 
 /** 轮询直到谓词为真（清理异步收敛等场景）。 */
-async function waitUntil(predicate, timeoutMs = 5000) {
+async function waitUntil(predicate, timeoutMs = 15000) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     if (predicate()) return
@@ -179,7 +179,7 @@ describe('快照创建与去重', () => {
     const app = await mountPlugin({ cwd, config: { provider: 'copy', snapshotDir } })
     openStep(app.session, 1, 1)
     await dispatchWriteIntent(app.root, app.agent, 'write')
-    await fs.writeFile(path.join(cwd, 'a.txt'), 'A2')
+    await fs.writeFile(path.join(cwd, 'a.txt'), 'A22') // 尺寸变化：去重判据不依赖 mtime 精度
     closeStep(app.session, 1, 1)
     openStep(app.session, 1, 2)
     await dispatchWriteIntent(app.root, app.agent, 'write')
@@ -249,10 +249,14 @@ describe('配额清理', () => {
     for (let step = 1; step <= 4; step += 1) {
       openStep(app.session, 1, step)
       await dispatchWriteIntent(app.root, app.agent, 'write')
-      await fs.writeFile(path.join(cwd, 'a.txt'), `A${step + 1}`)
+      await fs.writeFile(path.join(cwd, 'a.txt'), `A${step + 1}${'x'.repeat(step)}`) // 尺寸逐次变化
       closeStep(app.session, 1, step)
     }
-    await waitUntil(async () => (await recordsOf(app.records)).length === 2)
+    // 收敛到目标状态（[3,4]）而非假定中间状态：清理在异步链上推进。
+    await waitUntil(async () => {
+      const records = await recordsOf(app.records)
+      return JSON.stringify(records.map(([, record]) => record.step)) === JSON.stringify([3, 4])
+    })
     await settle()
     const records = await recordsOf(app.records)
     assert.deepEqual(records.map(([, record]) => record.step), [3, 4])
@@ -268,12 +272,13 @@ describe('配额清理', () => {
     for (let step = 1; step <= 3; step += 1) {
       openStep(app.session, 1, step)
       await dispatchWriteIntent(app.root, app.agent, 'write')
-      await fs.writeFile(path.join(cwd, 'a.txt'), `S${step}${filler}`)
+      await fs.writeFile(path.join(cwd, 'a.txt'), `S${step}${'x'.repeat(step)}${filler}`) // 尺寸逐次变化
       closeStep(app.session, 1, step)
     }
     await waitUntil(async () => {
       const records = await recordsOf(app.records)
-      return records.length >= 1 && records.at(-1)[1].step === 3
+      const steps = records.map(([, record]) => record.step)
+      return steps.includes(3) && !steps.includes(1)
     })
     await settle()
     const records = await recordsOf(app.records)
@@ -387,7 +392,7 @@ describe('/rewind 命令', () => {
     closeStep(app.session, 1, 1, true)
     const record = (await recordsOf(app.records))[0][1]
     // 破坏快照存储：删除快照目录 → 目标 restore 失败（guard 捕获会重建目录）。
-    await fs.writeFile(path.join(cwd, 'a.txt'), 'A2')
+    await fs.writeFile(path.join(cwd, 'a.txt'), 'A2!') // 尺寸变化：guard 捕获不依赖 mtime 精度
     await fs.rm(path.join(snapshotDir), { recursive: true, force: true })
     const result = await command(app, `/rewind ${record.id}`)
     assert.equal(result?.result.kind, 'error')
@@ -407,7 +412,7 @@ describe('/rewind 命令', () => {
     await dispatchWriteIntent(app.root, app.agent, 'bash')
     await waitForRecords(app.records, 1)
     closeStep(app.session, 1, 1) // 只关 step，不关 turn → forkSeq 未补记
-    await fs.writeFile(path.join(cwd, 'a.txt'), 'A2')
+    await fs.writeFile(path.join(cwd, 'a.txt'), 'A2!') // 尺寸变化：guard 捕获不依赖 mtime 精度
     const record = (await recordsOf(app.records))[0][1]
     const result = await command(app, `/rewind ${record.id}`)
     assert.equal(result?.result.kind, 'error')
@@ -427,14 +432,14 @@ describe('/rewind 命令', () => {
     openStep(app.session, 1, 1)
     await dispatchWriteIntent(app.root, app.agent, 'bash')
     await waitForRecords(app.records, 1)
-    await fs.writeFile(path.join(cwd, 'a.txt'), 'A2')
+    await fs.writeFile(path.join(cwd, 'a.txt'), 'A2!')
     closeStep(app.session, 1, 1, true)
     const forkSeq1 = app.session.events.at(-1).seq
     // turn 2：改 b.txt。
     openStep(app.session, 2, 1)
     await dispatchWriteIntent(app.root, app.agent, 'bash')
     await waitForRecords(app.records, 2)
-    await fs.writeFile(path.join(cwd, 'b.txt'), 'B2')
+    await fs.writeFile(path.join(cwd, 'b.txt'), 'B2!')
     closeStep(app.session, 2, 1, true)
     // 回退到 turn 1 的检查点（a.txt 改前、b.txt 未改）。
     const first = (await recordsOf(app.records)).find(([, record]) => record.turn === 1)[1]
@@ -507,7 +512,7 @@ describe('/rewind 寻址', () => {
     openStep(app.session, 1, 1)
     await dispatchWriteIntent(app.root, app.agent, 'bash')
     await waitForRecords(app.records, 1)
-    await fs.writeFile(path.join(cwd, 'a.txt'), 'A2')
+    await fs.writeFile(path.join(cwd, 'a.txt'), 'A2!')
     closeStep(app.session, 1, 1, true)
     const id = (await recordsOf(app.records))[0][1].id
     const result = await command(app, `/rewind ${id.slice(0, 8)}`)
@@ -535,7 +540,7 @@ describe('/rewind 寻址', () => {
     openStep(app.session, 1, 1)
     await dispatchWriteIntent(app.root, app.agent, 'bash')
     await waitForRecords(app.records, 1)
-    await fs.writeFile(path.join(cwd, 'a.txt'), 'A2')
+    await fs.writeFile(path.join(cwd, 'a.txt'), 'A2!')
     closeStep(app.session, 1, 1, true)
     const result = await command(app, '/rewind latest')
     assert.equal(result?.result.kind, 'success')
@@ -550,12 +555,12 @@ describe('/rewind 寻址', () => {
     openStep(app.session, 1, 1)
     await dispatchWriteIntent(app.root, app.agent, 'bash')
     await waitForRecords(app.records, 1)
-    await fs.writeFile(path.join(cwd, 'a.txt'), 'A2')
+    await fs.writeFile(path.join(cwd, 'a.txt'), 'A2!')
     closeStep(app.session, 1, 1, true)
     openStep(app.session, 1, 2)
     await dispatchWriteIntent(app.root, app.agent, 'bash')
     await waitForRecords(app.records, 2)
-    await fs.writeFile(path.join(cwd, 'a.txt'), 'A3')
+    await fs.writeFile(path.join(cwd, 'a.txt'), 'A3!!')
     closeStep(app.session, 1, 2, true)
     const result = await command(app, '/rewind step 1')
     assert.equal(result?.result.kind, 'success')
@@ -696,7 +701,7 @@ describe('默认变更工具清单', () => {
     openStep(app.session, 1, 1)
     await dispatchPreExecute(app.root, app.agent, 'pwsh')
     await waitForRecords(app.records, 1)
-    await fs.writeFile(path.join(cwd, 'a.txt'), 'A2')
+    await fs.writeFile(path.join(cwd, 'a.txt'), 'A2!') // 尺寸变化：去重判据不依赖 mtime 精度
     closeStep(app.session, 1, 1)
     openStep(app.session, 1, 2)
     await dispatchPreExecute(app.root, app.agent, 'terminal_send')

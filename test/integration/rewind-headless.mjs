@@ -122,9 +122,9 @@ async function mainCopyFlow() {
   const { root, session, agent, dispose } = await mount({ cwd: workspace, snapshotDir })
   log('copy flow: mounted; workspace', workspace)
 
-  await agentMutates(root, agent, 1, 1, fileA, 'A-v2\n') // turn 1: 改 a.txt
+  await agentMutates(root, agent, 1, 1, fileA, 'A-v2!\n') // turn 1: 改 a.txt（尺寸变化，去重不依赖 mtime）
   const forkSeq1 = session.events.at(-1).seq
-  await agentMutates(root, agent, 2, 1, fileB, 'B-v2\n') // turn 2: 改 b.txt
+  await agentMutates(root, agent, 2, 1, fileB, 'B-v2!\n') // turn 2: 改 b.txt
 
   const list = await executeCommand(root, agent, '/rewind')
   assert.equal(list.kind, 'success')

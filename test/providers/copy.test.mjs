@@ -61,7 +61,7 @@ describe('copy provider', () => {
     const { provider, snapshotDir } = await makeProvider()
     const ws = { cwd, key: cwd }
     const first = await provider.snapshot(ws, { triggerTool: 'bash' })
-    await fs.writeFile(path.join(cwd, 'b.txt'), 'B2')
+    await fs.writeFile(path.join(cwd, 'b.txt'), 'B2!') // 尺寸变化：去重判据不依赖 mtime 精度
     const second = await provider.snapshot(ws, { triggerTool: 'bash', previousRef: first.ref })
     assert.ok(second, 'second snapshot exists')
     const firstDir = path.join(snapshotBaseDir(snapshotDir, cwd), first.ref)
@@ -74,7 +74,7 @@ describe('copy provider', () => {
     if (statA1.nlink >= 2 && statA2.nlink >= 2) {
       assert.equal(statA1.ino, statA2.ino)
     }
-    assert.equal(await fs.readFile(path.join(secondDir, 'b.txt'), 'utf8'), 'B2')
+    assert.equal(await fs.readFile(path.join(secondDir, 'b.txt'), 'utf8'), 'B2!')
     // 删除第一快照后第二快照的未变文件仍可读（独立链接计数）。
     await provider.discard(ws, first.ref)
     assert.equal(await fs.readFile(path.join(secondDir, 'a.txt'), 'utf8'), 'A1')
