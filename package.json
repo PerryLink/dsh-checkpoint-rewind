@@ -1,8 +1,16 @@
 {
   "name": "dsh-checkpoint-rewind",
   "description": "Claude Code /rewind equivalent for DeepSeek Harness: git-first workspace file snapshots before every mutating tool execution, turn-boundary session forks, and a one-shot /rewind command that restores files and forks the session back to a checkpoint",
-  "version": "0.1.0",
-  "private": true,
+  "version": "0.2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PerryLink/dsh-checkpoint-rewind.git"
+  },
+  "homepage": "https://github.com/PerryLink/dsh-checkpoint-rewind#readme",
+  "bugs": {
+    "url": "https://github.com/PerryLink/dsh-checkpoint-rewind/issues"
+  },
+  "author": "PerryLink",
   "type": "module",
   "main": "./index.mjs",
   "types": "./types.d.ts",
@@ -22,6 +30,8 @@
     "README.pt.md",
     "README.hi.md",
     "ARCHITECTURE.md",
+    "CHANGELOG.md",
+    "SECURITY.md",
     "LICENSE",
     "THIRD_PARTY_NOTICES.md"
   ],
@@ -32,6 +42,7 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-llm": "0.1.0-rc.6",
     "@deepseek-ai/dsh-session": "0.1.0-rc.6",
     "@deepseek-ai/dsh-storage-domain": "0.1.0-rc.6",
     "@deepseek-ai/schemastery": ">=3.0.0"
@@ -41,6 +52,7 @@
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-llm": "0.1.0-rc.6",
     "@deepseek-ai/dsh-session": "0.1.0-rc.6",
     "@deepseek-ai/dsh-storage-domain": "0.1.0-rc.6",
     "@deepseek-ai/dsh-commands": "0.1.0-rc.6",

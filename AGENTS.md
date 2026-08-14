@@ -22,6 +22,8 @@ package.json         npm 元数据；files 白名单 = 发布内容
 README.md            英文主介绍（GitHub 默认页；五语源文）
 README.{zh,es,pt,hi}.md   中/西/葡/印地语介绍（顶部互链，与英文同 commit 更新）
 ARCHITECTURE.md      三角色 seam 架构图与全部设计决策
+CHANGELOG.md / SECURITY.md   变更记录 + 安全政策（含安全面矩阵）
+.github/workflows/ci.yml     单元测试 + 组装式集成验证（Windows/Linux × Node 22/24）
 LICENSE / THIRD_PARTY_NOTICES.md   Apache-2.0 + 复用出处标注
 test/                单测 + test/integration/ 组装式集成验证（进 GitHub，不进 npm 包）
 dev/                 ❌ 本地工程面：冒烟脚本、夹具、演示——永不提交

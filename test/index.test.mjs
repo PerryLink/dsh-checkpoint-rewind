@@ -408,8 +408,12 @@ describe('/rewind 命令', () => {
     assert.equal(child.header.parentSession, app.session.id)
     assert.equal(child.header.cwd, cwd)
     assert.equal(child.firstLiveSeq, forkSeq1 + 1)
-    assert.equal(child.events.length, forkSeq1 + 2) // 种子 + session/end-seed
-    assert.equal(child.events.at(-1).type, 'session/end-seed')
+    assert.equal(child.events.length, forkSeq1 + 3) // 种子 + session/end-seed + 回退通知
+    assert.equal(child.events.at(-1).type, 'user/message', '子会话收到回退通知')
+    const notice = child.events.at(-1).data
+    assert.equal(notice.source?.kind, 'plugin')
+    assert.equal(notice.source?.plugin, 'checkpoint-rewind')
+    assert.match(notice.content[0].text, /restored to checkpoint/)
     for (let seq = 0; seq <= forkSeq1; seq += 1) {
       assert.deepEqual(child.events[seq], app.session.events[seq])
     }

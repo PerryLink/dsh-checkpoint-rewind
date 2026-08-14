@@ -42,11 +42,15 @@
 - **टिकाऊ रजिस्ट्री + कोटा** — रिकॉर्ड `ctx.storageDomain` (डोमेन `checkpoints`; SQLite बैकएंड = पंक्तियाँ, JSON बैकएंड = पठनीय फ़ाइल) में रहते हैं; `maxSnapshots` (प्रति सत्र, डिफ़ॉल्ट 50), `maxSnapshotBytes` (वैश्विक, डिफ़ॉल्ट 512 MiB), `pruneOnTurnEnd`, सबसे-पुराना-पहले।
 - **डिज़ाइन से पुनर्निर्माणीय** — `/rewind` का आउटपुट harness के अपने `command/run` + `command/done` इवेंट पर चलता है; `checkpoint/snapshot|bound|prune|rewind` इवेंट घोषित हैं और होस्ट बिल्ड के जानते ही अपने-आप जुड़ जाते हैं (rc.6 अनुकूली द्वार)।
 - **Web-तैयार प्रोजेक्शन** — जहाँ भी `ctx.sessionProjections` मौजूद है, सत्र-प्रोजेक्शन इकाई `checkpoints` पंजीकृत होती है, ताकि shell पैनल बिना किसी प्लगइन बदलाव के इवेंट लॉग से चेकपॉइंट-पट्टी दिखा सके।
+- **मॉडल-सजग rewind** — fork चाइल्ड सत्र में एक इंजेक्टेड सूचना (`user/message`, plugin स्रोत) जाती है जिसमें चेकपॉइंट और बहाली का दायरा लिखा होता है, ताकि लौटा हुआ मॉडल पुराने टूल परिणामों पर आगे न बढ़े।
 
-## आवश्यकताएँ
+## अनुकूलता
 
-- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) `0.1.0-rc.6` (npm `next`), Node `^22.19 || >=24`
-- `git` (केवल git provider के लिए; git रिपॉज़िटरी न होने पर copy provider अपने-आप काम संभाल लेता है)
+| आवश्यकता | स्थिति | अंतिम सत्यापन |
+|---|---|---|
+| DeepSeek Harness `0.1.0-rc.6` (npm `next`) | ✅ लोड-स्तर सत्यापित | 2026-08-14 (tarball इंस्टॉल → `dsh --profile headless --dump-config` में परत दिखती है; रन केवल क्रेडेंशियल चरण पर रुकता है) |
+| Node `^22.19 \|\| >=24` | ✅ CI मैट्रिक्स | 2026-08-14 |
+| `git` | वैकल्पिक | केवल git provider के लिए; गैर-git डायरेक्टरी अपने-आप `copy` पर डिग्रेड |
 
 ## त्वरित शुरुआत
 
@@ -61,6 +65,13 @@ dsh plugin add dsh-checkpoint-rewind    # प्रोफ़ाइल के bun
 
 ```sh
 pnpm dsh web --patch ./cordis.patch.yml
+```
+
+अनइंस्टॉल (कमांड और लिस्नर हटते हैं; स्नैपशॉट फ़ाइलें आपके हटाने तक बची रहती हैं):
+
+```sh
+dsh plugin --profile <name> remove dsh-checkpoint-rewind
+rm -rf "$DSH_HOME/dsh-checkpoint-rewind"   # copy provider स्नैपशॉट; git ऑब्जेक्ट gc द्वारा एकत्रित
 ```
 
 वर्कस्पेस में बदलाव होते ही चेकपॉइंट अपने-आप बनते हैं:
@@ -213,9 +224,30 @@ npm run test:integration # असेंबल्ड headless सत्याप�
                          # बहाली → फ़ाइल सामग्री व fork संदर्भ सुनिश्चित
 ```
 
+## समस्या निवारण
+
+| लक्षण | कारण / समाधान |
+|---|---|
+| `/rewind <id>` कहता है `rewind cancelled: no confirmation answerer` | कोई userQuestions/approval चैनल नहीं है — प्लगइन fail-closed होता है। Web UI में चलाएँ (या प्रश्न-प्रदाता माउंट करें); `confirmVia` चैनल चुनता है। |
+| `rewind: checkpoint registry unavailable` | `checkpoints` स्टोरेज डोमेन नहीं खुला (बैकएंड अनुपस्थित/त्रुटिपूर्ण)। harness लॉग व डोमेन बैकएंड रूट देखें। |
+| चेकपॉइंट दिखता है `fork: pending (turn not closed)` | उस टर्न का `turn/end` अभी नहीं आया; फ़ाइलें बहाल होती हैं, fork टर्न बंद होने का इंतज़ार करता है। |
+| `files restored … but the session was NOT forked` | दो-चरणीय लेन-देन का चरण 2 विफल (कोई बंद सीमा नहीं या fork अस्वीकृत)। फ़ाइलें बहाल रहती हैं; चेकपॉइंट व वर्तमान सत्र अछूते — परिणाम में कारण दिया गया है। |
+| headless में `MISSING_CREDENTIAL` | इस प्लगइन से असंबंधित: प्रोवाइडर के लिए `DEEPSEEK_API_KEY` सेट नहीं। |
+| स्नैपशॉट स्टोरेज बढ़ता है | हर स्नैपशॉट के बाद व `turn/end` पर प्रूनिंग चलती है (`pruneOnTurnEnd`); `maxSnapshots`/`maxSnapshotBytes` घटाएँ या अनइंस्टॉल के बाद `$DSH_HOME/dsh-checkpoint-rewind` हटाएँ। |
+
+## अनुमतियाँ और डेटा
+
+| संसाधन | पहुँच |
+|---|---|
+| वर्कस्पेस फ़ाइलें | स्नैपशॉट के लिए केवल-पढ़ना; लेखन केवल स्वीकृत `/rewind <id>` बहाली पर (ओवरराइट, कभी विलोपन नहीं) |
+| स्नैपशॉट स्टोरेज | केवल `snapshotDir` के भीतर लिखता है (डिफ़ॉल्ट `$DSH_HOME/dsh-checkpoint-rewind/`) |
+| git रिपॉज़िटरी | केवल व्हाइटलिस्ट साइड-इफ़ेक्ट-रहित प्रिमिटिव (`stash create`, `commit-tree`, `restore --worktree`, …) — कभी `reset --hard`/`clean` नहीं |
+| सत्र लॉग | सीमाओं के लिए पढ़ना; होस्ट के जानते ही log-only `checkpoint/*` इवेंट जोड़ता है |
+| नेटवर्क / क्रेडेंशियल | कोई नहीं — पूर्णतः स्थानीय |
+
 ## लाइसेंस
 
-Apache License 2.0 — देखें [LICENSE](LICENSE) और [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)।
+Apache License 2.0 — देखें [LICENSE](LICENSE), [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) और सुरक्षा नीति [SECURITY.md](SECURITY.md)।
 
 ## संबंधित प्लगइन
 

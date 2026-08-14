@@ -42,11 +42,15 @@ A diferença em uma frase: **o dsh-checkpoint-rewind captura o *estado do worksp
 - **Registro durável + cotas** — os registros vivem em `ctx.storageDomain` (domínio `checkpoints`; backend SQLite = linhas, backend JSON = arquivo legível); `maxSnapshots` (por sessão, 50 por padrão), `maxSnapshotBytes` (global, 512 MiB por padrão), `pruneOnTurnEnd`, mais-antigo-primeiro.
 - **Reconstruível por design** — a saída do `/rewind` trafega nos eventos próprios do harness `command/run` + `command/done`; os eventos `checkpoint/snapshot|bound|prune|rewind` estão declarados e são anexados automaticamente quando um build do host os conhecer (porta adaptativa rc.6).
 - **Projeção pronta para a Web** — uma unidade de projeção de sessão `checkpoints` é registrada sempre que `ctx.sessionProjections` existir, de modo que um painel do shell pode renderizar a faixa de checkpoints a partir do log de eventos sem mudanças no plugin.
+- **Rewind consciente do modelo** — a sessão filha bifurcada recebe um aviso injetado (`user/message`, fonte plugin) com o checkpoint e o escopo da restauração, para que o modelo retomado não continue com resultados de ferramentas obsoletos.
 
-## Requisitos
+## Compatibilidade
 
-- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) `0.1.0-rc.6` (npm `next`), Node `^22.19 || >=24`
-- `git` (apenas para o provider git; sem repositório git o provider copy assume automaticamente)
+| Requisito | Estado | Última verificação |
+|---|---|---|
+| DeepSeek Harness `0.1.0-rc.6` (npm `next`) | ✅ nível de carga verificado | 2026-08-14 (instalação via tarball → `dsh --profile headless --dump-config` mostra a camada; a execução só para na etapa de credenciais) |
+| Node `^22.19 \|\| >=24` | ✅ matriz CI | 2026-08-14 |
+| `git` | opcional | apenas para o provider git; diretórios sem git degradam para `copy` automaticamente |
 
 ## Início rápido
 
@@ -61,6 +65,13 @@ Ou monte diretamente para experimentar:
 
 ```sh
 pnpm dsh web --patch ./cordis.patch.yml
+```
+
+Desinstalar (remove o comando e os listeners; os snapshots persistem até você apagá-los):
+
+```sh
+dsh plugin --profile <name> remove dsh-checkpoint-rewind
+rm -rf "$DSH_HOME/dsh-checkpoint-rewind"   # snapshots do provider copy; objetos git são coletados pelo gc
 ```
 
 As mutações do workspace agora criam checkpoints automaticamente:
@@ -214,9 +225,30 @@ npm run test:integration # verificação headless montada: o agente modifica 2 a
                          # /rewind lista → restaura → conteúdos e contexto do fork assegurados
 ```
 
+## Solução de problemas
+
+| Sintoma | Causa / solução |
+|---|---|
+| `/rewind <id>` diz `rewind cancelled: no confirmation answerer` | Nenhum canal userQuestions/approval está montado — o plugin fecha em falso. Rode na Web UI (ou monte um provedor de perguntas); `confirmVia` escolhe o canal. |
+| `rewind: checkpoint registry unavailable` | O domínio de armazenamento `checkpoints` não abriu (backend ausente/com erro). Veja os logs do harness e a rota do backend do domínio. |
+| Um checkpoint mostra `fork: pending (turn not closed)` | O turno ainda não tem `turn/end`; os arquivos são restaurados, o fork espera o turno fechar. |
+| `files restored … but the session was NOT forked` | Fase 2 da transação falhou (sem limite fechado ou fork rejeitado). Os arquivos ficam restaurados; o checkpoint e a sessão atual não são tocados — o resultado indica a razão. |
+| `MISSING_CREDENTIAL` em headless | Não relacionado: falta `DEEPSEEK_API_KEY` para o provedor. |
+| Armazenamento de snapshots cresce | A poda roda após cada snapshot e no `turn/end` (`pruneOnTurnEnd`); reduza `maxSnapshots`/`maxSnapshotBytes` ou apague `$DSH_HOME/dsh-checkpoint-rewind` após desinstalar. |
+
+## Permissões e dados
+
+| Recurso | Acesso |
+|---|---|
+| Arquivos do workspace | leitura para snapshots; escrita apenas numa restauração `/rewind <id>` aprovada (sobrescrita, nunca exclusão) |
+| Armazenamento de snapshots | escreve apenas sob `snapshotDir` (padrão `$DSH_HOME/dsh-checkpoint-rewind/`) |
+| Repositório git | apenas primitivas whitelisted sem efeitos colaterais (`stash create`, `commit-tree`, `restore --worktree`, …) — jamais `reset --hard`/`clean` |
+| Log da sessão | leitura de limites; anexa eventos log-only `checkpoint/*` quando o host os conhece |
+| Rede / credenciais | nenhuma — totalmente local |
+
 ## Licença
 
-Apache License 2.0 — veja [LICENSE](LICENSE) e [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Apache License 2.0 — veja [LICENSE](LICENSE), [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) e a política de segurança em [SECURITY.md](SECURITY.md).
 
 ## Plugins relacionados
 

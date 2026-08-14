@@ -145,12 +145,13 @@ async function mainCopyFlow() {
   assert.ok(child, 'fork 子会话存活')
   assert.equal(child.header.parentSession, session.id)
   assert.equal(child.header.cwd, workspace)
-  assert.equal(child.events.length, forkSeq1 + 2, '种子 = 边界前缀 + session/end-seed')
-  assert.equal(child.events.at(-1).type, 'session/end-seed')
+  assert.equal(child.events.length, forkSeq1 + 3, '种子 = 边界前缀 + session/end-seed + 回退通知')
+  assert.equal(child.events.at(-1).type, 'user/message', '子会话收到回退通知')
+  assert.match(child.events.at(-1).data.content[0].text, /restored to checkpoint/)
   for (let seq = 0; seq <= forkSeq1; seq += 1) {
     assert.deepEqual(child.events[seq], session.events[seq], `child seed seq ${seq} 与源一致`)
   }
-  log('  fork ok: child', childId, 'seedLength', child.events.length - 1, 'parent', child.header.parentSession)
+  log('  fork ok: child', childId, 'seedLength', child.events.length - 2, 'parent', child.header.parentSession)
 
   await dispose()
   log('copy flow: PASS')

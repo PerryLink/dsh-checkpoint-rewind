@@ -42,11 +42,15 @@
 - **持久注册表 + 配额** —— 检查点记录存 `ctx.storageDomain`（域 `checkpoints`；SQLite 后端 = 表行，JSON 后端 = 可读文件）；`maxSnapshots`（每会话，默认 50）、`maxSnapshotBytes`（全局，默认 512 MiB）、`pruneOnTurnEnd`，最旧优先清理。
 - **天然可重建** —— `/rewind` 输出走 harness 自有的 `command/run` + `command/done` 事件；`checkpoint/snapshot|bound|prune|rewind` 会话事件已声明，宿主构建收录后自动追加（rc.6 自适应门）。
 - **Web 就绪的投影** —— 只要 `ctx.sessionProjections` 存在即注册投影单元 `checkpoints`，shell 面板可直接从事件日志渲染检查点条，插件无需任何改动。
+- **模型感知的回退** —— fork 子会话收到注入通知（`user/message`，plugin source），写明恢复到的检查点与恢复范围，续接的模型不会沿用过期工具结果。
 
-## 要求
+## 兼容性
 
-- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) `0.1.0-rc.6`（npm `next`），Node `^22.19 || >=24`
-- `git`（仅 git provider 需要；非 git 目录自动改走 copy provider）
+| 要求 | 状态 | 最后验证 |
+|---|---|---|
+| DeepSeek Harness `0.1.0-rc.6`（npm `next`） | ✅ 加载级已验证 | 2026-08-14（tarball 安装后 `dsh --profile headless --dump-config` 出现插件层；headless 运行仅止于凭据阶段） |
+| Node `^22.19 \|\| >=24` | ✅ CI 矩阵 | 2026-08-14 |
+| `git` | 可选 | 仅 git provider 需要；非 git 目录自动降级 copy |
 
 ## 快速开始
 
@@ -61,6 +65,13 @@ dsh plugin add dsh-checkpoint-rewind    # 进入 profile 的 bundle 栈
 
 ```sh
 pnpm dsh web --patch ./cordis.patch.yml
+```
+
+卸载（移除命令与监听；快照文件保留至你手动删除）：
+
+```sh
+dsh plugin --profile <name> remove dsh-checkpoint-rewind
+rm -rf "$DSH_HOME/dsh-checkpoint-rewind"   # copy provider 快照；git 对象由 gc 回收
 ```
 
 工作区一旦发生变更，检查点自动生成。在 Web UI（或任何交互式适配器）中：
@@ -213,9 +224,30 @@ npm run test:integration # 组装式 headless 验证：agent 跨两轮改 2 个�
                          # 回退 → 断言文件内容与 fork 上下文
 ```
 
+## 故障排查
+
+| 症状 | 原因 / 处理 |
+|---|---|
+| `/rewind <id>` 返回 `rewind cancelled: no confirmation answerer` | 没有挂载 userQuestions/approval 通道——插件失败关闭。在 Web UI 运行（或挂载提问提供方）；`confirmVia` 选择通道。 |
+| `rewind: checkpoint registry unavailable` | `checkpoints` 存储域打开失败（存储后端缺失/报错）。检查 harness 日志与存储域后端路由配置。 |
+| 检查点显示 `fork: pending (turn not closed)` | 其轮次尚无 `turn/end`；文件仍可恢复，会话 fork 需等轮次闭合。 |
+| `files restored … but the session was NOT forked` | 两段式事务第 2 阶段失败（无闭合边界或 fork 被拒）。文件保持已恢复；检查点与当前会话不受影响——结果里给出了具体原因。 |
+| headless 运行报 `MISSING_CREDENTIAL` | 与本插件无关：未配置 `DEEPSEEK_API_KEY`。 |
+| 快照占用增长 | 每次快照后与 `turn/end` 时自动清理（`pruneOnTurnEnd`）；调低 `maxSnapshots`/`maxSnapshotBytes`，或卸载后删除 `$DSH_HOME/dsh-checkpoint-rewind`。 |
+
+## 权限与数据
+
+| 资源 | 访问 |
+|---|---|
+| 工作区文件 | 快照只读；仅在获批的 `/rewind <id>` 恢复时写入（覆盖式，绝不删除） |
+| 快照存储 | 只写 `snapshotDir`（默认 `$DSH_HOME/dsh-checkpoint-rewind/`） |
+| Git 仓库 | 仅白名单无副作用原语（`stash create`、`commit-tree`、`restore --worktree`……）——绝不 `reset --hard`/`clean` |
+| 会话日志 | 读取轮次/步骤边界；宿主收录类型时追加 log-only 的 `checkpoint/*` 事件 |
+| 网络 / 凭据 | 无——完全本地 |
+
 ## 许可证
 
-Apache License 2.0 —— 见 [LICENSE](LICENSE) 与 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+Apache License 2.0 —— 见 [LICENSE](LICENSE)、[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 与安全政策 [SECURITY.md](SECURITY.md)。
 
 ## 相关插件
 

@@ -18,6 +18,7 @@
 import { randomUUID } from 'node:crypto'
 import Schema from '@deepseek-ai/schemastery'
 import { KNOWN_SESSION_EVENT_TYPES } from '@deepseek-ai/dsh-session'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import {
   COMMAND_NAME,
   CONFIRM_CHANNELS,
@@ -523,6 +524,10 @@ export function apply(ctx, config = {}) {
       provider: record.provider, restored: restore.restored, leftovers: restore.leftovers,
       childSessionId: child.id, forkSeq: record.forkSeq,
     })
+    // 把回退事实注入子会话（模型可见 ⟺ 已记录：user/message 直接落在子会话日志里）。
+    // 子会话以边界前缀为种子，其中后续轮次的工具结果已不再与磁盘一致——
+    // 没有这条通知，模型会沿用过期上下文继续。
+    injectRewindNotice(child, record, restore)
     logger.info(`rewind ok: checkpoint ${record.id} → restored ${restore.restored} file(s), forked session ${child.id} at seq ${record.forkSeq}`)
     return {
       kind: 'success',
@@ -533,6 +538,33 @@ export function apply(ctx, config = {}) {
         'Open the new session to continue from before that turn; this session keeps its later history.',
         ...notes,
       ].join('\n'),
+    }
+  }
+
+  /**
+   * 向 fork 子会话注入一条回退通知：说明文件已恢复、哪些轮次之后的结果失效。
+   * 通知是持久的 user/message（plugin source），派生历史会投影它。
+   * @param {import('@deepseek-ai/dsh-session').Session} child - fork 子会话。
+   * @param {object} record - 检查点记录。
+   * @param {{restored: number, leftovers: string[]}} restore - 恢复结果。
+   */
+  function injectRewindNotice(child, record, restore) {
+    const text = [
+      `Workspace files were restored to checkpoint ${record.id} by /rewind`,
+      `(provider ${record.provider}, ${restore.restored} file(s), state before turn ${record.turn} step ${record.step}).`,
+      restore.leftovers.length > 0
+        ? `${restore.leftovers.length} file(s) created after the checkpoint were left in place.`
+        : '',
+      'Tool results after that point no longer reflect the files on disk; re-check the workspace before continuing.',
+    ].filter(line => line.length > 0).join('\n')
+    try {
+      child.append('user/message', createUserMessage({
+        content: [{ type: 'text', text }],
+        source: { kind: 'plugin', plugin: PLUGIN_NAME, form: 'rewind-notice', summary: 'rewind' },
+      }), { surfaceOp: 'append' })
+    } catch (error) {
+      // 通知是锦上添花：append 失败绝不能把一次成功的回退变成失败。
+      logger.warn(`rewind notice injection into child session ${child.id} failed: ${messageOf(error)}`)
     }
   }
 }
