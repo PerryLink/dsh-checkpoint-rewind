@@ -32,6 +32,7 @@ describe('git provider（scripted runner）', () => {
   it('available：工作树检查通过 → ok', async () => {
     const { run } = scriptedGit({
       'rev-parse --is-inside-work-tree': { code: 0, stdout: 'true\n', stderr: '' },
+      'rev-parse --verify HEAD': { code: 0, stdout: 'deadbeef\n', stderr: '' },
       'status --porcelain': { code: 0, stdout: '', stderr: '' },
     })
     const provider = makeGitProvider({ gitBin: 'git', run })
@@ -49,10 +50,34 @@ describe('git provider（scripted runner）', () => {
     assert.match(probe.reason, /not inside a git working tree/)
   })
 
+  it('available：unborn HEAD（无初始提交）→ ok=false + 原因（快照原语依赖 HEAD）', async () => {
+    const { run } = scriptedGit({
+      'rev-parse --is-inside-work-tree': { code: 0, stdout: 'true\n', stderr: '' },
+      'rev-parse --verify HEAD': { code: 128, stdout: '', stderr: 'fatal: Needed a single revision\n' },
+    })
+    const provider = makeGitProvider({ gitBin: 'git', run })
+    const probe = await provider.available(workspace)
+    assert.equal(probe.ok, false)
+    assert.match(probe.reason, /unborn HEAD/)
+  })
+
+  it('available：探测结果按工作区键缓存（第二次调用不再 spawn）', async () => {
+    const { run, calls } = scriptedGit({
+      'rev-parse --is-inside-work-tree': { code: 0, stdout: 'false\n', stderr: '' },
+    })
+    const provider = makeGitProvider({ gitBin: 'git', run })
+    const first = await provider.available(workspace)
+    const second = await provider.available(workspace)
+    assert.equal(first.ok, false)
+    assert.equal(second.ok, false)
+    assert.equal(calls.length, 1, '负结果同样缓存')
+  })
+
   it('snapshot：脏工作树走 stash create，返回 sha/文件数/字节数', async () => {
     const { run, calls } = scriptedGit({
       'stash create': { code: 0, stdout: 'abc123\n', stderr: '' },
-      'diff-tree --name-only -r abc123': { code: 0, stdout: 'a.txt\nb.txt\n', stderr: '' },
+      'rev-parse abc123^': { code: 0, stdout: 'parent123\n', stderr: '' },
+      'diff-tree --name-only -r parent123 abc123': { code: 0, stdout: 'a.txt\nb.txt\n', stderr: '' },
       'ls-tree -r -l abc123': { code: 0, stdout: '100644 blob x 100\ta.txt\n100644 blob y 24\tb.txt\n', stderr: '' },
     })
     const provider = makeGitProvider({ gitBin: 'git', run })
@@ -61,18 +86,45 @@ describe('git provider（scripted runner）', () => {
     assert.deepEqual(calls[0], ['stash', 'create'])
   })
 
-  it('snapshot：干净工作树（stash create 空）退化为 commit-tree HEAD^{tree}', async () => {
+  it('snapshot：干净工作树（stash create 空）退化为带父指针的 commit-tree', async () => {
     const { run, calls } = scriptedGit({
       'stash create': { code: 0, stdout: '', stderr: '' },
       'rev-parse HEAD': { code: 0, stdout: 'deadbeef\n', stderr: '' },
-      'commit-tree deadbeef^{tree} -m dsh-checkpoint-rewind snapshot': { code: 0, stdout: 'feedface\n', stderr: '' },
-      'diff-tree --name-only -r feedface': { code: 0, stdout: 'a.txt\n', stderr: '' },
+      'commit-tree deadbeef^{tree} -p deadbeef -m dsh-checkpoint-rewind snapshot': { code: 0, stdout: 'feedface\n', stderr: '' },
+      'rev-parse feedface^': { code: 0, stdout: 'deadbeef\n', stderr: '' },
+      'diff-tree --name-only -r deadbeef feedface': { code: 0, stdout: 'a.txt\n', stderr: '' },
       'ls-tree -r -l feedface': { code: 0, stdout: '100644 blob x 10\ta.txt\n', stderr: '' },
     })
     const provider = makeGitProvider({ gitBin: 'git', run })
     const result = await provider.snapshot(workspace, { triggerTool: 'write' })
     assert.equal(result?.ref, 'feedface')
     assert.deepEqual(calls.map((args) => args.join(' '))[1], 'rev-parse HEAD')
+    assert.deepEqual(calls.map((args) => args.join(' '))[2], 'commit-tree deadbeef^{tree} -p deadbeef -m dsh-checkpoint-rewind snapshot')
+  })
+
+  it('snapshot：干净树（变更集为空）→ bytes 0（增量记账）', async () => {
+    const { run } = scriptedGit({
+      'stash create': { code: 0, stdout: '', stderr: '' },
+      'rev-parse HEAD': { code: 0, stdout: 'deadbeef\n', stderr: '' },
+      'commit-tree deadbeef^{tree} -p deadbeef -m dsh-checkpoint-rewind snapshot': { code: 0, stdout: 'feedface\n', stderr: '' },
+      'rev-parse feedface^': { code: 0, stdout: 'deadbeef\n', stderr: '' },
+      'diff-tree --name-only -r deadbeef feedface': { code: 0, stdout: '', stderr: '' },
+    })
+    const provider = makeGitProvider({ gitBin: 'git', run })
+    const result = await provider.snapshot(workspace, { triggerTool: 'write' })
+    assert.deepEqual(result, { ref: 'feedface', files: 0, bytes: 0, notes: [] })
+  })
+
+  it('snapshot：bytes 只计变更文件（ls-tree 全树行按 diff-tree 变更集过滤）', async () => {
+    const { run } = scriptedGit({
+      'stash create': { code: 0, stdout: 'abc123\n', stderr: '' },
+      'rev-parse abc123^': { code: 0, stdout: 'parent123\n', stderr: '' },
+      'diff-tree --name-only -r parent123 abc123': { code: 0, stdout: 'b.txt\n', stderr: '' },
+      'ls-tree -r -l abc123': { code: 0, stdout: '100644 blob x 100\ta.txt\n100644 blob y 24\tb.txt\n', stderr: '' },
+    })
+    const provider = makeGitProvider({ gitBin: 'git', run })
+    const result = await provider.snapshot(workspace, { triggerTool: 'bash' })
+    assert.equal(result.bytes, 24, '未变更的 a.txt 不计入增量')
   })
 
   it('snapshot：与 previousRef 树一致 → null（内容去重）', async () => {
@@ -89,7 +141,8 @@ describe('git provider（scripted runner）', () => {
     const { run } = scriptedGit({
       'stash create': { code: 0, stdout: 'abc123\n', stderr: '' },
       'diff --quiet prev123 abc123 --': { code: 1, stdout: '', stderr: '' },
-      'diff-tree --name-only -r abc123': { code: 0, stdout: 'a.txt\n', stderr: '' },
+      'rev-parse abc123^': { code: 0, stdout: 'parent123\n', stderr: '' },
+      'diff-tree --name-only -r parent123 abc123': { code: 0, stdout: 'a.txt\n', stderr: '' },
       'ls-tree -r -l abc123': { code: 0, stdout: '100644 blob x 10\ta.txt\n', stderr: '' },
     })
     const provider = makeGitProvider({ gitBin: 'git', run })
@@ -97,23 +150,45 @@ describe('git provider（scripted runner）', () => {
     assert.equal(result?.ref, 'abc123')
   })
 
-  it('restore：worktree-only restore + 未跟踪遗留报告', async () => {
+  it('restore：显式路径恢复 + 遗留报告（未跟踪 ∪ 已暂存新文件，绝不删除）', async () => {
     const { run, calls } = scriptedGit({
-      'restore --source=abc123 --worktree -- .': { code: 0, stdout: '', stderr: '' },
       'ls-tree -r --name-only abc123': { code: 0, stdout: 'a.txt\nb.txt\n', stderr: '' },
+      'diff --name-only abc123 --': { code: 0, stdout: 'a.txt\nstaged.txt\n', stderr: '' },
+      'restore --source=abc123 --worktree -- a.txt b.txt': { code: 0, stdout: '', stderr: '' },
       'ls-files --others --exclude-standard': { code: 0, stdout: 'new.txt\n', stderr: '' },
+      'diff --name-only --diff-filter=A abc123 --': { code: 0, stdout: 'staged.txt\n', stderr: '' },
     })
     const provider = makeGitProvider({ gitBin: 'git', run })
     const result = await provider.restore(workspace, 'abc123')
-    assert.equal(result.restored, 2)
-    assert.deepEqual(result.leftovers, ['new.txt'])
-    assert.match(result.notes[0], /untracked file\(s\)/)
-    assert.deepEqual(calls[0], ['restore', '--source=abc123', '--worktree', '--', '.'])
+    assert.equal(result.restored, 1, '只计 ref 中存在且工作树不同的文件（staged.txt 不在 ref）')
+    assert.deepEqual(result.leftovers, ['new.txt', 'staged.txt'])
+    assert.match(result.notes[0], /left in place/)
+    assert.deepEqual(calls[2], ['restore', '--source=abc123', '--worktree', '--', 'a.txt', 'b.txt'])
+  })
+
+  it('restore：显式路径按批分块（超过批量上限拆多次 restore）', async () => {
+    const count = 201
+    const names = Array.from({ length: count }, (_, index) => `f${index}.txt`)
+    const script = {
+      'ls-tree -r --name-only abc123': { code: 0, stdout: `${names.join('\n')}\n`, stderr: '' },
+      'diff --name-only abc123 --': { code: 0, stdout: 'f0.txt\n', stderr: '' },
+      'ls-files --others --exclude-standard': { code: 0, stdout: '', stderr: '' },
+      'diff --name-only --diff-filter=A abc123 --': { code: 0, stdout: '', stderr: '' },
+    }
+    script[`restore --source=abc123 --worktree -- ${names.slice(0, 200).join(' ')}`] = { code: 0, stdout: '', stderr: '' }
+    script[`restore --source=abc123 --worktree -- ${names.slice(200).join(' ')}`] = { code: 0, stdout: '', stderr: '' }
+    const { run } = scriptedGit(script)
+    const provider = makeGitProvider({ gitBin: 'git', run })
+    const result = await provider.restore(workspace, 'abc123')
+    assert.equal(result.restored, 1)
+    assert.deepEqual(result.leftovers, [])
   })
 
   it('restore：git 报错 → providerFailed（响亮失败）', async () => {
     const { run } = scriptedGit({
-      'restore --source=abc123 --worktree -- .': { code: 128, stdout: '', stderr: 'bad object\n' },
+      'ls-tree -r --name-only abc123': { code: 0, stdout: 'a.txt\n', stderr: '' },
+      'diff --name-only abc123 --': { code: 0, stdout: 'a.txt\n', stderr: '' },
+      'restore --source=abc123 --worktree -- a.txt': { code: 128, stdout: '', stderr: 'bad object\n' },
     })
     const provider = makeGitProvider({ gitBin: 'git', run })
     await assert.rejects(() => provider.restore(workspace, 'abc123'), /restore failed: bad object/)
@@ -147,14 +222,20 @@ describe('git provider（scripted runner）', () => {
   it('安全白名单：允许的原语通过（快照/恢复只依赖这些）', () => {
     const allowed = [
       ['rev-parse', '--is-inside-work-tree'],
+      ['rev-parse', '--verify', 'HEAD'],
+      ['rev-parse', 'abc123^'],
       ['status', '--porcelain'],
       ['stash', 'create'],
-      ['commit-tree', 'HEAD^{tree}', '-m', 'msg'],
+      ['commit-tree', 'HEAD^{tree}', '-p', 'HEAD', '-m', 'msg'],
       ['diff', '--quiet', 'a', 'b', '--'],
+      ['diff', '--name-only', 'a', '--'],
+      ['diff', '--name-only', '--diff-filter=A', 'a', '--'],
       ['diff-tree', '--name-only', '-r', 'abc123'],
+      ['diff-tree', '--name-only', '-r', 'parent123', 'abc123'],
       ['ls-tree', '-r', '-l', 'abc123'],
+      ['ls-tree', '-r', '--name-only', 'abc123'],
       ['ls-files', '--others', '--exclude-standard'],
-      ['restore', '--source=abc123', '--worktree', '--', '.'],
+      ['restore', '--source=abc123', '--worktree', '--', 'a.txt'],
     ]
     for (const args of allowed) {
       assert.doesNotThrow(() => assertSafe(args))
@@ -187,6 +268,8 @@ describe('git provider（真实 git，能力检测）', () => {
     await fs.writeFile(path.join(repo, 'a.txt'), 'v1\n')
     await runReal(['config', 'user.email', 'test@example.com'])
     await runReal(['config', 'user.name', 'tester'])
+    // 字节级断言：关闭换行转换，避免 Windows autocrlf 干扰内容比较。
+    await runReal(['config', 'core.autocrlf', 'false'])
     await runReal(['add', '-A'])
     await runReal(['commit', '-q', '-m', 'initial'])
     const headBefore = (await runReal(['rev-parse', 'HEAD'])).stdout.trim()
@@ -200,11 +283,16 @@ describe('git provider（真实 git，能力检测）', () => {
 
     await fs.writeFile(path.join(repo, 'a.txt'), 'v3\n')
     await fs.writeFile(path.join(repo, 'new.txt'), 'untracked\n')
+    // 检查点之后 git add 的新文件：restore 必须保留（显式路径恢复，绝不删除）并报告。
+    await fs.writeFile(path.join(repo, 'staged.txt'), 'staged\n')
+    await runReal(['add', 'staged.txt'])
     const restore = await provider.restore(ws, snapshot.ref)
-    // 快照时只有 a.txt(v2)：恢复覆盖 a.txt，new.txt 是快照后的未跟踪文件 → 遗留报告。
+    // 快照时只有 a.txt(v2)：恢复覆盖 a.txt；new.txt/staged.txt 是快照后的新文件 → 遗留报告。
     assert.equal(restore.restored, 1)
     assert.equal(await fs.readFile(path.join(repo, 'a.txt'), 'utf8'), 'v2\n')
-    assert.deepEqual(restore.leftovers, ['new.txt'])
+    assert.deepEqual(restore.leftovers, ['new.txt', 'staged.txt'])
+    assert.equal(await fs.readFile(path.join(repo, 'staged.txt'), 'utf8'), 'staged\n', '已暂存新文件绝不删除')
+    assert.equal(await fs.readFile(path.join(repo, 'new.txt'), 'utf8'), 'untracked\n', '未跟踪新文件绝不删除')
     // 历史与索引未被改写：HEAD 不变，工作树状态与快照一致。
     const headAfter = (await runReal(['rev-parse', 'HEAD'])).stdout.trim()
     assert.equal(headAfter, headBefore)
