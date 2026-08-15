@@ -3,10 +3,30 @@
 ## Reporting a vulnerability
 
 Report suspected vulnerabilities privately through
-[GitHub Security Advisories](https://github.com/PerryLink/dsh-checkpoint-rewind/security/advisories/new),
-or file a [GitHub issue](https://github.com/PerryLink/dsh-checkpoint-rewind/issues)
-when the finding is not exploitable. Include the affected version, the
+[GitHub Security Advisories](https://github.com/PerryLink/dsh-checkpoint-rewind/security/advisories/new)
+(private vulnerability reporting — only the maintainer sees the report).
+Use a [GitHub issue](https://github.com/PerryLink/dsh-checkpoint-rewind/issues)
+only when the finding is not exploitable. Include the affected version, the
 observed behavior, and steps to reproduce.
+
+**Redact before reporting**: reports and any attached logs must not contain
+tokens, API keys, credentials, authorization headers, or real user workspace
+content. Replace sensitive values with `<redacted>` before submitting.
+
+## Response expectations
+
+- The maintainer is a solo maintainer; expect an initial acknowledgement
+  within **7 days** and a status update on every change.
+- Findings that break a documented safety invariant (for example: restore
+  through a symbolic link, a path traversal out of the snapshot root, or a
+  git primitive outside the whitelist) are treated as high priority.
+- Fixes land in a patch release with a `SECURITY.md`/CHANGELOG entry.
+
+## Credit and disclosure
+
+- Reporters are credited in the release notes and in the advisory, unless
+  they ask to stay anonymous.
+- Public disclosure follows the advisory, coordinated with the reporter.
 
 ## Security surface
 
