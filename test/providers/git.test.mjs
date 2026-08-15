@@ -7,9 +7,12 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
-import { assertSafe, makeGitProvider } from '../../lib/providers/git.mjs'
+import { assertSafe, assertSafeRef, GIT_SPAWN_ENV, makeGitProvider } from '../../lib/providers/git.mjs'
 
 const workspace = { cwd: '/repo', key: '/repo' }
+
+/** 40 位 hex 假 sha：restore 的 ref 与 snapshot 的 previousRef 经格式校验。 */
+const SHA = '0123456789abcdef0123456789abcdef01234567'
 
 /**
  * scripted git：按 (args) → 响应 的脚本表回放，记录全部调用。
@@ -130,68 +133,114 @@ describe('git provider（scripted runner）', () => {
   it('snapshot：与 previousRef 树一致 → null（内容去重）', async () => {
     const { run } = scriptedGit({
       'stash create': { code: 0, stdout: 'abc123\n', stderr: '' },
-      'diff --quiet prev123 abc123 --': { code: 0, stdout: '', stderr: '' },
+      [`diff --quiet ${SHA} abc123 --`]: { code: 0, stdout: '', stderr: '' },
     })
     const provider = makeGitProvider({ gitBin: 'git', run })
-    const result = await provider.snapshot(workspace, { triggerTool: 'bash', previousRef: 'prev123' })
+    const result = await provider.snapshot(workspace, { triggerTool: 'bash', previousRef: SHA })
     assert.equal(result, null)
   })
 
   it('snapshot：与 previousRef 不一致 → 继续返回结果', async () => {
     const { run } = scriptedGit({
       'stash create': { code: 0, stdout: 'abc123\n', stderr: '' },
-      'diff --quiet prev123 abc123 --': { code: 1, stdout: '', stderr: '' },
+      [`diff --quiet ${SHA} abc123 --`]: { code: 1, stdout: '', stderr: '' },
       'rev-parse abc123^': { code: 0, stdout: 'parent123\n', stderr: '' },
       'diff-tree --name-only -r parent123 abc123': { code: 0, stdout: 'a.txt\n', stderr: '' },
       'ls-tree -r -l abc123': { code: 0, stdout: '100644 blob x 10\ta.txt\n', stderr: '' },
     })
     const provider = makeGitProvider({ gitBin: 'git', run })
-    const result = await provider.snapshot(workspace, { triggerTool: 'bash', previousRef: 'prev123' })
+    const result = await provider.snapshot(workspace, { triggerTool: 'bash', previousRef: SHA })
     assert.equal(result?.ref, 'abc123')
+  })
+
+  it('snapshot：previousRef 非 sha 形态（注入 git 选项）→ 拒绝且不 spawn 任何命令', async () => {
+    const { run, calls } = scriptedGit({})
+    const provider = makeGitProvider({ gitBin: 'git', run })
+    await assert.rejects(
+      () => provider.snapshot(workspace, { triggerTool: 'bash', previousRef: '--output=evil' }),
+      /not a valid git object id/,
+    )
+    assert.equal(calls.length, 0, '格式校验先于任何 git 命令')
   })
 
   it('restore：显式路径恢复 + 遗留报告（未跟踪 ∪ 已暂存新文件，绝不删除）', async () => {
     const { run, calls } = scriptedGit({
-      'ls-tree -r --name-only abc123': { code: 0, stdout: 'a.txt\nb.txt\n', stderr: '' },
-      'diff --name-only abc123 --': { code: 0, stdout: 'a.txt\nstaged.txt\n', stderr: '' },
-      'restore --source=abc123 --worktree -- a.txt b.txt': { code: 0, stdout: '', stderr: '' },
+      [`ls-tree -r --name-only ${SHA}`]: { code: 0, stdout: 'a.txt\nb.txt\n', stderr: '' },
+      [`diff --name-only ${SHA} --`]: { code: 0, stdout: 'a.txt\nstaged.txt\n', stderr: '' },
+      [`restore --source=${SHA} --worktree -- a.txt b.txt`]: { code: 0, stdout: '', stderr: '' },
       'ls-files --others --exclude-standard': { code: 0, stdout: 'new.txt\n', stderr: '' },
-      'diff --name-only --diff-filter=A abc123 --': { code: 0, stdout: 'staged.txt\n', stderr: '' },
+      [`diff --name-only --diff-filter=A ${SHA} --`]: { code: 0, stdout: 'staged.txt\n', stderr: '' },
     })
     const provider = makeGitProvider({ gitBin: 'git', run })
-    const result = await provider.restore(workspace, 'abc123')
+    const result = await provider.restore(workspace, SHA)
     assert.equal(result.restored, 1, '只计 ref 中存在且工作树不同的文件（staged.txt 不在 ref）')
     assert.deepEqual(result.leftovers, ['new.txt', 'staged.txt'])
     assert.match(result.notes[0], /left in place/)
-    assert.deepEqual(calls[2], ['restore', '--source=abc123', '--worktree', '--', 'a.txt', 'b.txt'])
+    assert.deepEqual(calls[2], ['restore', `--source=${SHA}`, '--worktree', '--', 'a.txt', 'b.txt'])
   })
 
   it('restore：显式路径按批分块（超过批量上限拆多次 restore）', async () => {
     const count = 201
     const names = Array.from({ length: count }, (_, index) => `f${index}.txt`)
     const script = {
-      'ls-tree -r --name-only abc123': { code: 0, stdout: `${names.join('\n')}\n`, stderr: '' },
-      'diff --name-only abc123 --': { code: 0, stdout: 'f0.txt\n', stderr: '' },
+      [`ls-tree -r --name-only ${SHA}`]: { code: 0, stdout: `${names.join('\n')}\n`, stderr: '' },
+      [`diff --name-only ${SHA} --`]: { code: 0, stdout: 'f0.txt\n', stderr: '' },
       'ls-files --others --exclude-standard': { code: 0, stdout: '', stderr: '' },
-      'diff --name-only --diff-filter=A abc123 --': { code: 0, stdout: '', stderr: '' },
+      [`diff --name-only --diff-filter=A ${SHA} --`]: { code: 0, stdout: '', stderr: '' },
     }
-    script[`restore --source=abc123 --worktree -- ${names.slice(0, 200).join(' ')}`] = { code: 0, stdout: '', stderr: '' }
-    script[`restore --source=abc123 --worktree -- ${names.slice(200).join(' ')}`] = { code: 0, stdout: '', stderr: '' }
+    script[`restore --source=${SHA} --worktree -- ${names.slice(0, 200).join(' ')}`] = { code: 0, stdout: '', stderr: '' }
+    script[`restore --source=${SHA} --worktree -- ${names.slice(200).join(' ')}`] = { code: 0, stdout: '', stderr: '' }
     const { run } = scriptedGit(script)
     const provider = makeGitProvider({ gitBin: 'git', run })
-    const result = await provider.restore(workspace, 'abc123')
+    const result = await provider.restore(workspace, SHA)
     assert.equal(result.restored, 1)
     assert.deepEqual(result.leftovers, [])
   })
 
   it('restore：git 报错 → providerFailed（响亮失败）', async () => {
     const { run } = scriptedGit({
-      'ls-tree -r --name-only abc123': { code: 0, stdout: 'a.txt\n', stderr: '' },
-      'diff --name-only abc123 --': { code: 0, stdout: 'a.txt\n', stderr: '' },
-      'restore --source=abc123 --worktree -- a.txt': { code: 128, stdout: '', stderr: 'bad object\n' },
+      [`ls-tree -r --name-only ${SHA}`]: { code: 0, stdout: 'a.txt\n', stderr: '' },
+      [`diff --name-only ${SHA} --`]: { code: 0, stdout: 'a.txt\n', stderr: '' },
+      [`restore --source=${SHA} --worktree -- a.txt`]: { code: 128, stdout: '', stderr: 'bad object\n' },
     })
     const provider = makeGitProvider({ gitBin: 'git', run })
-    await assert.rejects(() => provider.restore(workspace, 'abc123'), /restore failed: bad object/)
+    await assert.rejects(() => provider.restore(workspace, SHA), /restore failed: bad object/)
+  })
+
+  it('restore：ref 非 sha 形态（注入 git 选项）→ 拒绝且不 spawn 任何命令', async () => {
+    const { run, calls } = scriptedGit({})
+    const provider = makeGitProvider({ gitBin: 'git', run })
+    await assert.rejects(
+      () => provider.restore(workspace, '--output=evil'),
+      /not a valid git object id/,
+    )
+    assert.equal(calls.length, 0)
+  })
+
+  it('preview：只读预览命令序列（ls-tree/diff/ls-files/diff-filter，绝不 spawn restore）', async () => {
+    const { run, calls } = scriptedGit({
+      [`ls-tree -r --name-only ${SHA}`]: { code: 0, stdout: 'a.txt\nb.txt\n', stderr: '' },
+      [`diff --name-only ${SHA} --`]: { code: 0, stdout: 'a.txt\nstaged.txt\n', stderr: '' },
+      'ls-files --others --exclude-standard': { code: 0, stdout: 'new.txt\n', stderr: '' },
+      [`diff --name-only --diff-filter=A ${SHA} --`]: { code: 0, stdout: 'staged.txt\n', stderr: '' },
+    })
+    const provider = makeGitProvider({ gitBin: 'git', run })
+    const result = await provider.preview(workspace, SHA)
+    assert.deepEqual(result, { restore: 1, unchanged: 1, leftovers: ['new.txt', 'staged.txt'], changes: ['a.txt'] })
+    assert.equal(calls.some((args) => args[0] === 'restore'), false, 'preview 不执行 restore')
+  })
+
+  it('子进程环境：终端提示与可选锁关闭（防凭据提示挂起快照链）', () => {
+    assert.equal(GIT_SPAWN_ENV.GIT_TERMINAL_PROMPT, '0')
+    assert.equal(GIT_SPAWN_ENV.GIT_OPTIONAL_LOCKS, '0')
+  })
+
+  it('ref 格式校验：40/64 位 hex 通过，其余拒绝', () => {
+    assert.doesNotThrow(() => assertSafeRef(SHA))
+    assert.doesNotThrow(() => assertSafeRef('f'.repeat(64)))
+    for (const bad of ['abc123', '--output=x', 'x'.repeat(39), 'g'.repeat(40), 'x'.repeat(65), '../sha']) {
+      assert.throws(() => assertSafeRef(bad), /not a valid git object id/)
+    }
   })
 
   it('discard：git 侧 no-op（对象留给 gc）', async () => {

@@ -5,6 +5,7 @@ import assert from 'node:assert/strict'
 import {
   formatBytes,
   formatCheckpointList,
+  formatPreviewResult,
   formatRelativeAge,
   nearestCheckpointAtOrBefore,
   parseRewindInput,
@@ -170,7 +171,8 @@ describe('parseRewindInput（/rewind 寻址语法）', () => {
   it('step <N> → step；非法 step 语法 → invalid', () => {
     assert.deepEqual(parseRewindInput('step 3'), { kind: 'step', step: 3 })
     assert.deepEqual(parseRewindInput('  STEP 12 '), { kind: 'step', step: 12 })
-    assert.deepEqual(parseRewindInput('step 0'), { kind: 'step', step: 0 })
+    assert.deepEqual(parseRewindInput('step 0').kind, 'invalid')
+    assert.match(parseRewindInput('step 0').message, /positive-integer/)
     assert.deepEqual(parseRewindInput('step abc').kind, 'invalid')
     assert.deepEqual(parseRewindInput('step').kind, 'invalid')
   })
@@ -178,6 +180,41 @@ describe('parseRewindInput（/rewind 寻址语法）', () => {
   it('其余输入 → id', () => {
     assert.deepEqual(parseRewindInput('abc123'), { kind: 'id', input: 'abc123' })
     assert.deepEqual(parseRewindInput('  a1b2c3d4  '), { kind: 'id', input: 'a1b2c3d4' })
+  })
+
+  it('preview <目标> → preview；preview 空/非法 → invalid', () => {
+    assert.deepEqual(parseRewindInput('preview abc123'), { kind: 'preview', target: 'abc123' })
+    assert.deepEqual(parseRewindInput('  PREVIEW step 2 '), { kind: 'preview', target: 'step 2' })
+    assert.deepEqual(parseRewindInput('preview latest'), { kind: 'preview', target: 'latest' })
+    assert.deepEqual(parseRewindInput('preview').kind, 'invalid')
+    assert.match(parseRewindInput('preview').message, /preview <id-prefix/)
+  })
+})
+
+describe('formatPreviewResult（/rewind preview 渲染）', () => {
+  it('渲染覆盖清单、未变计数、遗留清单与操作指引', () => {
+    const target = record({ id: 'cp-9', provider: 'git', turn: 2, step: 3 })
+    const preview = { restore: 2, unchanged: 5, leftovers: ['new.txt'], changes: ['a.txt', 'b.txt'] }
+    const text = formatPreviewResult(target, preview)
+    assert.match(text, /rewind preview: checkpoint #cp-9/)
+    assert.match(text, /would overwrite 2 file\(s\):/)
+    assert.match(text, /a\.txt/)
+    assert.match(text, /5 file\(s\) already match/)
+    assert.match(text, /1 file\(s\) created after the checkpoint would be left in place:/)
+    assert.match(text, /new\.txt/)
+    assert.match(text, /guard checkpoint is captured first/)
+  })
+
+  it('无覆盖文件与无遗留时渲染简洁形态；超限截断', () => {
+    const target = record({ id: 'cp-9' })
+    const preview = { restore: 0, unchanged: 3, leftovers: [] }
+    const text = formatPreviewResult(target, preview)
+    assert.match(text, /would overwrite 0 file\(s\)/)
+    assert.match(text, /0 file\(s\) created after the checkpoint would be left in place\./)
+    const many = { restore: 25, unchanged: 0, leftovers: [], changes: Array.from({ length: 25 }, (_, i) => `f${i}.txt`) }
+    const capped = formatPreviewResult(target, many)
+    assert.match(capped, /… and 5 more/)
+    assert.equal((capped.match(/f\d+\.txt/gu) ?? []).length, 20)
   })
 })
 

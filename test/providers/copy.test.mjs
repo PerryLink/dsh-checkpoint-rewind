@@ -20,8 +20,29 @@ async function makeWorkspace(files) {
 
 async function makeProvider(opts = {}) {
   const snapshotDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-rewind-copy-snap-'))
-  const provider = makeCopyProvider({ snapshotDir, excludeGlobs: ['node_modules'], verifyByHash: opts.verifyByHash === true })
+  const provider = makeCopyProvider({
+    snapshotDir,
+    excludeGlobs: opts.excludeGlobs ?? ['node_modules'],
+    verifyByHash: opts.verifyByHash === true,
+  })
   return { provider, snapshotDir }
+}
+
+/** symlink 能力检测（Windows 无开发者模式/特权时 EPERM，跳过并说明原因）。 */
+async function requireSymlink(t) {
+  const probeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-rewind-linkprobe-'))
+  const probeTarget = path.join(probeDir, 'target.txt')
+  const probeLink = path.join(probeDir, 'link.txt')
+  await fs.writeFile(probeTarget, 'x')
+  try {
+    await fs.symlink(probeTarget, probeLink)
+    return true
+  } catch (error) {
+    t.skip(`symlink creation unavailable on this platform/user (${error.code ?? error.message})`)
+    return false
+  } finally {
+    await fs.rm(probeDir, { recursive: true, force: true })
+  }
 }
 
 describe('copy provider', () => {
@@ -236,5 +257,143 @@ describe('copy provider', () => {
   it('available 恒可用（兜底语义）', async () => {
     const { provider } = await makeProvider()
     assert.deepEqual(await provider.available({ cwd: '/nowhere', key: '/nowhere' }), { ok: true })
+  })
+
+  it('restore/discard：ref 路径遍历（..）→ 响亮拒绝', async () => {
+    const cwd = await makeWorkspace({ 'a.txt': 'A1' })
+    const { provider } = await makeProvider()
+    const ws = { cwd, key: cwd }
+    await assert.rejects(() => provider.restore(ws, '../evil'), /not a safe snapshot id/)
+    await assert.rejects(() => provider.restore(ws, 'a/b'), /not a safe snapshot id/)
+    await assert.rejects(() => provider.discard(ws, '../..'), /not a safe snapshot id/)
+    assert.equal(await fs.readFile(path.join(cwd, 'a.txt'), 'utf8'), 'A1', '工作区未被触碰')
+  })
+
+  it('restore：目标文件被换成符号链接 → 拒绝，外部文件不被改写', async (t) => {
+    if (!(await requireSymlink(t))) return
+    const cwd = await makeWorkspace({ 'a.txt': 'A1' })
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-rewind-outside-'))
+    const target = path.join(outside, 'victim.txt')
+    await fs.writeFile(target, 'outside-content')
+    const { provider } = await makeProvider()
+    const ws = { cwd, key: cwd }
+    const snapshot = await provider.snapshot(ws, { triggerTool: 'bash' })
+    await fs.rm(path.join(cwd, 'a.txt'))
+    await fs.symlink(target, path.join(cwd, 'a.txt'))
+    await assert.rejects(() => provider.restore(ws, snapshot.ref), /symbolic links are refused/)
+    assert.equal(await fs.readFile(target, 'utf8'), 'outside-content', '工作区外文件未被改写')
+  })
+
+  it('restore：中间目录被换成符号链接 → 拒绝', async (t) => {
+    if (!(await requireSymlink(t))) return
+    const cwd = await makeWorkspace({ 'dir/a.txt': 'A1' })
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-rewind-outside-'))
+    const { provider } = await makeProvider()
+    const ws = { cwd, key: cwd }
+    const snapshot = await provider.snapshot(ws, { triggerTool: 'bash' })
+    await fs.rm(path.join(cwd, 'dir'), { recursive: true, force: true })
+    await fs.symlink(outside, path.join(cwd, 'dir'))
+    await assert.rejects(() => provider.restore(ws, snapshot.ref), /symbolic links are refused/)
+    assert.deepEqual(await fs.readdir(outside), [], '外部目录未被写入')
+  })
+
+  it('restore：快照存储内文件被换成符号链接 → 拒绝（不读外部文件）', async (t) => {
+    if (!(await requireSymlink(t))) return
+    const cwd = await makeWorkspace({ 'a.txt': 'A1' })
+    const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-rewind-outside-'))
+    const secret = path.join(outside, 'secret.txt')
+    await fs.writeFile(secret, 'secret')
+    const { provider, snapshotDir } = await makeProvider()
+    const ws = { cwd, key: cwd }
+    const snapshot = await provider.snapshot(ws, { triggerTool: 'bash' })
+    const snapFile = path.join(snapshotBaseDir(snapshotDir, cwd), snapshot.ref, 'a.txt')
+    await fs.rm(snapFile)
+    await fs.symlink(secret, snapFile)
+    await assert.rejects(() => provider.restore(ws, snapshot.ref), /snapshot storage contains a symbolic link/)
+    assert.equal(await fs.readFile(path.join(cwd, 'a.txt'), 'utf8'), 'A1', '外部内容未进入工作区')
+  })
+
+  it('restore：目标路径祖先目录不存在（快照后删除）→ 重建并恢复', async () => {
+    const cwd = await makeWorkspace({ 'dir/a.txt': 'A1' })
+    const { provider } = await makeProvider()
+    const ws = { cwd, key: cwd }
+    const snapshot = await provider.snapshot(ws, { triggerTool: 'bash' })
+    await fs.rm(path.join(cwd, 'dir'), { recursive: true, force: true })
+    const result = await provider.restore(ws, snapshot.ref)
+    assert.equal(result.restored, 1)
+    assert.equal(await fs.readFile(path.join(cwd, 'dir/a.txt'), 'utf8'), 'A1', '目录被重建')
+  })
+
+  it('snapshot：物化失败的文件跳过并警告，快照仍成功（能力检测）', async (t) => {
+    if (process.platform === 'win32') {
+      t.skip('Windows 不执行 chmod 000 语义')
+      return
+    }
+    const cwd = await makeWorkspace({ 'a.txt': 'A1', 'locked.txt': 'L1' })
+    const locked = path.join(cwd, 'locked.txt')
+    await fs.chmod(locked, 0o000)
+    try {
+      await fs.readFile(locked)
+      t.skip('以 root 运行：chmod 000 不阻止读取（物化会成功）')
+      return
+    } catch {
+      // 有防护：copyFile 将失败，验证跳过路径。
+    }
+    const { provider } = await makeProvider()
+    const ws = { cwd, key: cwd }
+    const result = await provider.snapshot(ws, { triggerTool: 'bash' })
+    assert.ok(result, '快照仍成功')
+    assert.equal(result.files, 1, 'locked.txt 被跳过（不进清单）')
+    assert.ok(result.notes.some(note => note.includes('locked.txt')), '警告包含被跳过文件')
+    const restore = await provider.restore(ws, result.ref)
+    assert.equal(restore.restored, 1, '恢复只涉及清单内文件')
+  })
+
+  it('excludeGlobs glob 语义：**/*.tmp 排除任意深度临时文件', async () => {
+    const cwd = await makeWorkspace({
+      'a.txt': 'A',
+      'x/a.tmp': 'T',
+      'x/y/b.tmp': 'T',
+      'x/keep.log': 'L',
+    })
+    const { provider } = await makeProvider({ excludeGlobs: ['**/*.tmp'] })
+    const result = await provider.snapshot({ cwd, key: cwd }, { triggerTool: 'bash' })
+    assert.deepEqual(result.files, 2, '仅 a.txt 与 keep.log')
+  })
+
+  it('preview：报告将覆盖/未变/遗留（不写任何文件）', async () => {
+    const cwd = await makeWorkspace({ 'a.txt': 'A1', 'b.txt': 'B1' })
+    const { provider } = await makeProvider()
+    const ws = { cwd, key: cwd }
+    const snapshot = await provider.snapshot(ws, { triggerTool: 'bash' })
+    // 尺寸变化：快检去重不依赖 mtime 精度，消除并行负载下的偶发误判。
+    await fs.writeFile(path.join(cwd, 'a.txt'), 'A2!!')
+    await fs.writeFile(path.join(cwd, 'new.txt'), 'new')
+    const preview = await provider.preview(ws, snapshot.ref)
+    assert.deepEqual(preview, { restore: 1, unchanged: 1, leftovers: ['new.txt'], changes: ['a.txt'] })
+    assert.equal(await fs.readFile(path.join(cwd, 'a.txt'), 'utf8'), 'A2!!', 'preview 不写文件')
+    assert.equal(await fs.readFile(path.join(cwd, 'new.txt'), 'utf8'), 'new')
+  })
+
+  it('preview：verifyByHash 按内容哈希判定（mtime 保留的同尺寸变更被检出）', async () => {
+    const cwd = await makeWorkspace({ 'a.txt': 'AAAA' })
+    const { provider } = await makeProvider({ verifyByHash: true })
+    const ws = { cwd, key: cwd }
+    const file = path.join(cwd, 'a.txt')
+    const before = await fs.stat(file)
+    const exactMs = Math.trunc(before.mtimeMs)
+    await fs.utimes(file, before.atime, new Date(exactMs))
+    const snapshot = await provider.snapshot(ws, { triggerTool: 'bash' })
+    await fs.writeFile(file, 'BBBB')
+    await fs.utimes(file, before.atime, new Date(exactMs))
+    const preview = await provider.preview(ws, snapshot.ref)
+    assert.equal(preview.restore, 1, '哈希比对检出内容变更')
+    assert.deepEqual(preview.changes, ['a.txt'])
+  })
+
+  it('preview：ref 非法 → 拒绝', async () => {
+    const cwd = await makeWorkspace({ 'a.txt': 'A1' })
+    const { provider } = await makeProvider()
+    await assert.rejects(() => provider.preview({ cwd, key: cwd }, '../evil'), /not a safe snapshot id/)
   })
 })

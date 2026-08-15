@@ -8,7 +8,8 @@
 // - 边界：快照后补记关联 —— step/end 到达时补 stepEndSeq（"回到第 N 步"映射），
 //   turn/end 到达时补 forkSeq（fork 边界）。
 // - /rewind：无参列出最近检查点（短 id + 相对时间）；<id 前缀> / step <N> /
-//   latest 寻址；clear 清空本会话检查点；<目标> 经确认门（userQuestions/approval，
+//   latest 寻址；preview <目标> 只读影响面预览（不写文件、不经确认门）；
+//   clear 清空本会话检查点；<目标> 经确认门（userQuestions/approval，
 //   失败关闭）后三段式：pre-rewind 保护检查点 → 恢复文件 → ctx.sessions.fork。
 // - 记录存 ctx.storageDomain 域 'checkpoints'；checkpoint/* 会话事件经自适应门
 //   append（宿主收录该类型或支持 ignorable 信封才写，见 lib/gate.mjs）。
@@ -49,6 +50,7 @@ import { workspaceKeyOf, resolveSnapshotDir } from './lib/workspace.mjs'
 import { checkpointsDomainSpec } from './lib/domain.mjs'
 import {
   formatCheckpointList,
+  formatPreviewResult,
   formatRewindSummary,
   nearestCheckpointAtOrBefore,
   parseRewindInput,
@@ -580,6 +582,80 @@ export function apply(ctx, config = {}) {
   })
 
   /**
+   * 寻址解析：latest / step <N> / id 前缀 → 目标记录或错误文本。
+   * @param {object[]} mine - 本会话本工作区的检查点记录。
+   * @param {import('@deepseek-ai/dsh-session').Session} session - 会话。
+   * @param {{kind: string, step?: number, input?: string}} parsed - parseRewindInput 的目标形态。
+   * @returns {{record: object} | {error: string}} 命中或错误文本。
+   */
+  function resolveRewindTarget(mine, session, parsed) {
+    if (parsed.kind === 'latest') {
+      const record = sortOldestFirst(mine).at(-1)
+      if (record === undefined) return { error: 'rewind: no checkpoints yet' }
+      return { record }
+    }
+    if (parsed.kind === 'step') {
+      const seq = stepEndSeqOf(session.events, parsed.step)
+      if (seq === undefined) {
+        return {
+          error: `rewind: step ${parsed.step} has not ended or does not exist (steps restart per turn; run /rewind to list checkpoints)`,
+        }
+      }
+      const record = nearestCheckpointAtOrBefore(mine, seq)
+      if (record === undefined) return { error: `rewind: no checkpoint at or before step ${parsed.step}` }
+      return { record }
+    }
+    const resolvedId = resolveRecordByPrefix(mine, parsed.input)
+    if (resolvedId.record !== undefined) return { record: resolvedId.record }
+    if (resolvedId.notFound === true) {
+      const err = checkpointNotFound(parsed.input)
+      return { error: `rewind: ${err.message}` }
+    }
+    const err = ambiguousCheckpoint(parsed.input, resolvedId.ambiguous ?? [])
+    return { error: `rewind: ${err.message}` }
+  }
+
+  /**
+   * /rewind preview：只读影响面预览——不写文件、不经确认门、不 fork，
+   * 只报告该检查点恢复将覆盖/保留哪些文件（确认前知情权）。
+   * @param {object[]} mine - 本会话本工作区的检查点记录。
+   * @param {import('@deepseek-ai/dsh-session').Session} session - 会话。
+   * @param {string} cwd - 已校验的工作区。
+   * @param {string} target - preview 之后的原始寻址文本。
+   * @returns {Promise<import('@deepseek-ai/dsh-commands').CommandResult>} 命令结果。
+   */
+  async function handlePreview(mine, session, cwd, target) {
+    const parsed = parseRewindInput(target)
+    if (parsed.kind !== 'latest' && parsed.kind !== 'step' && parsed.kind !== 'id') {
+      return {
+        kind: 'error',
+        text: `rewind: ${parsed.kind === 'invalid' ? parsed.message : 'usage: /rewind preview <id-prefix | step <N> | latest>'}`,
+      }
+    }
+    const hit = resolveRewindTarget(mine, session, parsed)
+    if (hit.error !== undefined) {
+      return { kind: 'error', text: hit.error }
+    }
+    const record = hit.record
+    const provider = registry.get(record.provider)
+    if (provider === undefined || typeof provider.preview !== 'function') {
+      return {
+        kind: 'error',
+        text: `rewind: preview is not supported by the ${record.provider} provider for checkpoint ${record.id}`,
+      }
+    }
+    try {
+      const preview = await provider.preview({ cwd, key: workspaceKeyOf(cwd) }, record.ref)
+      logger.info(`rewind preview: checkpoint ${record.id} (${record.provider}) → ${preview.restore} overwrite / ${preview.unchanged} unchanged / ${preview.leftovers.length} leftovers`)
+      return { kind: 'success', text: formatPreviewResult(record, preview) }
+    } catch (error) {
+      const message = messageOf(error)
+      logger.error(`rewind preview failed (checkpoint ${record.id}, provider ${record.provider}): ${message}`)
+      return { kind: 'error', text: `rewind: preview failed for checkpoint ${record.id} (${message}). No files were changed.` }
+    }
+  }
+
+  /**
    * /rewind 命令处理器。
    * @param {import('@deepseek-ai/dsh-commands').CommandInvocation} invocation - 命令调用。
    * @returns {Promise<import('@deepseek-ai/dsh-commands').CommandResult>} 命令结果。
@@ -618,37 +694,15 @@ export function apply(ctx, config = {}) {
     if (parsed.kind === 'clear') {
       return handleClear(mine, session, agent, signal)
     }
-
-    let record
-    if (parsed.kind === 'latest') {
-      record = sortOldestFirst(mine).at(-1)
-      if (record === undefined) {
-        return { kind: 'error', text: 'rewind: no checkpoints yet' }
-      }
-    } else if (parsed.kind === 'step') {
-      const seq = stepEndSeqOf(session.events, parsed.step)
-      if (seq === undefined) {
-        return {
-          kind: 'error',
-          text: `rewind: step ${parsed.step} has not ended or does not exist (steps restart per turn; run /rewind to list checkpoints)`,
-        }
-      }
-      record = nearestCheckpointAtOrBefore(mine, seq)
-      if (record === undefined) {
-        return { kind: 'error', text: `rewind: no checkpoint at or before step ${parsed.step}` }
-      }
-    } else {
-      const resolvedId = resolveRecordByPrefix(mine, parsed.input)
-      if (resolvedId.record !== undefined) {
-        record = resolvedId.record
-      } else if (resolvedId.notFound === true) {
-        const err = checkpointNotFound(parsed.input)
-        return { kind: 'error', text: `rewind: ${err.message}` }
-      } else {
-        const err = ambiguousCheckpoint(parsed.input, resolvedId.ambiguous ?? [])
-        return { kind: 'error', text: `rewind: ${err.message}` }
-      }
+    if (parsed.kind === 'preview') {
+      return handlePreview(mine, session, cwd, parsed.target)
     }
+
+    const target = resolveRewindTarget(mine, session, parsed)
+    if (target.error !== undefined) {
+      return { kind: 'error', text: target.error }
+    }
+    const record = target.record
 
     // 确认门：覆盖用户文件必须先经 ask 语义，无回答者失败关闭。
     const summary = formatRewindSummary(record)
@@ -839,6 +893,7 @@ export {
   resolveRecordByPrefix,
   stepEndSeqOf,
   formatCheckpointList,
+  formatPreviewResult,
   formatRewindSummary,
   confirmRewind,
   makeEventGate,

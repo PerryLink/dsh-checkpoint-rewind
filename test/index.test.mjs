@@ -634,6 +634,65 @@ describe('/rewind clear', () => {
   })
 })
 
+describe('/rewind preview（只读影响面预览）', () => {
+  it('preview <id 前缀>：不经确认门、不写文件、不 fork', async () => {
+    const cwd = await makeWorkspace({ 'a.txt': 'A1' })
+    const snapshotDir = await makeSnapDir()
+    // 拒绝型确认通道：preview 若误入确认门会立刻失败关闭，成功即证明未走门。
+    const app = await mountPlugin({ cwd, userQuestions: rejectingQuestions(), config: { provider: 'copy', snapshotDir } })
+    openStep(app.session, 1, 1)
+    await dispatchWriteIntent(app.root, app.agent, 'bash')
+    await waitForRecords(app.records, 1)
+    // 尺寸变化：快检去重不依赖 mtime 精度，消除并行负载下的偶发误判。
+    await fs.writeFile(path.join(cwd, 'a.txt'), 'A2!!')
+    closeStep(app.session, 1, 1, true)
+    const record = (await recordsOf(app.records))[0][1]
+    const result = await command(app, `/rewind preview ${record.id.slice(0, 8)}`)
+    assert.equal(result?.result.kind, 'success')
+    assert.match(result?.result.text, /rewind preview: checkpoint #/)
+    assert.match(result?.result.text, /would overwrite 1 file\(s\):/)
+    assert.match(result?.result.text, /a\.txt/)
+    assert.equal(await fs.readFile(path.join(cwd, 'a.txt'), 'utf8'), 'A2!!', 'preview 不写文件')
+    assert.ok(!result?.result.text.includes('forked'), 'preview 不 fork')
+    await app.dispose()
+  })
+
+  it('preview step <N> / latest 共享寻址语法', async () => {
+    const cwd = await makeWorkspace({ 'a.txt': 'A1' })
+    const snapshotDir = await makeSnapDir()
+    const app = await mountPlugin({ cwd, userQuestions: approvingQuestions(), config: { provider: 'copy', snapshotDir } })
+    openStep(app.session, 1, 1)
+    await dispatchWriteIntent(app.root, app.agent, 'bash')
+    await waitForRecords(app.records, 1)
+    await fs.writeFile(path.join(cwd, 'a.txt'), 'A2')
+    closeStep(app.session, 1, 1, true)
+    const byStep = await command(app, '/rewind preview step 1')
+    assert.equal(byStep?.result.kind, 'success')
+    assert.match(byStep?.result.text, /rewind preview:/)
+    const byLatest = await command(app, '/rewind preview latest')
+    assert.equal(byLatest?.result.kind, 'success')
+    assert.match(byLatest?.result.text, /rewind preview:/)
+    await app.dispose()
+  })
+
+  it('preview 无目标/未知 id → 响亮错误', async () => {
+    const cwd = await makeWorkspace({ 'a.txt': 'A1' })
+    const snapshotDir = await makeSnapDir()
+    const app = await mountPlugin({ cwd, userQuestions: approvingQuestions(), config: { provider: 'copy', snapshotDir } })
+    openStep(app.session, 1, 1)
+    await dispatchWriteIntent(app.root, app.agent, 'bash')
+    await waitForRecords(app.records, 1)
+    closeStep(app.session, 1, 1, true)
+    const empty = await command(app, '/rewind preview')
+    assert.equal(empty?.result.kind, 'error')
+    assert.match(empty?.result.text, /preview <id-prefix/)
+    const unknown = await command(app, '/rewind preview deadbeef')
+    assert.equal(unknown?.result.kind, 'error')
+    assert.match(unknown?.result.text, /unknown checkpoint id/)
+    await app.dispose()
+  })
+})
+
 describe('pre-rewind 保护检查点', () => {
   it('warn 模式（默认）：guard 捕获失败只警告，回退继续', async () => {
     const cwd = await makeWorkspace({ 'a.txt': 'A1' })

@@ -61,8 +61,10 @@ async function mount(opts) {
   const agent = { id: session.id, session }
   // 假 agents 注册表：真 user-questions 校验调用方是 live runtime root。
   root.provide('agents', { get: (id) => (id === agent.id ? agent : undefined), roots: () => [agent] })
+  const state = { asks: 0 }
   root.userQuestions.registerProvider({
     ask: async (request) => {
+      state.asks += 1
       log('  [user-questions] asked:', request.questions[0].question)
       return { answers: request.questions.map((question) => ({ id: question.id, selected: ['Restore'] })) }
     },
@@ -88,7 +90,7 @@ async function mount(opts) {
   const dispose = async () => {
     for (const fiber of fibers.reverse()) await fiber.dispose()
   }
-  return { root, session, agent, dispose }
+  return { root, session, agent, dispose, asks: () => state.asks }
 }
 
 /** 模拟一个"agent 修改文件"的轮次：开放步骤 → 变更意图 → 写文件 → 关闭。 */
@@ -119,12 +121,14 @@ async function mainCopyFlow() {
   await fs.writeFile(fileA, 'A-v1\n')
   await fs.writeFile(fileB, 'B-v1\n')
 
-  const { root, session, agent, dispose } = await mount({ cwd: workspace, snapshotDir })
+  const { root, session, agent, dispose, asks } = await mount({ cwd: workspace, snapshotDir })
   log('copy flow: mounted; workspace', workspace)
 
   await agentMutates(root, agent, 1, 1, fileA, 'A-v2!\n') // turn 1: 改 a.txt（尺寸变化，去重不依赖 mtime）
   const forkSeq1 = session.events.at(-1).seq
   await agentMutates(root, agent, 2, 1, fileB, 'B-v2!\n') // turn 2: 改 b.txt
+  const fileC = path.join(workspace, 'c.txt')
+  await fs.writeFile(fileC, 'C-new\n') // 检查点之后新建的文件：preview 报告、restore 保留
 
   const list = await executeCommand(root, agent, '/rewind')
   assert.equal(list.kind, 'success')
@@ -134,13 +138,28 @@ async function mainCopyFlow() {
 
   const firstId = /#([0-9a-f]{8})/.exec(list.text)?.[1]
   assert.ok(firstId, 'list carries short checkpoint ids (usable as addressing prefix)')
+
+  // preview：只读影响面 —— 不经确认门、不写文件、不 fork。
+  assert.equal(asks(), 0, 'preview 之前没有任何确认请求')
+  const preview = await executeCommand(root, agent, `/rewind preview ${firstId}`)
+  assert.equal(preview.kind, 'success', preview.text)
+  assert.match(preview.text, /restoring it would overwrite 2 file\(s\)/)
+  assert.match(preview.text, /1 file\(s\) created after the checkpoint would be left in place/)
+  assert.match(preview.text, /run "\/rewind <id>" to confirm and apply/)
+  assert.equal(asks(), 0, 'preview 不经确认门')
+  assert.equal(await fs.readFile(fileA, 'utf8'), 'A-v2!\n', 'preview 不写文件')
+  assert.equal(await fs.readFile(fileC, 'utf8'), 'C-new\n', 'preview 不删文件')
+  log('  /rewind preview ok (no gate, no writes):', preview.text.split('\n')[0])
+
   const rewind = await executeCommand(root, agent, `/rewind ${firstId}`)
+  assert.equal(asks(), 1, '真正的 rewind 经确认门一次')
   assert.equal(rewind.kind, 'success', rewind.text)
   assert.match(rewind.text, /rewind guard: [0-9a-f-]{36}/, '结果携带可撤销本次回退的保护检查点')
   log('  /rewind result:', rewind.text)
 
   assert.equal(await fs.readFile(fileA, 'utf8'), 'A-v1\n', 'a.txt 恢复')
   assert.equal(await fs.readFile(fileB, 'utf8'), 'B-v1\n', 'b.txt 恢复')
+  assert.equal(await fs.readFile(fileC, 'utf8'), 'C-new\n', '检查点之后新建的 c.txt 保留')
 
   const childId = /session: (session-[\w-]+)/.exec(rewind.text)?.[1]
   assert.ok(childId, '结果携带新 sessionId')
@@ -187,6 +206,13 @@ async function gitFlowIfAvailable() {
   assert.match(list.text, /\(git\)/, 'auto 解析为 git provider 并在列表标注')
   const firstId = /#([0-9a-f]{8})/.exec(list.text)?.[1]
   assert.ok(firstId)
+
+  // preview：只读命令序列，不 spawn restore、不改 HEAD。
+  const preview = await executeCommand(root, agent, `/rewind preview ${firstId}`)
+  assert.equal(preview.kind, 'success', preview.text)
+  assert.match(preview.text, /restoring it would overwrite 1 file\(s\)/)
+  assert.equal(await fs.readFile(fileA, 'utf8'), 'A-v2\n', 'preview 不写文件')
+  log('  /rewind preview ok (git):', preview.text.split('\n')[0])
 
   await fs.writeFile(fileA, 'A-v3\n')
   const rewind = await executeCommand(root, agent, `/rewind ${firstId}`)

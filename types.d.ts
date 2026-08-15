@@ -90,17 +90,33 @@ declare module '@deepseek-ai/dsh-session-projection' {
 }
 
 export interface Config {
+  /** 总开关；false 时命令、监听器与 provider 全部卸载。 */
   enabled?: boolean
+  /** 快照 provider：auto（git 可用则 git，否则 copy）· git · copy。 */
   provider?: 'auto' | 'git' | 'copy'
+  /** git 可执行文件路径（仅 git provider 使用）。 */
   gitBin?: string
+  /** copy provider 快照根目录（默认 $DSH_HOME/dsh-checkpoint-rewind）。 */
   snapshotDir?: string
+  /** 每会话保留的检查点数（最旧优先清理，默认 50）。 */
   maxSnapshots?: number
+  /** 跨会话全局增量字节软配额（默认 512 MiB；每会话最新一条总是保留）。 */
   maxSnapshotBytes?: number
+  /** 轮次结束时执行配额清理（默认 true）。 */
   pruneOnTurnEnd?: boolean
+  /** tools/pre-execute 上视为变更型的工具名（fs 工具由 fs/*-intent 覆盖）。 */
   mutationTools?: string[]
+  /**
+   * copy provider 排除的 glob 模式：`*` 段内任意字符、`?` 单字符、`**` 跨段；
+   * 无 `/` 匹配任意深度段名，含 `/` 按相对路径匹配，命中目录排除整个子树。
+   */
   excludeGlobs?: string[]
+  /** 恢复确认通道：auto（userQuestions 优先）· userQuestions · approval。 */
   confirmVia?: 'auto' | 'userQuestions' | 'approval'
+  /** 无参 /rewind 列出的检查点数（默认 10）。 */
   listLimit?: number
+  /** 恢复前保护检查点：warn · require · off（默认 warn）。 */
   preRewindCheckpoint?: 'warn' | 'require' | 'off'
+  /** copy provider 内容哈希校验（去重 + 恢复完整性，默认 false）。 */
   verifyByHash?: boolean
 }
