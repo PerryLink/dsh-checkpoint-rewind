@@ -7,10 +7,13 @@
 一个能力接缝插件，为 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 补上 **工作区文件快照 + 会话边界回退**：每次变更型工具执行前捕获工作区状态（git 优先、目录拷贝兜底），一条 `/rewind` 命令即可恢复文件**并**把会话 fork 回该检查点的轮次边界——模型上下文与磁盘文件永远一致。
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![npm version](https://img.shields.io/npm/v/dsh-checkpoint-rewind)](https://www.npmjs.com/package/dsh-checkpoint-rewind)
+[![npm downloads](https://img.shields.io/npm/dm/dsh-checkpoint-rewind)](https://www.npmjs.com/package/dsh-checkpoint-rewind)
+[![CI](https://github.com/PerryLink/dsh-checkpoint-rewind/actions/workflows/ci.yml/badge.svg)](https://github.com/PerryLink/dsh-checkpoint-rewind/actions/workflows/ci.yml)
 [![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-green.svg)](#)
 [![Harness](https://img.shields.io/badge/dsh-0.1.0--rc.6-8a2be2.svg)](#)
 
-> **Topics**: `dsh` · `dsh-plugin` · `deepseek-harness` · `rewind` · `checkpoint` · `session-fork` · `workspace-safety` · `undo` · `cordis-plugin`
+> **Topics**: `dsh` · `dsh-plugin` · `deepseek-harness` · `rewind` · `checkpoint` · `snapshot` · `session-fork` · `workspace-safety` · `undo` · `cordis-plugin`
 
 **TL;DR**
 
@@ -293,6 +296,14 @@ npm run test:integration # 组装式 headless 验证：agent 跨两轮改 2 个�
 | Git 仓库 | 仅白名单无副作用原语（`stash create`、`commit-tree`、显式路径 `restore --worktree`……）——绝不 `reset --hard`/`clean` |
 | 会话日志 | 读取轮次/步骤边界；宿主收录类型或支持 `ignorable` 信封时追加 log-only 的 `checkpoint/*` 事件 |
 | 网络 / 凭据 | 无——完全本地 |
+
+## 贡献者
+
+感谢所有为本插件做出贡献的人：
+
+- [PerryLink](https://github.com/PerryLink) —— 项目作者与维护者：插件架构、git/copy provider、三段式回退事务、五语文档、CI/CD 与 0.1.0 → 0.4.0 各版本发布。
+
+还没有社区贡献者——你的第一个 PR 就有机会列在这里！入门见 [PR 模板](.github/PULL_REQUEST_TEMPLATE.md) 与 issue 模板。
 
 ## 许可证
 

@@ -7,10 +7,13 @@
 एक capability-seam प्लगइन जो [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) में **वर्कस्पेस फ़ाइल स्नैपशॉट + सत्र-सीमा रोलबैक** जोड़ता है: हर mutating टूल के निष्पादन से पहले प्लगइन वर्कस्पेस कैप्चर करता है (git पहले, कॉपी फ़ॉलबैक), और एक `/rewind` कमांड फ़ाइलों को पुनर्स्थापित करता है **और** सत्र को चेकपॉइंट की टर्न-सीमा तक fork करता है — ताकि मॉडल का संदर्भ और डिस्क की फ़ाइलें हमेशा एक जैसी रहें।
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![npm version](https://img.shields.io/npm/v/dsh-checkpoint-rewind)](https://www.npmjs.com/package/dsh-checkpoint-rewind)
+[![npm downloads](https://img.shields.io/npm/dm/dsh-checkpoint-rewind)](https://www.npmjs.com/package/dsh-checkpoint-rewind)
+[![CI](https://github.com/PerryLink/dsh-checkpoint-rewind/actions/workflows/ci.yml/badge.svg)](https://github.com/PerryLink/dsh-checkpoint-rewind/actions/workflows/ci.yml)
 [![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-green.svg)](#)
 [![Harness](https://img.shields.io/badge/dsh-0.1.0--rc.6-8a2be2.svg)](#)
 
-> **Topics**: `dsh` · `dsh-plugin` · `deepseek-harness` · `rewind` · `checkpoint` · `session-fork` · `workspace-safety` · `undo` · `cordis-plugin`
+> **Topics**: `dsh` · `dsh-plugin` · `deepseek-harness` · `rewind` · `checkpoint` · `snapshot` · `session-fork` · `workspace-safety` · `undo` · `cordis-plugin`
 
 **TL;DR**
 
@@ -294,6 +297,14 @@ npm run test:integration # असेंबल्ड headless सत्याप�
 | git रिपॉज़िटरी | केवल व्हाइटलिस्ट साइड-इफ़ेक्ट-रहित प्रिमिटिव (`stash create`, `commit-tree`, स्पष्ट पथ के साथ `restore --worktree`, …) — कभी `reset --hard`/`clean` नहीं |
 | सत्र लॉग | सीमाओं के लिए पढ़ना; होस्ट के इन्हें जानने या `ignorable` एन्वेलप का समर्थन करने पर log-only `checkpoint/*` इवेंट जोड़ता है |
 | नेटवर्क / क्रेडेंशियल | कोई नहीं — पूर्णतः स्थानीय |
+
+## योगदानकर्ता
+
+इस प्लगइन को बनाने में मदद करने वाले सभी लोगों का धन्यवाद:
+
+- [PerryLink](https://github.com/PerryLink) — परियोजना के लेखक और अनुरक्षक: प्लगइन आर्किटेक्चर, git/copy providers, तीन-चरणीय rewind ट्रांज़ैक्शन, पाँच-भाषा दस्तावेज़, CI/CD और 0.1.0 → 0.4.0 रिलीज़।
+
+अभी तक कोई सामुदायिक योगदानकर्ता नहीं है — आपका पहला PR यहाँ सूचीबद्ध हो सकता है! शुरुआत के लिए [PR टेम्पलेट](.github/PULL_REQUEST_TEMPLATE.md) और issue टेम्पलेट देखें।
 
 ## लाइसेंस
 

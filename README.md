@@ -7,10 +7,13 @@
 A capability-seam plugin that adds **workspace file snapshots + session-boundary rollback** to [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): before every mutating tool execution the plugin captures your workspace (git-first, copy fallback), and one `/rewind` command restores the files **and** forks the session back to the checkpoint's turn boundary — so the model context and the files on disk always agree.
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![npm version](https://img.shields.io/npm/v/dsh-checkpoint-rewind)](https://www.npmjs.com/package/dsh-checkpoint-rewind)
+[![npm downloads](https://img.shields.io/npm/dm/dsh-checkpoint-rewind)](https://www.npmjs.com/package/dsh-checkpoint-rewind)
+[![CI](https://github.com/PerryLink/dsh-checkpoint-rewind/actions/workflows/ci.yml/badge.svg)](https://github.com/PerryLink/dsh-checkpoint-rewind/actions/workflows/ci.yml)
 [![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-green.svg)](#)
 [![Harness](https://img.shields.io/badge/dsh-0.1.0--rc.6-8a2be2.svg)](#)
 
-> **Topics**: `dsh` · `dsh-plugin` · `deepseek-harness` · `rewind` · `checkpoint` · `session-fork` · `workspace-safety` · `undo` · `cordis-plugin`
+> **Topics**: `dsh` · `dsh-plugin` · `deepseek-harness` · `rewind` · `checkpoint` · `snapshot` · `session-fork` · `workspace-safety` · `undo` · `cordis-plugin`
 
 **TL;DR**
 
@@ -295,6 +298,14 @@ npm run test:integration # assembled-headless verification: agent modifies 2 fil
 | Git repository | only whitelisted side-effect-free primitives (`stash create`, `commit-tree`, `restore --worktree` with explicit paths, …) — never `reset --hard`/`clean` |
 | Session log | read for boundaries; appends log-only `checkpoint/*` events when the host knows them or supports the `ignorable` envelope |
 | Network / credentials | none — fully local |
+
+## Contributors
+
+Thanks to everyone who has helped build this plugin:
+
+- [PerryLink](https://github.com/PerryLink) — project author and maintainer: plugin architecture, git/copy providers, the three-phase rewind transaction, five-language docs, CI/CD, and the 0.1.0 → 0.4.0 releases.
+
+No community contributors yet — your first PR could be listed here! See the [pull request template](.github/PULL_REQUEST_TEMPLATE.md) and the issue templates to get started.
 
 ## License
 

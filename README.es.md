@@ -7,10 +7,13 @@
 Un plugin de capability-seam que añade **instantáneas de archivos del workspace + retroceso por límite de sesión** a [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness): antes de cada herramienta que muta, el plugin captura el workspace (git primero, copia como respaldo) y un único comando `/rewind` restaura los archivos **y** bifurca (fork) la sesión hasta el límite de turno del checkpoint — así el contexto del modelo y los archivos en disco siempre coinciden.
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![npm version](https://img.shields.io/npm/v/dsh-checkpoint-rewind)](https://www.npmjs.com/package/dsh-checkpoint-rewind)
+[![npm downloads](https://img.shields.io/npm/dm/dsh-checkpoint-rewind)](https://www.npmjs.com/package/dsh-checkpoint-rewind)
+[![CI](https://github.com/PerryLink/dsh-checkpoint-rewind/actions/workflows/ci.yml/badge.svg)](https://github.com/PerryLink/dsh-checkpoint-rewind/actions/workflows/ci.yml)
 [![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-green.svg)](#)
 [![Harness](https://img.shields.io/badge/dsh-0.1.0--rc.6-8a2be2.svg)](#)
 
-> **Topics**: `dsh` · `dsh-plugin` · `deepseek-harness` · `rewind` · `checkpoint` · `session-fork` · `workspace-safety` · `undo` · `cordis-plugin`
+> **Topics**: `dsh` · `dsh-plugin` · `deepseek-harness` · `rewind` · `checkpoint` · `snapshot` · `session-fork` · `workspace-safety` · `undo` · `cordis-plugin`
 
 **TL;DR**
 
@@ -296,6 +299,14 @@ npm run test:integration # verificación headless ensamblada: el agente modifica
 | Repositorio git | solo primitivas whitelisted sin efectos secundarios (`stash create`, `commit-tree`, `restore --worktree` con rutas explícitas, …) — jamás `reset --hard`/`clean` |
 | Log de sesión | lectura de límites; añade eventos log-only `checkpoint/*` cuando el host los conoce o soporta el sobre `ignorable` |
 | Red / credenciales | ninguna — totalmente local |
+
+## Contribuidores
+
+Gracias a todos los que han ayudado a construir este plugin:
+
+- [PerryLink](https://github.com/PerryLink) — autor y mantenedor del proyecto: arquitectura del plugin, providers git/copy, la transacción de rewind en tres fases, documentación en cinco idiomas, CI/CD y los releases 0.1.0 → 0.4.0.
+
+Aún no hay contribuidores de la comunidad — ¡tu primer PR podría aparecer aquí! Consulta la [plantilla de PR](.github/PULL_REQUEST_TEMPLATE.md) y las plantillas de issues para empezar.
 
 ## Licencia
 
