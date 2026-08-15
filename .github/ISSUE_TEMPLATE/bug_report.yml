@@ -1,0 +1,75 @@
+name: Bug report
+description: Report a bug in dsh-checkpoint-rewind
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please fill out the form below.
+        The more precise the reproduction, the faster it can be fixed.
+  - type: input
+    id: package-version
+    attributes:
+      label: Package version
+      description: The installed version of dsh-checkpoint-rewind (`npm ls dsh-checkpoint-rewind` or the version shown in `/rewind` output).
+      placeholder: "0.4.0"
+    validations:
+      required: true
+  - type: input
+    id: harness-version
+    attributes:
+      label: DeepSeek Harness version
+      description: The running DSH version (`dsh --version`).
+      placeholder: "0.1.0-rc.6"
+    validations:
+      required: true
+  - type: input
+    id: os-node
+    attributes:
+      label: OS and Node version
+      description: Operating system and Node.js version (`node --version`).
+      placeholder: "Windows 11 x64, Node v22.19.0"
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: The exact steps that trigger the bug, starting from a clean state.
+      placeholder: |
+        1. Configure provider/confirmVia/...
+        2. Run a mutating tool / run /rewind ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What actually happened, including the exact error text if any.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs (optional)
+      description: Relevant log output (dsh console, /rewind command output, CI logs).
+      render: shell
+    validations:
+      required: false
+  - type: checkboxes
+    id: redaction
+    attributes:
+      label: Log redaction
+      description: Before submitting this issue, confirm the following.
+      options:
+        - label: "**WARNING — redact before pasting**: logs above contain no tokens, API keys, credentials, authorization headers, or other secrets. Redact any sensitive value (replace with `<redacted>`) before submitting."
+          required: true

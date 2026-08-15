@@ -1,0 +1,41 @@
+name: Feature request
+description: Suggest an improvement for dsh-checkpoint-rewind
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting an improvement. Feature requests are triaged against the plugin's
+        design boundaries (git-safe primitives only, fail-closed confirmation, local-first) — the
+        closer a proposal stays inside them, the more likely it is to ship.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: Describe the problem or pain point this feature would solve. What can't you do today?
+      placeholder: "Today there is no way to ..."
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: Describe what the feature should do, ideally with a concrete usage example.
+      placeholder: "Given a checkpoint, I would like to ..."
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered (optional)
+      description: Workarounds you use today, or alternative designs you have already considered.
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context (optional)
+      description: Anything else — links, screenshots, related discussions.
+    validations:
+      required: false
