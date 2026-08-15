@@ -523,7 +523,7 @@ describe('/rewind 寻址', () => {
 
   it('歧义前缀 → 错误列出候选 id', async () => {
     const app = await mountPlugin({})
-    const base = { sessionId: 'session-under-test', cwd: 'C:/work/proj', seq: 0, time: 1, provider: 'copy', triggerTool: 'bash', turn: 1, step: 1, files: 1, bytes: 1, ref: 'x' }
+    const base = { sessionId: 'session-under-test', cwd: path.resolve('/work', 'proj'), seq: 0, time: 1, provider: 'copy', triggerTool: 'bash', turn: 1, step: 1, files: 1, bytes: 1, ref: 'x' }
     app.records.set('aaaaaaaa-0000-0000-0000-000000000001', { ...base, id: 'aaaaaaaa-0000-0000-0000-000000000001' })
     app.records.set('aaaaaaaa-0000-0000-0000-000000000002', { ...base, id: 'aaaaaaaa-0000-0000-0000-000000000002' })
     const result = await command(app, '/rewind aaaaaaaa')

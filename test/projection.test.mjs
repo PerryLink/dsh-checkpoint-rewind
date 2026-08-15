@@ -6,6 +6,7 @@
 
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import path from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
@@ -105,9 +106,9 @@ describe('checkpoints 投影单元（真注册表接线）', () => {
     await mount(SessionProjectionRegistry)
     await import('@deepseek-ai/dsh-commands').then(async ({ default: CommandRuntime }) => mount(CommandRuntime))
     const plugin = await import('../index.mjs')
-    await mount({ name: plugin.name, inject: plugin.inject, apply: (ctx) => plugin.apply(ctx, { provider: 'copy', snapshotDir: 'C:/tmp/unused' }) })
+    await mount({ name: plugin.name, inject: plugin.inject, apply: (ctx) => plugin.apply(ctx, { provider: 'copy', snapshotDir: path.resolve('/tmp', 'unused') }) })
 
-    const session = root.sessions.create(SessionId('proj-session'), { meta: { cwd: 'C:/work' } })
+    const session = root.sessions.create(SessionId('proj-session'), { meta: { cwd: path.resolve('/work') } })
     // 合成事件直接 append（绕过自适应门：投影只消费、不生产）。
     session.append('checkpoint/snapshot', record({ id: 'cp-1' }))
     session.append('checkpoint/bound', { id: 'cp-1', turn: 1, step: 1, stepEndSeq: 12 })

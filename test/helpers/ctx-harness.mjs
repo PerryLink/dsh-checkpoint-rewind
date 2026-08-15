@@ -10,6 +10,7 @@
 import { Context } from '@deepseek-ai/cordis'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
 import CommandRuntime from '@deepseek-ai/dsh-commands'
+import path from 'node:path'
 import { checkpointsDomainSpec } from '../../lib/domain.mjs'
 
 /**
@@ -76,7 +77,9 @@ export async function mountPlugin(opts = {}) {
     apply: (ctx) => plugin.apply(ctx, opts.config ?? {}),
   }))
 
-  const cwd = opts.cwd ?? 'C:/work/proj'
+  // 合成绝对路径（跨平台）：session 头校验要求绝对路径，Windows 风格 'C:/…'
+  // 在 Linux 上只是相对路径。目录无需真实存在——快照 walk 读不到即得空快照。
+  const cwd = opts.cwd ?? path.resolve('/work', 'proj')
   const session = root.sessions.create(SessionId(opts.sessionId ?? 'session-under-test'), { meta: { cwd } })
   const agent = { id: session.id, session }
   return {
