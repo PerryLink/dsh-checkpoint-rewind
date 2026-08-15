@@ -12,10 +12,12 @@ types.d.ts           类型契约：checkpoint/* SessionEventMap 声明合并 + 
 lib/constants.mjs    词汇表与协议常量（provider/事件名/错误码/默认值，零依赖）
 lib/errors.mjs       结构化领域错误（code + details，零依赖）
 lib/workspace.mjs    工作区键规范化 + 快照目录解析（零依赖）
-lib/checkpoints.mjs  检查点纯函数：≤N 映射、清理计划、列表渲染（零依赖）
+lib/checkpoints.mjs  检查点纯函数：≤N 映射、清理计划、列表/预览渲染（零依赖）
+lib/glob.mjs         轻量 glob → 相对路径匹配器（copy provider 排除项用，零依赖）
 lib/gate.mjs         回退确认门 + 会话事件自适应门（零依赖）
 lib/lock.mjs         按键串行化互斥（零依赖）
 lib/domain.mjs       'checkpoints' 存储领域 spec（唯一允许 zod/DSH 包的 lib 模块）
+lib/projection.mjs   会话投影单元 checkpoints（持久边界校验器，允许 zod）
 lib/providers/       provider seam：definition（契约）/ registry / git / copy
 cordis.patch.yml     bundle 声明（insert checkpoint-rewind）
 package.json         npm 元数据；files 白名单 = 发布内容
@@ -24,6 +26,7 @@ README.{zh,es,pt,hi}.md   中/西/葡/印地语介绍（顶部互链，与英文
 ARCHITECTURE.md      三角色 seam 架构图与全部设计决策
 CHANGELOG.md / SECURITY.md   变更记录 + 安全政策（含安全面矩阵）
 .github/workflows/ci.yml     单元测试 + 组装式集成验证（Windows/Linux × Node 22/24）
+.github/workflows/publish.yml   tag v* → 测试 + npm publish（NPM_TOKEN secret）
 LICENSE / THIRD_PARTY_NOTICES.md   Apache-2.0 + 复用出处标注
 test/                单测 + test/integration/ 组装式集成验证（进 GitHub，不进 npm 包）
 dev/                 ❌ 本地工程面：冒烟脚本、夹具、演示——永不提交

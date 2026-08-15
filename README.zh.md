@@ -17,8 +17,9 @@
 - 📸 **每次变更前快照** —— 所有写入路径（`write`、`edit`、`str_replace_editor`、`bash`、`pwsh`、`terminal_send`……）经 `fs/*-intent` + `tools/pre-execute` 直通监听先行捕获，静默无感。
 - 🧵 **git 优先、零历史风险** —— 快照是未引用的 git 对象（`stash create` / `commit-tree`）；恢复仅动工作树且只按显式路径，检查点之后新建的文件**绝不删除**。非 git 目录自动降级为增量目录快照。
 - ⏪ **一条命令回退** —— `/rewind` 列出检查点；`/rewind <id 前缀>` / `step <N>` / `latest` 经确认后先恢复文件，再在检查点轮次边界 fork 会话并返回新会话 id。
+- 🔍 **动手前先预览** —— `/rewind preview <target>` 打印精确影响（将被覆盖的文件、检查点后新建将保留的文件），不动任何东西——无确认提示、无写入、无 fork。
 - 🛡️ **回退本身可撤销** —— 恢复前先捕获当前状态的保护检查点，`/rewind <guard-id>` 即可撤销这次回退。
-- 🔒 **设计即失败关闭** —— 恢复必须经人工确认，无回答者即不恢复。绝不 `git reset --hard`、绝不 `git clean`、绝不编辑对话消息。
+- 🔒 **设计即失败关闭** —— 恢复必须经人工确认，无回答者即不恢复。绝不 `git reset --hard`、绝不 `git clean`、绝不编辑对话消息，绝不写入符号链接指向的位置。
 
 ---
 
@@ -39,6 +40,7 @@
 - **Provider seam** —— `git` 优先：`git stash create` / `git commit-tree` 产生未引用的快照对象，**绝不触碰工作树、索引与历史**；恢复只用 worktree-only 且**显式路径**的 `git restore`（`git restore … -- .` 会删除检查点之后 `git add` 的新文件，provider 绝不发出该形式）。无初始提交（unborn HEAD）的仓库被探测并自动降级 `copy`；可用性探测按工作区缓存。非 git 目录用 `copy`（增量目录快照 + hardlink 复用），并在列表中明确标注。
 - **步骤级映射、轮次级 fork** —— 每个检查点记录其 turn/step；`step/end` 补记步骤映射（"回到第 N 步" = 最近的 ≤N 快照，经 `/rewind step <N>` 可达），`turn/end` 补记 fork 边界，使用 harness 真正的 `ctx.sessions.fork` 原语。
 - **三段式回退事务** —— `/rewind <id>` 先经确认（userQuestions / approval seam，**无回答者失败关闭**），捕获当前状态的**保护检查点**（配置 `preRewindCheckpoint`），再恢复文件、最后 fork；恢复失败绝不 fork，fork 失败报告"文件已恢复、会话未派生"——而保护检查点让整个回退可撤销。
+- **只读影响预览** —— `/rewind preview <target>`（同一寻址：id 前缀、`step <N>`、`latest`）精确显示一次恢复会覆盖哪些文件、哪些检查点之后新建的文件会保留，不经确认门、不写文件、不 fork——先知情再审批，而非盲跳。
 - **持久注册表 + 配额** —— 检查点记录存 `ctx.storageDomain`（域 `checkpoints`；SQLite 后端 = 表行，JSON 后端 = 可读文件）；`maxSnapshots`（每会话，默认 50）与 `maxSnapshotBytes`（全局**增量字节**软配额，默认 512 MiB；每会话最新一条总是保留，大工作区不会被自我清理）、`pruneOnTurnEnd`，最旧优先。
 - **copy 完整性选项** —— `verifyByHash` 让 copy provider 用内容哈希替代 size+mtime 快检（`touch -r` / `rsync -t` 精确还原 mtime 也无法掩盖同尺寸内容变更）并校验恢复内容；文件 mode 尽力恢复。
 - **天然可重建** —— `/rewind` 输出走 harness 自有的 `command/run` + `command/done` 事件；`checkpoint/snapshot|bound|prune|rewind` 会话事件在宿主收录类型**或**支持 `ignorable` 信封时自动追加（运行时探测；rc.6 自适应门保持关闭且安全）。
@@ -95,7 +97,21 @@ run "/rewind <id>" to restore files and fork the session from that checkpoint
 /rewind b2c3d4e5
 /rewind step 2
 /rewind latest
+/rewind preview b2c3d4e5   # 只读：显示哪些文件会变，不触碰任何东西
 /rewind clear        # 经确认删除本会话全部检查点（文件不动）
+```
+
+`preview` 走同一套寻址（`<id 前缀>`、`step <N>`、`latest`），无需确认、不写任何东西即可打印影响：
+
+```text
+rewind preview: 检查点 #b2c3d4e5-… (provider git, turn 2 step 3)
+恢复它会覆盖 2 个文件：
+  src/app.ts
+  src/util.ts
+3 个文件已与检查点一致（不触碰）。
+不删除任何文件：检查点之后新建的 1 个文件将保留：
+  src/new.ts
+运行 "/rewind <id>" 确认并应用（先捕获一个保护检查点）
 ```
 
 插件询问 **"Restore the workspace files to this checkpoint and fork the session?"** → 批准后先捕获保护检查点、恢复文件、在该检查点的轮次边界 fork 会话，并返回新会话 id：
@@ -112,26 +128,29 @@ headless 运行打印同样的结果并附带续接指引；Web shell 可用返�
 
 ## 演示
 
-一次真实的组装式 headless 运行（`npm run test:integration`）：agent 在第 1 轮改 `a.txt`、第 2 轮改 `b.txt`，随后一条 `/rewind` 恢复两个文件并 fork 会话（下方为逐字转录；注意增量记账：第二个检查点只计变更文件）。
+一次真实的组装式 headless 运行（`npm run test:integration`）：agent 在第 1 轮改 `a.txt`、第 2 轮改 `b.txt`，随后新建 `c.txt`，一条 `/rewind preview` 只读查看影响面，再一条 `/rewind` 恢复两个文件并 fork 会话（下方为逐字转录；注意增量记账：第二个检查点只计变更文件——preview 行不触发确认、不写任何东西）。
 
 ```console
-[rewind-integration] copy flow: mounted; workspace C:\Users\me\Temp\dsh-rewind-int-ws-SqBCJ6
+[rewind-integration] copy flow: mounted; workspace C:\Users\me\Temp\dsh-rewind-int-ws-NTk6jw
 [rewind-integration]   /rewind list:
     rewind: 2 checkpoints (newest last):
-    #3251015b · (copy) · turn 1 step 1 · 2026/8/14 16:59:50 (just now) · trigger: fs/write-intent · 2 files · 10 B · fork: ready
-    #6c4c05d7 · (copy) · turn 2 step 1 · 2026/8/14 16:59:50 (just now) · trigger: fs/write-intent · 2 files · 5 B · fork: ready
+    #9ab2d753 · (copy) · turn 1 step 1 · 2026/8/15 12:57:05 (just now) · trigger: fs/write-intent · 2 files · 10 B · fork: ready
+    #7ec0e96f · (copy) · turn 2 step 1 · 2026/8/15 12:57:05 (just now) · trigger: fs/write-intent · 2 files · 6 B · fork: ready
     run "/rewind <id>" to restore files and fork the session from that checkpoint
+[rewind-integration]   /rewind preview ok (no gate, no writes): rewind preview: checkpoint #9ab2d753-… (provider copy, turn 1 step 1)
 [rewind-integration]   [user-questions] asked: Restore the workspace files to this checkpoint and fork the session?
-[rewind-integration]   /rewind result: rewind: restored 2 file(s) from checkpoint 3251015b-… (provider copy)
+[rewind-integration]   /rewind result: rewind: restored 2 file(s) from checkpoint 9ab2d753-… (provider copy)
 and forked a new session at seq 3 (end of turn 1).
 session: session-1
 Open the new session to continue from before that turn; this session keeps its later history.
-rewind guard: 69fe5923-… (run "/rewind 69fe5923" to undo this rewind)
+1 file(s) created after the checkpoint were left in place (overwrite rollback never deletes files)
+rewind guard: f18027ea-… (run "/rewind f18027ea" to undo this rewind)
 [rewind-integration]   fork ok: child session-1 seedLength 4 parent integration-session
 [rewind-integration] copy flow: PASS
-[rewind-integration] git flow: mounted; workspace C:\Users\me\Temp\dsh-rewind-int-git-YxoLl6
+[rewind-integration] git flow: mounted; workspace C:\Users\me\Temp\dsh-rewind-int-git-CXd4BQ
+[rewind-integration]   /rewind preview ok (git): rewind preview: checkpoint #fd1dc3ad-… (provider git, turn 1 step 1)
 [rewind-integration]   [user-questions] asked: Restore the workspace files to this checkpoint and fork the session?
-[rewind-integration]   git restore ok; HEAD intact: 5b618e51
+[rewind-integration]   git restore ok; HEAD intact: 19484e99
 [rewind-integration] git flow: PASS
 [rewind-integration] integration: ALL PASS
 ```
@@ -150,7 +169,7 @@ rewind guard: 69fe5923-… (run "/rewind 69fe5923" to undo this rewind)
 | `maxSnapshotBytes` | `536870912`（512 MiB） | 跨会话全局**增量字节**软配额（最旧优先清理；每会话最新一条总是保留）。 |
 | `pruneOnTurnEnd` | `true` | 轮次结束时执行配额清理。 |
 | `mutationTools` | `['bash','write','edit','str_replace_editor','pwsh','terminal_send']` | `tools/pre-execute` 上视为变更型的工具名（fs 工具已由 `fs/*-intent` 覆盖）。 |
-| `excludeGlobs` | `['node_modules','.git','.dsh','dist','build']` | copy provider 跳过的目录/文件（`.git` 与快照目录恒被排除）。 |
+| `excludeGlobs` | `['node_modules','.git','.dsh','dist','build']` | copy provider 跳过的 glob 模式：`*` 匹配段内任意字符、`?` 匹配单字符、`**` 跨任意段；无 `/` 的模式匹配任意深度的段名，含 `/` 的模式按相对路径匹配，命中目录则整个子树排除（`.git` 与快照目录恒被排除）。 |
 | `confirmVia` | `auto` | 确认通道：`auto`（优先 userQuestions，其次 approval）· `userQuestions` · `approval`。注意：`approval` 要求开放轮次而命令运行于轮次之间，rc.6 上会失败关闭并给出可操作提示——请挂载 userQuestions。 |
 | `listLimit` | `10` | `/rewind` 无参列出的检查点数。 |
 | `preRewindCheckpoint` | `warn` | 恢复前的保护检查点：`warn`（捕获失败仅警告继续）· `require`（中止回退）· `off`。 |
@@ -171,9 +190,10 @@ rewind guard: 69fe5923-… (run "/rewind 69fe5923" to undo this rewind)
 
 ## 安全模型
 
-- **git 历史不可触碰。** git provider 只运行白名单内的无副作用原语——`stash create`、`commit-tree`、`restore --worktree`、`ls-tree`、`diff-tree`、`ls-files`、`status`、`rev-parse`——由运行时断言强制。**绝不 `reset --hard`、绝不 `clean`、绝不改写索引或历史。**
+- **git 历史不可触碰。** git provider 只运行白名单内的无副作用原语——`stash create`、`commit-tree`、`restore --worktree`、`ls-tree`、`diff-tree`、`ls-files`、`status`、`rev-parse`——由运行时断言强制，且对象引用在传给 git 前会校验为十六进制 id（被篡改的记录无法注入 git 选项）。**绝不 `reset --hard`、绝不 `clean`、绝不改写索引或历史。**
 - **覆盖式回滚，绝不删除。** 恢复只覆盖捕获的文件，且 git provider 按**显式路径**恢复（`git restore … -- .` 会删除检查点之后 `git add` 的新文件）。快照之后新建的文件（未跟踪**或**已暂存）只*报告*而绝不删除。
-- **恢复必须先确认。** 覆盖用户文件必经确认 seam（ask 语义）；回答者缺失、抛错或拒绝一律**失败关闭**。
+- **绝不写入链接指向的位置，绝不路径穿越。** copy provider 在把引用拼入快照目录路径前校验其格式，恢复时拒绝经已变为符号链接的目标（或其祖先目录）写入，也拒绝读取已变为符号链接的快照存储文件——恢复绝不跟随链接进出工作区。快照引用与 git 对象 id 在持久边界做格式校验。
+- **恢复必须先确认。** 覆盖用户文件必经确认 seam（ask 语义）；回答者缺失、抛错或拒绝一律**失败关闭**。`/rewind preview` 是先以只读方式查看影响面的途径。
 - **回退可撤销。** 恢复前先捕获当前状态的保护检查点，恢复该保护检查点即撤销回退。`preRewindCheckpoint: require` 在保护检查点无法捕获时中止回退。
 - **三段式事务，顺序固定。** 先保护检查点、再文件、后 fork，每阶段落日志；恢复失败时文件、检查点与会话原样保留。
 - **模型可见 ⟺ 已落盘。** 用户/模型看到的一切均可从会话日志（`command/run` + `command/done`，宿主收录后还有 `checkpoint/*` 事件）加持久 `checkpoints` 域重建。
@@ -198,7 +218,8 @@ flowchart LR
     H --> E
     J --> E
   end
-  K["/rewind &lt;id&gt; · step &lt;N&gt; · latest · clear"] --> L{"确认（userQuestions / approval）<br/>失败关闭"}
+  K["/rewind &lt;id&gt; · step &lt;N&gt; · latest · preview · clear"] --> L{"确认（userQuestions / approval）<br/>失败关闭"}
+  L -->|preview| KP["只读影响清单<br/>（无写入、无 fork）"]
   L -->|allow| M["阶段 0.5：保护检查点（回退前状态）"]
   M --> N["阶段 1：provider.restore(ref)"]
   N -->|ok| O["阶段 2：ctx.sessions.fork(session, forkSeq)"]
@@ -231,18 +252,22 @@ flowchart LR
 
 **如何寻址检查点？** 唯一 id 前缀（列表中的 8 位短 id 即可）、`/rewind step <N>`、`/rewind latest`，或 `/rewind clear` 删除本会话全部检查点（文件不动）。
 
+**`preview` 做什么——又不做什么？** 它解析检查点后做只读比较：哪些文件将被覆盖（或重建）、哪些已一致、哪些检查点之后新建的文件将保留。它绝不提示、绝不写入、绝不 fork，也不记录 `checkpoint/rewind` 事件——确认门只在真正的 `/rewind <id>` 上运行。
+
 ## 测试
 
 ```sh
 npm install
-npm test                 # 131 个单测（test/**/*.test.mjs，含 provider 套件）：快照创建/去重/并发、
+npm test                 # 160 个单测（test/**/*.test.mjs，含 provider 套件）：快照创建/去重/并发、
                          # git 与非 git 路径、unborn HEAD 降级、增量字节配额 + 最新保留下限、已暂存
                          # 新文件恢复安全、≤N 边界映射、三段式恢复失败矩阵、approval 拒绝、寻址
-                         # （前缀/step/latest/clear）、保护检查点三种模式、自适应事件门 + ignorable
-                         # 探测、哈希校验、checkpoints 投影单元（真 Cordis + 真 SessionStore/
-                         # CommandRuntime/SessionProjectionRegistry）
-npm run test:integration # 组装式 headless 验证：agent 跨两轮改 2 个文件 → /rewind 列表 → 回退 →
-                         # 断言文件内容、fork 上下文与保护检查点
+                         # （前缀/step/latest/preview/clear）、保护检查点三种模式、自适应事件门 +
+                         # ignorable 探测、哈希校验、glob 排除语义、符号链接/引用路径安全加固、
+                         # checkpoints 投影单元（真 Cordis + 真 SessionStore/CommandRuntime/
+                         # SessionProjectionRegistry）
+npm run test:integration # 组装式 headless 验证：agent 跨两轮改 2 个文件 → /rewind 列表 → preview
+                         # （不经确认门、不写文件）→ 回退 → 断言文件内容、fork 上下文、保护检查点
+                         # 与检查点后新建文件保留
 ```
 
 ## 故障排查

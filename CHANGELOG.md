@@ -4,7 +4,55 @@ All notable changes to dsh-checkpoint-rewind are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project versions with [SemVer](https://semver.org/).
 
-## [0.3.0] — unreleased
+## [0.4.0] — 2026-08-15
+
+### Added
+
+- **`/rewind preview <target>`**: a read-only impact preview that lists the
+  files a restore would overwrite and the files created after the checkpoint
+  that would be left in place — no confirmation gate, no writes, no fork.
+  The provider contract gains an optional `preview(workspace, ref)` method
+  (git reuses the restore counting commands without executing `restore`;
+  copy compares the manifest against the workspace, hashing content when
+  `verifyByHash` is on). Addressing is shared with `/rewind`
+  (`<id-prefix>`, `step <N>`, `latest`).
+- **Glob semantics for `excludeGlobs`**: the copy provider now matches real
+  glob patterns (`*` within a segment, `?` single char, `**` across
+  segments) instead of exact segment names. Patterns without `/` still
+  match a segment name at any depth (defaults unchanged); patterns with `/`
+  match relative paths; a directory matching a pattern excludes its whole
+  subtree (gitignore semantics). Implemented by the new dependency-free
+  `lib/glob.mjs`.
+- npm publish workflow (`.github/workflows/publish.yml`): pushes of `v*`
+  tags run the test suite and `npm publish` with an `NPM_TOKEN` secret.
+- `exports` now carries a `types` condition for Node16 module resolution.
+
+### Fixed
+
+- **copy provider ref traversal**: checkpoint `ref`s from the (human-
+  editable) JSON storage backend are now validated as snapshot ids before
+  being joined into snapshot-directory paths — a tampered `ref: ".."` can
+  no longer read or write outside the snapshot root.
+- **copy restore symbolic-link escape**: restoring through a destination
+  path (or ancestor directory) that has become a symbolic link would have
+  written workspace content outside the workspace; the snapshot source
+  being swapped for a symbolic link would have read external content in.
+  Both are now refused loudly, per-path, before any copy.
+- **git provider ref injection**: snapshot `previousRef` and restore `ref`
+  are validated as 40/64-hex object ids before being passed to git — a
+  tampered record can no longer smuggle git options (`--output=…` and
+  friends) into `diff`/`restore` invocations.
+- **git subprocess hardening**: git commands now run with
+  `GIT_TERMINAL_PROMPT=0` (credential/confirmation prompts can no longer
+  hang the snapshot chain) and `GIT_OPTIONAL_LOCKS=0`.
+- **copy snapshot TOCTOU tolerance**: a file that disappears (or becomes
+  unreadable) between traversal and copy is now skipped with a warning
+  instead of failing the whole snapshot, so one transient file no longer
+  costs a step its checkpoint.
+- `/rewind step 0` (and non-positive step numbers) now fail at parse time
+  with a usage message instead of a misleading "step not ended" error.
+
+## [0.3.0] — 2026-08-14
 
 ### Added
 

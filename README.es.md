@@ -17,8 +17,9 @@ Un plugin de capability-seam que añade **instantáneas de archivos del workspac
 - 📸 **Instantánea antes de cada mutación** — todos los caminos de escritura (`write`, `edit`, `str_replace_editor`, `bash`, `pwsh`, `terminal_send`, …) se capturan primero, en silencio, vía listeners pass-through `fs/*-intent` + `tools/pre-execute`.
 - 🧵 **git primero, sin riesgo histórico** — las instantáneas son objetos git sin referencia (`stash create` / `commit-tree`); la restauración es solo-worktree y por rutas explícitas, así que los archivos creados después del checkpoint **nunca se borran**. Los directorios sin git degradan a instantáneas incrementales de directorio.
 - ⏪ **Un comando para volver** — `/rewind` lista checkpoints; `/rewind <id-prefijo>` / `step <N>` / `latest` confirma, restaura archivos, luego bifurca la sesión en el límite de turno del checkpoint y devuelve el id de la nueva sesión.
+- 🔍 **Previsualiza antes de saltar** — `/rewind preview <target>` imprime el impacto exacto (archivos que se sobrescribirían, archivos creados después del checkpoint que permanecen) sin tocar nada — sin prompt de confirmación, sin escrituras, sin fork.
 - 🛡️ **El rewind es reversible** — primero se captura un checkpoint de guarda del estado previo al rewind, de modo que `/rewind <guard-id>` deshace el rewind.
-- 🔒 **Fail-closed por diseño** — restaurar requiere confirmación humana; sin respondedor no hay restauración. Nada de `git reset --hard`, nada de `git clean`, nunca edición de mensajes.
+- 🔒 **Fail-closed por diseño** — restaurar requiere confirmación humana; sin respondedor no hay restauración. Nada de `git reset --hard`, nada de `git clean`, nunca edición de mensajes, nunca escrituras a través de enlaces simbólicos.
 
 ---
 
@@ -39,6 +40,7 @@ La diferencia en una frase: **dsh-checkpoint-rewind captura el *estado del works
 - **Provider seam** — `git` primero: `git stash create` / `git commit-tree` producen objetos de instantánea sin referencia que **jamás tocan worktree, índice o historial**; la restauración es solo-worktree y restaura **solo rutas explícitas** — `git restore … -- .` borraría archivos con `git add` posteriores al checkpoint, por lo que el provider nunca lo emite. Los repositorios con HEAD no nacido (unborn) se detectan y degradan a `copy`; las sondas de disponibilidad se cachean por workspace. Los directorios sin git usan `copy` (instantáneas incrementales de directorio con reutilización de hardlinks), claramente etiquetados en la lista.
 - **Mapeo por paso, forks por turno** — cada checkpoint registra su turno/paso; `step/end` rellena el mapeo de pasos («volver al paso N» = instantánea más cercana ≤ N, accesible vía `/rewind step <N>`) y `turn/end` rellena el límite del fork, usando el primitivo real `ctx.sessions.fork` del harness.
 - **Transacción de rewind en tres fases** — `/rewind <id>` pide confirmación (seam userQuestions / approval, **fail-closed sin respondedor**), captura un **checkpoint de guarda** del estado actual (config `preRewindCheckpoint`), restaura archivos en segundo lugar, luego bifurca en tercero; un fallo de restauración nunca bifurca, un fallo de fork informa «archivos restaurados, sesión no bifurcada» — y el checkpoint de guarda hace que todo el rewind sea deshacible.
+- **Previsualización de impacto de solo lectura** — `/rewind preview <target>` (mismo direccionamiento: prefijo de id, `step <N>`, `latest`) muestra exactamente qué archivos sobrescribiría una restauración y qué archivos posteriores al checkpoint permanecerían, sin la puerta de confirmación, sin escrituras y sin fork — aprobación informada en lugar de un salto de fe.
 - **Registro durable + cuotas** — los registros viven en `ctx.storageDomain` (dominio `checkpoints`; backend SQLite = filas, backend JSON = archivo legible); `maxSnapshots` (por sesión, 50 por defecto) y `maxSnapshotBytes` (cuota blanda global **de bytes incrementales**, 512 MiB por defecto; el checkpoint más nuevo por sesión siempre se conserva, de modo que los workspaces grandes nunca se auto-podan), `pruneOnTurnEnd`, primero-lo-más-antiguo.
 - **Opción de integridad del copy** — `verifyByHash` hace que el provider copy compare hashes de contenido en lugar de size+mtime (un `touch -r`/`rsync -t` con mtime exacto no puede ocultar un cambio de contenido del mismo tamaño) y verifique el contenido restaurado; los modos de archivo se restauran en la medida de lo posible.
 - **Reconstruible por diseño** — la salida de `/rewind` viaja en los eventos propios del harness `command/run` + `command/done`; los eventos de sesión `checkpoint/snapshot|bound|prune|rewind` se añaden cuando el host conoce los tipos **o** soporta el sobre (envelope) `ignorable` (sonda en runtime; la puerta adaptativa rc.6 permanece cerrada y segura).
@@ -95,7 +97,21 @@ Dirige un checkpoint por su prefijo de id único (el id corto que muestra la lis
 /rewind b2c3d4e5
 /rewind step 2
 /rewind latest
+/rewind preview b2c3d4e5   # solo lectura: muestra qué archivos cambiarían, no toca nada
 /rewind clear        # borrado confirmado de los checkpoints de esta sesión (archivos intactos)
+```
+
+`preview` se resuelve con el mismo direccionamiento (`<id-prefijo>`, `step <N>`, `latest`) e imprime el impacto sin pedir confirmación ni escribir nada:
+
+```text
+rewind preview: checkpoint #b2c3d4e5-… (provider git, turn 2 step 3)
+restoring it would overwrite 2 file(s):
+  src/app.ts
+  src/util.ts
+3 file(s) already match the checkpoint (not touched).
+no files are deleted: 1 file(s) created after the checkpoint would be left in place:
+  src/new.ts
+run "/rewind <id>" to confirm and apply (a guard checkpoint is captured first)
 ```
 
 El plugin pregunta **«Restore the workspace files to this checkpoint and fork the session?»** → al aprobarse captura un checkpoint de guarda, restaura los archivos, bifurca la sesión en el límite de turno del checkpoint y devuelve el id de la nueva sesión:
@@ -112,26 +128,29 @@ Las ejecuciones headless imprimen el mismo resultado con guía de reanudación; 
 
 ## Demo
 
-Una ejecución headless ensamblada real (`npm run test:integration`): el agente modifica `a.txt` en el turno 1 y `b.txt` en el turno 2, luego un `/rewind` restaura ambos archivos y bifurca la sesión. (La transcripción es salida literal; nota el conteo de bytes incrementales: el segundo checkpoint solo cuesta el archivo cambiado.)
+Una ejecución headless ensamblada real (`npm run test:integration`): el agente modifica `a.txt` en el turno 1 y `b.txt` en el turno 2, crea `c.txt` después, luego un `/rewind preview` inspecciona el impacto en solo lectura y un `/rewind` restaura ambos archivos y bifurca la sesión. (La transcripción es salida literal; nota el conteo de bytes incrementales: el segundo checkpoint solo cuesta el archivo cambiado — y la línea preview no pide confirmación ni escribe nada.)
 
 ```console
-[rewind-integration] copy flow: mounted; workspace C:\Users\me\Temp\dsh-rewind-int-ws-SqBCJ6
+[rewind-integration] copy flow: mounted; workspace C:\Users\me\Temp\dsh-rewind-int-ws-NTk6jw
 [rewind-integration]   /rewind list:
     rewind: 2 checkpoints (newest last):
-    #3251015b · (copy) · turn 1 step 1 · 2026/8/14 16:59:50 (just now) · trigger: fs/write-intent · 2 files · 10 B · fork: ready
-    #6c4c05d7 · (copy) · turn 2 step 1 · 2026/8/14 16:59:50 (just now) · trigger: fs/write-intent · 2 files · 5 B · fork: ready
+    #9ab2d753 · (copy) · turn 1 step 1 · 2026/8/15 12:57:05 (just now) · trigger: fs/write-intent · 2 files · 10 B · fork: ready
+    #7ec0e96f · (copy) · turn 2 step 1 · 2026/8/15 12:57:05 (just now) · trigger: fs/write-intent · 2 files · 6 B · fork: ready
     run "/rewind <id>" to restore files and fork the session from that checkpoint
+[rewind-integration]   /rewind preview ok (no gate, no writes): rewind preview: checkpoint #9ab2d753-… (provider copy, turn 1 step 1)
 [rewind-integration]   [user-questions] asked: Restore the workspace files to this checkpoint and fork the session?
-[rewind-integration]   /rewind result: rewind: restored 2 file(s) from checkpoint 3251015b-… (provider copy)
+[rewind-integration]   /rewind result: rewind: restored 2 file(s) from checkpoint 9ab2d753-… (provider copy)
 and forked a new session at seq 3 (end of turn 1).
 session: session-1
 Open the new session to continue from before that turn; this session keeps its later history.
-rewind guard: 69fe5923-… (run "/rewind 69fe5923" to undo this rewind)
+1 file(s) created after the checkpoint were left in place (overwrite rollback never deletes files)
+rewind guard: f18027ea-… (run "/rewind f18027ea" to undo this rewind)
 [rewind-integration]   fork ok: child session-1 seedLength 4 parent integration-session
 [rewind-integration] copy flow: PASS
-[rewind-integration] git flow: mounted; workspace C:\Users\me\Temp\dsh-rewind-int-git-YxoLl6
+[rewind-integration] git flow: mounted; workspace C:\Users\me\Temp\dsh-rewind-int-git-CXd4BQ
+[rewind-integration]   /rewind preview ok (git): rewind preview: checkpoint #fd1dc3ad-… (provider git, turn 1 step 1)
 [rewind-integration]   [user-questions] asked: Restore the workspace files to this checkpoint and fork the session?
-[rewind-integration]   git restore ok; HEAD intact: 5b618e51
+[rewind-integration]   git restore ok; HEAD intact: 19484e99
 [rewind-integration] git flow: PASS
 [rewind-integration] integration: ALL PASS
 ```
@@ -150,7 +169,7 @@ Todo es un campo de `Config` (cambiable desde cordis.yml; nada está hardcodeado
 | `maxSnapshotBytes` | `536870912` (512 MiB) | Cuota blanda global **de bytes incrementales** entre todas las sesiones (lo más antiguo primero; el checkpoint más nuevo por sesión siempre se conserva). |
 | `pruneOnTurnEnd` | `true` | Ejecuta la poda de cuota al terminar un turno. |
 | `mutationTools` | `['bash','write','edit','str_replace_editor','pwsh','terminal_send']` | Herramientas tratadas como mutadoras en `tools/pre-execute` (las fs ya están cubiertas por `fs/*-intent`). |
-| `excludeGlobs` | `['node_modules','.git','.dsh','dist','build']` | Directorios/archivos omitidos por el provider copy (`.git` y el directorio de instantáneas siempre se excluyen). |
+| `excludeGlobs` | `['node_modules','.git','.dsh','dist','build']` | Patrones glob omitidos por el provider copy: `*` dentro de un segmento, `?` un carácter, `**` entre segmentos; un patrón sin `/` coincide con el nombre de un segmento a cualquier profundidad, un patrón con `/` coincide con rutas relativas, y un directorio coincidente excluye todo su subárbol (`.git` y el directorio de instantáneas siempre se excluyen). |
 | `confirmVia` | `auto` | Canal de confirmación: `auto` (userQuestions primero, luego approval) · `userQuestions` · `approval`. Nota: `approval` requiere un turno abierto y los comandos se ejecutan entre turnos, así que en rc.6 cierra en falso con un mensaje accionable — monta userQuestions. |
 | `listLimit` | `10` | Checkpoints mostrados por `/rewind` sin argumentos. |
 | `preRewindCheckpoint` | `warn` | Checkpoint de guarda antes de restaurar: `warn` (avisa y continúa si falla la captura) · `require` (aborta el rewind) · `off`. |
@@ -171,9 +190,10 @@ Todo es un campo de `Config` (cambiable desde cordis.yml; nada está hardcodeado
 
 ## Modelo de seguridad
 
-- **El historial de git es intocable.** El provider git solo ejecuta primitivas sin efectos secundarios de una lista blanca — `stash create`, `commit-tree`, `restore --worktree`, `ls-tree`, `diff-tree`, `ls-files`, `status`, `rev-parse` — aplicada con aserción en runtime. **Nada de `reset --hard`, nada de `clean`, jamás mutar índice o historial.**
+- **El historial de git es intocable.** El provider git solo ejecuta primitivas sin efectos secundarios de una lista blanca — `stash create`, `commit-tree`, `restore --worktree`, `ls-tree`, `diff-tree`, `ls-files`, `status`, `rev-parse` — aplicada con aserción en runtime, y las refs de objeto se validan como ids hexadecimales antes de pasarlas a git (un registro manipulado no puede inyectar opciones de git). **Nada de `reset --hard`, nada de `clean`, jamás mutar índice o historial.**
 - **Rollback por sobrescritura, nunca borrado.** La restauración solo sobrescribe archivos capturados, y el provider git restaura **rutas explícitas** (`git restore … -- .` borraría archivos con `git add` posteriores al checkpoint). Los archivos creados después del checkpoint (sin seguimiento **o** staged) se *informan* y se dejan en su sitio.
-- **Restaurar requiere aprobación.** Sobrescribir archivos del usuario siempre pasa por el seam de confirmación con semántica `ask`; un respondedor ausente, que lanza o que dice no **cierra en falso**.
+- **Nada de escrituras a través de enlaces, nada de path traversal.** El provider copy valida las refs de checkpoint antes de unirlas a rutas del directorio de instantáneas, y rechaza restaurar a través de un destino (o ancestro) que se haya convertido en enlace simbólico — y rechaza leer un archivo de almacenamiento de instantáneas que se haya convertido en uno — así una restauración nunca puede seguir un enlace fuera del workspace. Las refs de instantánea y los ids de objeto git se verifican por formato en la frontera de persistencia.
+- **Restaurar requiere aprobación.** Sobrescribir archivos del usuario siempre pasa por el seam de confirmación con semántica `ask`; un respondedor ausente, que lanza o que dice no **cierra en falso**. `/rewind preview` es la forma de solo lectura de inspeccionar el impacto primero.
 - **El rewind es reversible.** Antes de restaurar, un checkpoint de guarda captura el estado actual; restaurar la guarda deshace el rewind. `preRewindCheckpoint: require` aborta el rewind cuando la guarda no puede capturarse.
 - **Transacción de tres fases, orden fijo.** Guarda primero, archivos segundo, fork tercero; cada fase se registra; una restauración fallida deja archivos, checkpoints y sesión intactos.
 - **Visible para el modelo ⟺ registrado.** Todo lo que ven usuarios o modelos es reconstruible desde el log de sesión (`command/run` + `command/done` y, cuando el host los conozca, los eventos `checkpoint/*`) más el dominio durable `checkpoints`.
@@ -198,7 +218,8 @@ flowchart LR
     H --> E
     J --> E
   end
-  K["/rewind &lt;id&gt; · step &lt;N&gt; · latest · clear"] --> L{"confirmar (userQuestions / approval)<br/>fail-closed"}
+  K["/rewind &lt;id&gt; · step &lt;N&gt; · latest · preview · clear"] --> L{"confirmar (userQuestions / approval)<br/>fail-closed"}
+  L -->|preview| KP["lista de impacto de solo lectura<br/>(sin escrituras, sin fork)"]
   L -->|allow| M["fase 0.5: checkpoint de guarda (estado previo al rewind)"]
   M --> N["fase 1: provider.restore(ref)"]
   N -->|ok| O["fase 2: ctx.sessions.fork(session, forkSeq)"]
@@ -229,24 +250,27 @@ El plugin ya devuelve el id de la nueva sesión en el resultado del comando (`se
 
 **¿Puedo deshacer un rewind?** Sí — cada rewind aprobado captura primero un checkpoint de guarda del estado previo al rewind; el resultado imprime `rewind guard: <id>`, y `/rewind <guard-id>` restaura ese estado.
 
-**¿Cómo dirijo los checkpoints?** Prefijo de id único (el id corto de 8 caracteres de la lista funciona), `/rewind step <N>`, `/rewind latest`, o `/rewind clear` para borrar los checkpoints de esta sesión (archivos intactos).
+**¿Cómo dirijo los checkpoints?** Prefijo de id único (el id corto de 8 caracteres de la lista funciona), `/rewind step <N>`, `/rewind latest`, o `/rewind clear` para borrar los checkpoints de esta sesión (archivos intactos). `/rewind preview <target>` usa el mismo direccionamiento para mostrar el impacto sin cambiar nada.
+
+**¿Qué hace `preview` — y qué no?** Resuelve el checkpoint y luego ejecuta una comparación de solo lectura: qué archivos se sobrescribirían (o recrearían), cuáles ya coinciden y qué archivos creados después del checkpoint permanecerían en su sitio. Nunca pregunta, nunca escribe, nunca bifurca y no registra ningún evento `checkpoint/rewind` — la puerta de aprobación solo se ejecuta en un `/rewind <id>` real.
 
 ## Pruebas
 
 ```sh
 npm install
-npm test                 # 131 tests unitarios (test/**/*.test.mjs, incl. suites de provider):
+npm test                 # 160 tests unitarios (test/**/*.test.mjs, incl. suites de provider):
                          # creación/dedup/concurrencia de instantáneas, rutas git y no-git, degradación
                          # unborn HEAD, cuotas de bytes incrementales + suelo de conservación del más
                          # nuevo, seguridad de restauración de archivos staged, mapeo de límite ≤N,
                          # matriz de fallos de tres fases, rechazo de aprobación, direccionamiento
-                         # (prefijo/step/latest/clear), modos de checkpoint de guarda, puerta adaptativa
-                         # de eventos + sonda ignorable, verificación por hash, unidad de proyección
-                         # checkpoints (Cordis real + SessionStore/CommandRuntime/SessionProjectionRegistry
-                         # reales)
+                         # (prefijo/step/latest/preview/clear), modos de checkpoint de guarda, puerta
+                         # adaptativa de eventos + sonda ignorable, verificación por hash, semántica
+                         # de exclusión glob, endurecimiento de seguridad de enlaces simbólicos/rutas
+                         # de refs, unidad de proyección checkpoints (Cordis real +
+                         # SessionStore/CommandRuntime/SessionProjectionRegistry reales)
 npm run test:integration # verificación headless ensamblada: el agente modifica 2 archivos en 2 turnos,
-                         # /rewind lista → restaura → contenidos de archivo + contexto del fork + guarda
-                         # asegurados
+                         # /rewind lista → preview (sin puerta, sin escrituras) → restaura → contenidos +
+                         # contexto del fork + guarda + supervivencia del archivo post-checkpoint asegurados
 ```
 
 ## Solución de problemas
@@ -267,7 +291,7 @@ npm run test:integration # verificación headless ensamblada: el agente modifica
 
 | Recurso | Acceso |
 |---|---|
-| Archivos del workspace | lectura para snapshots; escritura solo en una restauración `/rewind <id>` aprobada (sobrescritura, nunca borrado) |
+| Archivos del workspace | lectura para snapshots; escritura solo en una restauración `/rewind <id>` aprobada (sobrescritura, nunca borrado, nunca a través de un enlace simbólico fuera del workspace) |
 | Almacenamiento de snapshots | escribe solo bajo `snapshotDir` (por defecto `$DSH_HOME/dsh-checkpoint-rewind/`) |
 | Repositorio git | solo primitivas whitelisted sin efectos secundarios (`stash create`, `commit-tree`, `restore --worktree` con rutas explícitas, …) — jamás `reset --hard`/`clean` |
 | Log de sesión | lectura de límites; añade eventos log-only `checkpoint/*` cuando el host los conoce o soporta el sobre `ignorable` |
