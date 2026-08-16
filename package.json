@@ -110,7 +110,8 @@
   },
   "scripts": {
     "test": "node --test \"test/**/*.test.mjs\"",
-    "test:integration": "node test/integration/rewind-headless.mjs"
+    "test:integration": "node test/integration/rewind-headless.mjs",
+    "prepack": "npm test"
   },
   "keywords": [
     "deepseek-harness",

@@ -60,10 +60,10 @@
 
 ## 快速开始
 
-`dsh-checkpoint-rewind` 以 **bundle 插件**形式发布（无构建步骤，纯 ESM）：
+`dsh-checkpoint-rewind` 以 **bundle 插件**形式发布——发布包即源码（`index.mjs` + `lib/`，纯 ESM），因此没有构建步骤、没有 `src/` 目录；`package.json` 的 `dsh.bundle.patch` 指向根目录 `cordis.patch.yml`。
 
 ```sh
-dsh plugin add dsh-checkpoint-rewind    # 进入 profile 的 bundle 栈
+dsh plugin --profile <profile> add dsh-checkpoint-rewind    # 标准 Profile Bundle 安装（npm）
 # 重启 dsh —— /rewind 即在 Web UI 生效
 ```
 

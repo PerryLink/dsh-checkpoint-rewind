@@ -60,10 +60,10 @@
 
 ## त्वरित शुरुआत
 
-`dsh-checkpoint-rewind` एक **bundle plugin** के रूप में वितरित होता है (कोई बिल्ड चरण नहीं, शुद्ध ESM):
+`dsh-checkpoint-rewind` एक **bundle plugin** के रूप में वितरित होता है — प्रकाशित पैकेज ही स्रोत है (`index.mjs` + `lib/`, शुद्ध ESM), इसलिए कोई बिल्ड चरण नहीं और कोई `src/` निर्देशिका नहीं; `package.json` में `dsh.bundle.patch` मूल `cordis.patch.yml` की ओर इशारा करता है।
 
 ```sh
-dsh plugin add dsh-checkpoint-rewind    # प्रोफ़ाइल के bundle स्टैक में जुड़ता है
+dsh plugin --profile <profile> add dsh-checkpoint-rewind    # मानक Profile Bundle इंस्टॉल (npm)
 # dsh पुनः आरंभ करें — /rewind Web UI में सक्रिय हो गया।
 ```
 

@@ -60,10 +60,10 @@ A diferença em uma frase: **o dsh-checkpoint-rewind captura o *estado do worksp
 
 ## Início rápido
 
-`dsh-checkpoint-rewind` é distribuído como **bundle plugin** (sem etapa de build, ESM puro):
+`dsh-checkpoint-rewind` é distribuído como **bundle plugin** — o pacote publicado *é* o código-fonte (`index.mjs` + `lib/`, ESM puro), então não há etapa de build nem diretório `src/`; `dsh.bundle.patch` no `package.json` aponta para o `cordis.patch.yml` da raiz.
 
 ```sh
-dsh plugin add dsh-checkpoint-rewind    # entra na pilha de bundles do perfil
+dsh plugin --profile <profile> add dsh-checkpoint-rewind    # instalação padrão Profile Bundle (npm)
 # reinicie o dsh — o /rewind já está ativo na Web UI.
 ```
 

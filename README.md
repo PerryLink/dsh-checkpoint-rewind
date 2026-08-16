@@ -60,10 +60,10 @@ The difference in one sentence: **dsh-checkpoint-rewind captures the *workspace 
 
 ## Quick start
 
-`dsh-checkpoint-rewind` ships as a **bundle plugin** (no build step, pure ESM):
+`dsh-checkpoint-rewind` ships as a **bundle plugin** — the published package *is* the source (`index.mjs` + `lib/`, pure ESM), so there is no build step and no `src/` directory; `dsh.bundle.patch` in `package.json` points at the root `cordis.patch.yml`.
 
 ```sh
-dsh plugin add dsh-checkpoint-rewind    # enters your profile's bundle stack
+dsh plugin --profile <profile> add dsh-checkpoint-rewind    # standard Profile Bundle install (npm)
 # restart dsh — done. /rewind is live in the Web UI.
 ```
 
