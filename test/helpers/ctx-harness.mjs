@@ -68,13 +68,21 @@ export async function mountPlugin(opts = {}) {
   root.provide('storageDomain', facility)
   if (opts.userQuestions !== undefined) root.provide('userQuestions', opts.userQuestions)
   if (opts.approval !== undefined) root.provide('approval', opts.approval)
+  if (opts.tools !== undefined) root.provide('tools', opts.tools)
+  if (opts.systemPrompt !== undefined) root.provide('systemPrompt', opts.systemPrompt)
   await mount(SessionStore)
   await mount(CommandRuntime)
   const plugin = await import('../../index.mjs')
+  // 默认关闭自动间隔快照（openStep 的 step/start 会触发）：既有测试断言的是
+  // 变更安全网/手动路径的精确记录数；autoCheckpoint 相关行为在专门测试中显式开启。
+  const config = {
+    autoCheckpoint: { enabled: false },
+    ...(opts.config ?? {}),
+  }
   await mount(Object.assign({}, plugin, {
     // Config 走 cordis 的 config 注入：plugin 函数形式在 plugin() 下用第 0 号 config。
     // 直接用默认导出的 apply 手动挂载等价于 config 全默认；此处传入自定义 config。
-    apply: (ctx) => plugin.apply(ctx, opts.config ?? {}),
+    apply: (ctx) => plugin.apply(ctx, config),
   }))
 
   // 合成绝对路径（跨平台）：session 头校验要求绝对路径，Windows 风格 'C:/…'

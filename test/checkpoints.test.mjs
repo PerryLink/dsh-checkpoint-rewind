@@ -8,6 +8,7 @@ import {
   formatPreviewResult,
   formatRelativeAge,
   nearestCheckpointAtOrBefore,
+  parseCheckpointInput,
   parseRewindInput,
   prunePlan,
   resolveRecordByPrefix,
@@ -160,9 +161,10 @@ describe('prunePlan（配额清理计划）', () => {
 })
 
 describe('parseRewindInput（/rewind 寻址语法）', () => {
-  it('空输入 → list；latest/last → latest；clear → clear', () => {
+  it('空输入 → list；list/latest/last → 对应形态；clear → clear', () => {
     assert.deepEqual(parseRewindInput(''), { kind: 'list' })
     assert.deepEqual(parseRewindInput('  '), { kind: 'list' })
+    assert.deepEqual(parseRewindInput('list'), { kind: 'list' })
     assert.deepEqual(parseRewindInput('latest'), { kind: 'latest' })
     assert.deepEqual(parseRewindInput('LAST'), { kind: 'latest' })
     assert.deepEqual(parseRewindInput('clear'), { kind: 'clear' })
@@ -177,6 +179,22 @@ describe('parseRewindInput（/rewind 寻址语法）', () => {
     assert.deepEqual(parseRewindInput('step').kind, 'invalid')
   })
 
+  it('三态目标：workspace|session|config|all <目标> → target（大小写不敏感）', () => {
+    assert.deepEqual(parseRewindInput('workspace a1b2'), { kind: 'target', target: 'workspace', input: 'a1b2' })
+    assert.deepEqual(parseRewindInput('SESSION latest'), { kind: 'target', target: 'session', input: 'latest' })
+    assert.deepEqual(parseRewindInput('config step 2'), { kind: 'target', target: 'config', input: 'step 2' })
+    assert.deepEqual(parseRewindInput('  ALL a1b2 '), { kind: 'target', target: 'all', input: 'a1b2' })
+    assert.deepEqual(parseRewindInput('workspace').kind, 'invalid')
+    assert.match(parseRewindInput('workspace').message, /usage: \/rewind \[workspace\|session\|config\|all\]/)
+  })
+
+  it('diff <a> <b> → diff；缺参数 → invalid', () => {
+    assert.deepEqual(parseRewindInput('diff a1b2 c3d4'), { kind: 'diff', a: 'a1b2', b: 'c3d4' })
+    assert.deepEqual(parseRewindInput('  DIFF a b '), { kind: 'diff', a: 'a', b: 'b' })
+    assert.deepEqual(parseRewindInput('diff a').kind, 'invalid')
+    assert.match(parseRewindInput('diff a').message, /diff <checkpoint-a> <checkpoint-b>/)
+  })
+
   it('其余输入 → id', () => {
     assert.deepEqual(parseRewindInput('abc123'), { kind: 'id', input: 'abc123' })
     assert.deepEqual(parseRewindInput('  a1b2c3d4  '), { kind: 'id', input: 'a1b2c3d4' })
@@ -188,6 +206,25 @@ describe('parseRewindInput（/rewind 寻址语法）', () => {
     assert.deepEqual(parseRewindInput('preview latest'), { kind: 'preview', target: 'latest' })
     assert.deepEqual(parseRewindInput('preview').kind, 'invalid')
     assert.match(parseRewindInput('preview').message, /preview <id-prefix/)
+  })
+})
+
+describe('parseCheckpointInput（/checkpoint 语法）', () => {
+  it('空输入 → create；list → list；diff <a> <b> → diff', () => {
+    assert.deepEqual(parseCheckpointInput(''), { kind: 'create' })
+    assert.deepEqual(parseCheckpointInput('  '), { kind: 'create' })
+    assert.deepEqual(parseCheckpointInput('list'), { kind: 'list' })
+    assert.deepEqual(parseCheckpointInput('LIST'), { kind: 'list' })
+    assert.deepEqual(parseCheckpointInput('diff a b'), { kind: 'diff', a: 'a', b: 'b' })
+  })
+
+  it('note <text> → create 带备注；裸文本 → create 带备注（命令简写）', () => {
+    assert.deepEqual(parseCheckpointInput('note 发布前检查'), { kind: 'create', note: '发布前检查' })
+    assert.deepEqual(parseCheckpointInput('  NOTE before release '), { kind: 'create', note: 'before release' })
+    assert.deepEqual(parseCheckpointInput('before release'), { kind: 'create', note: 'before release' })
+    assert.deepEqual(parseCheckpointInput('note').kind, 'invalid')
+    assert.match(parseCheckpointInput('note').message, /note <text>/)
+    assert.deepEqual(parseCheckpointInput('diff a').kind, 'invalid')
   })
 })
 
@@ -274,7 +311,7 @@ describe('formatBytes / formatCheckpointList', () => {
 
   it('列表按最旧到最新渲染且包含关键字段', () => {
     const records = [
-      record({ id: 'cp-1', time: 1700000000000, forkSeq: 12 }),
+      record({ id: 'cp-1', time: 1700000000000, sessionBoundary: 12, kind: 'mutation', tree: null, config: {} }),
       record({ id: 'cp-2', time: 1700000001000, turn: 2, files: 1 }),
     ]
     const text = formatCheckpointList(records, { timeFormatter: () => 'T' })
@@ -283,9 +320,12 @@ describe('formatBytes / formatCheckpointList', () => {
     assert.match(text, /\(copy\)/)
     assert.match(text, /trigger: bash/)
     assert.match(text, /turn 1 step 1/)
-    assert.match(text, /fork: ready/)
-    assert.match(text, /fork: pending \(turn not closed\)/)
+    assert.match(text, /\[mutation\]/)
+    assert.match(text, /tree: n\/a \(copy\)/)
+    assert.match(text, /session: replay-ready/)
+    assert.match(text, /session: fresh \(no closed turn yet\)/)
     assert.match(text, /\/rewind <id>/)
+    assert.match(text, /workspace\|session\|config/)
     assert.ok(text.indexOf('cp-1') < text.indexOf('cp-2'), '最旧在前')
   })
 

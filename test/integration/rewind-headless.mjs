@@ -5,7 +5,7 @@
 // dsh-checkpoint-rewind。模拟 agent 两个轮次分别改两个文件 →
 // /rewind 列表 → /rewind <id> 回退 → 断言文件内容与 fork 会话上下文。
 //
-// 用法：node dev/integration/rewind-headless.mjs（需先 npm install）。
+// 用法：node test/integration/rewind-headless.mjs（需先 npm install）。
 
 import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
@@ -132,18 +132,22 @@ async function mainCopyFlow() {
 
   const list = await executeCommand(root, agent, '/rewind')
   assert.equal(list.kind, 'success')
-  assert.match(list.text, /2 checkpoints/)
+  assert.match(list.text, /4 checkpoints/, '每轮一个 auto 自动快照 + 一个 fs/write-intent 变更快照')
+  assert.match(list.text, /trigger: auto/)
   assert.match(list.text, /trigger: fs\/write-intent/)
   log('  /rewind list:\n' + list.text.split('\n').map((line) => `    ${line}`).join('\n'))
 
-  const firstId = /#([0-9a-f]{8})/.exec(list.text)?.[1]
-  assert.ok(firstId, 'list carries short checkpoint ids (usable as addressing prefix)')
+  // 确定性选取"回放就绪"的变更触发检查点（turn 2 的 fs/write-intent 捕获）：
+  // 种子 = turn 1 的 turn/end 前缀，文件状态 = a.txt 已改、b.txt 未改。
+  const targetLine = list.text.split('\n').find((line) => line.includes('trigger: fs/write-intent') && line.includes('session: replay-ready'))
+  const targetId = /#([0-9a-f]{8})/.exec(targetLine ?? '')?.[1]
+  assert.ok(targetId, 'list carries a replay-ready checkpoint id (usable as addressing prefix)')
 
   // preview：只读影响面 —— 不经确认门、不写文件、不 fork。
   assert.equal(asks(), 0, 'preview 之前没有任何确认请求')
-  const preview = await executeCommand(root, agent, `/rewind preview ${firstId}`)
+  const preview = await executeCommand(root, agent, `/rewind preview ${targetId}`)
   assert.equal(preview.kind, 'success', preview.text)
-  assert.match(preview.text, /restoring it would overwrite 2 file\(s\)/)
+  assert.match(preview.text, /restoring it would overwrite 1 file\(s\)/)
   assert.match(preview.text, /1 file\(s\) created after the checkpoint would be left in place/)
   assert.match(preview.text, /run "\/rewind <id>" to confirm and apply/)
   assert.equal(asks(), 0, 'preview 不经确认门')
@@ -151,17 +155,17 @@ async function mainCopyFlow() {
   assert.equal(await fs.readFile(fileC, 'utf8'), 'C-new\n', 'preview 不删文件')
   log('  /rewind preview ok (no gate, no writes):', preview.text.split('\n')[0])
 
-  const rewind = await executeCommand(root, agent, `/rewind ${firstId}`)
+  const rewind = await executeCommand(root, agent, `/rewind ${targetId}`)
   assert.equal(asks(), 1, '真正的 rewind 经确认门一次')
   assert.equal(rewind.kind, 'success', rewind.text)
   assert.match(rewind.text, /rewind guard: [0-9a-f-]{36}/, '结果携带可撤销本次回退的保护检查点')
   log('  /rewind result:', rewind.text)
 
-  assert.equal(await fs.readFile(fileA, 'utf8'), 'A-v1\n', 'a.txt 恢复')
-  assert.equal(await fs.readFile(fileB, 'utf8'), 'B-v1\n', 'b.txt 恢复')
+  assert.equal(await fs.readFile(fileA, 'utf8'), 'A-v2!\n', 'a.txt 保留检查点后的 turn 1 修改')
+  assert.equal(await fs.readFile(fileB, 'utf8'), 'B-v1\n', 'b.txt 回退到检查点内容')
   assert.equal(await fs.readFile(fileC, 'utf8'), 'C-new\n', '检查点之后新建的 c.txt 保留')
 
-  const childId = /session: (session-[\w-]+)/.exec(rewind.text)?.[1]
+  const childId = /session: replayed as child session (session-[\w-]+)/.exec(rewind.text)?.[1]
   assert.ok(childId, '结果携带新 sessionId')
   const child = root.sessions.get(childId)
   assert.ok(child, 'fork 子会话存活')
@@ -169,7 +173,7 @@ async function mainCopyFlow() {
   assert.equal(child.header.cwd, workspace)
   assert.equal(child.events.length, forkSeq1 + 3, '种子 = 边界前缀 + session/end-seed + 回退通知')
   assert.equal(child.events.at(-1).type, 'user/message', '子会话收到回退通知')
-  assert.match(child.events.at(-1).data.content[0].text, /restored to checkpoint/)
+  assert.match(child.events.at(-1).data.content[0].text, /replayed from checkpoint/)
   for (let seq = 0; seq <= forkSeq1; seq += 1) {
     assert.deepEqual(child.events[seq], session.events[seq], `child seed seq ${seq} 与源一致`)
   }

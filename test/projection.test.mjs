@@ -20,7 +20,6 @@ import { mountPlugin } from './helpers/ctx-harness.mjs'
 
 const snapshotEvent = (data) => ({ type: 'checkpoint/snapshot', data })
 const boundStep = (data) => ({ type: 'checkpoint/bound', data })
-const boundTurn = (data) => ({ type: 'checkpoint/bound', data })
 const prune = (ids, reason = 'maxSnapshots') => ({ type: 'checkpoint/prune', data: { ids, reason } })
 const rewind = (checkpointId, outcome) => ({ type: 'checkpoint/rewind', data: { checkpointId, sessionId: 's1', outcome } })
 
@@ -50,18 +49,19 @@ describe('checkpoints 投影单元（纯折叠）', () => {
     assert.equal(after, state, '无关事件必须原引用返回')
   })
 
-  it('snapshot 添加记录；bound 补 stepEndSeq/forkSeq；rewind 记 outcome；prune 删除', () => {
+  it('snapshot 添加记录；bound 补 stepEndSeq；rewind 记 outcome；prune 删除', () => {
     let state = initCheckpointsProjection()
-    state = applyCheckpointsProjection(state, snapshotEvent(record()))
+    state = applyCheckpointsProjection(state, snapshotEvent(record({ kind: 'manual', tree: null, note: '发布前', sessionBoundary: 9 })))
     assert.deepEqual(viewCheckpointsProjection(state), [{
       id: 'cp-1', turn: 1, step: 1, time: 1000, provider: 'copy', triggerTool: 'bash', files: 2, bytes: 4096,
+      kind: 'manual', note: '发布前', seq: 10, sessionBoundary: 9,
     }])
     state = applyCheckpointsProjection(state, boundStep({ id: 'cp-1', turn: 1, step: 1, stepEndSeq: 12 }))
-    state = applyCheckpointsProjection(state, boundTurn({ id: 'cp-1', turn: 1, forkSeq: 15 }))
-    state = applyCheckpointsProjection(state, rewind('cp-1', 'restored+forked'))
+    state = applyCheckpointsProjection(state, rewind('cp-1', 'restored'))
     assert.deepEqual(viewCheckpointsProjection(state), [{
       id: 'cp-1', turn: 1, step: 1, time: 1000, provider: 'copy', triggerTool: 'bash', files: 2, bytes: 4096,
-      stepEndSeq: 12, forkSeq: 15, rewindOutcome: 'restored+forked',
+      kind: 'manual', note: '发布前', seq: 10, sessionBoundary: 9,
+      stepEndSeq: 12, rewindOutcome: 'restored',
     }])
     state = applyCheckpointsProjection(state, prune(['cp-1']))
     assert.deepEqual(viewCheckpointsProjection(state), [])
@@ -110,9 +110,8 @@ describe('checkpoints 投影单元（真注册表接线）', () => {
 
     const session = root.sessions.create(SessionId('proj-session'), { meta: { cwd: path.resolve('/work') } })
     // 合成事件直接 append（绕过自适应门：投影只消费、不生产）。
-    session.append('checkpoint/snapshot', record({ id: 'cp-1' }))
+    session.append('checkpoint/snapshot', record({ id: 'cp-1', sessionBoundary: 5 }))
     session.append('checkpoint/bound', { id: 'cp-1', turn: 1, step: 1, stepEndSeq: 12 })
-    session.append('checkpoint/bound', { id: 'cp-1', turn: 1, forkSeq: 15 })
     session.append('checkpoint/snapshot', record({ id: 'cp-2', time: 2000, turn: 2, step: 1 }))
 
     const snapshot = root.sessionProjections.snapshot(session)
@@ -120,7 +119,7 @@ describe('checkpoints 投影单元（真注册表接线）', () => {
     assert.ok(Array.isArray(list), 'checkpoints 键由本单元供给')
     assert.deepEqual(list.map((entry) => entry.id), ['cp-1', 'cp-2'])
     assert.equal(list[0].stepEndSeq, 12)
-    assert.equal(list[0].forkSeq, 15)
+    assert.equal(list[0].sessionBoundary, 5)
 
     for (const fiber of fibers.reverse()) await fiber.dispose()
   })

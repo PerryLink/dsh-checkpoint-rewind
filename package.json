@@ -1,7 +1,7 @@
 {
   "name": "dsh-checkpoint-rewind",
-  "description": "Claude Code /rewind equivalent for DeepSeek Harness: git-first workspace file snapshots before every mutating tool execution, turn-boundary session forks, and a one-shot /rewind command that restores files and forks the session back to a checkpoint",
-  "version": "0.4.0",
+  "description": "Unified DSH checkpoints: session + workspace + config three-state snapshots with one-shot rollback — /checkpoint and /rewind commands, a checkpoint tool, automatic interval snapshots, a Settings page timeline with pairwise diffs, and seed-replay session rollback via the official sessions.create API",
+  "version": "0.5.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/PerryLink/dsh-checkpoint-rewind.git"
@@ -19,13 +19,21 @@
       "types": "./types.d.ts",
       "default": "./index.mjs"
     },
+    "./typert": {
+      "default": "./typert.host.mjs"
+    },
+    "./client": {
+      "default": "./client/index.js"
+    },
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
   "files": [
     "index.mjs",
     "types.d.ts",
+    "typert.host.mjs",
     "lib",
+    "client",
     "cordis.patch.yml",
     "README.md",
     "README.zh.md",
@@ -41,6 +49,15 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ]
     }
   },
   "dshWorkshop": {
@@ -64,8 +81,10 @@
       "workspace:read",
       "workspace:write",
       "git:read",
+      "git:write",
       "snapshot-storage:write",
       "session-log:read",
+      "settings:write",
       "network:none"
     ],
     "compatibility": {
@@ -74,10 +93,10 @@
       ]
     },
     "capability": {
-      "id": "rewind",
+      "id": "checkpoint-rewind",
       "kind": "command",
-      "invocation": "/rewind",
-      "expected": "the /rewind command is registered on the commands service: it lists checkpoints, restores workspace files after user confirmation, and forks the session at the checkpoint's turn boundary"
+      "invocation": "/checkpoint",
+      "expected": "the /checkpoint command captures a unified session+workspace+config checkpoint, and /rewind [workspace|session|config] <id> restores one or all three states after an approval-gated diff summary"
     },
     "evidence": {
       "install": null,
@@ -91,6 +110,8 @@
     "@deepseek-ai/dsh-llm": "0.1.0-rc.6",
     "@deepseek-ai/dsh-session": "0.1.0-rc.6",
     "@deepseek-ai/dsh-storage-domain": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-tools": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-typert-protocol": "0.1.0-rc.6",
     "@deepseek-ai/schemastery": ">=3.0.0"
   },
   "dependencies": {
@@ -105,6 +126,8 @@
     "@deepseek-ai/dsh-storage": "0.1.0-rc.6",
     "@deepseek-ai/dsh-storage-domain": "0.1.0-rc.6",
     "@deepseek-ai/dsh-storage-json": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-tools": "0.1.0-rc.6",
+    "@deepseek-ai/dsh-typert-protocol": "0.1.0-rc.6",
     "@deepseek-ai/dsh-user-questions": "0.1.0-rc.6",
     "@deepseek-ai/schemastery": ">=3.0.0"
   },
@@ -120,7 +143,9 @@
     "rewind",
     "checkpoint",
     "snapshot",
+    "session-replay",
     "session-fork",
+    "config-restore",
     "workspace-safety",
     "undo",
     "cordis-plugin"

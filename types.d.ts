@@ -2,42 +2,54 @@
 
 /**
  * 检查点记录（与 lib/domain.mjs 的持久 schema 同构；存储领域记录为权威）。
+ * 一体化三态模型：{id, 时间, 会话事件游标(seq), 工作区 git tree SHA(tree),
+ * 配置快照(config), 备注(note), 来源(kind)}。
  */
 export interface CheckpointRecord {
   id: string
   sessionId: string
   cwd: string
+  /** 会话事件游标：捕获时会话日志 seq。 */
   seq: number
   time: number
   provider: 'git' | 'copy'
+  /** 来源：manual（/checkpoint 与工具）· auto（间隔）· guard（回退保护）· mutation（变更安全网）。 */
+  kind: 'manual' | 'auto' | 'guard' | 'mutation'
   triggerTool: string
   turn: number
   step: number
   files: number
   bytes: number
+  /** provider 恢复句柄（git 提交对象 sha / copy 目录名）。 */
   ref: string
+  /** 工作区 git tree SHA（copy provider 为 null）。 */
+  tree?: string | null
+  /** 配置快照（捕获时插件有效配置）。 */
+  config?: Record<string, unknown>
+  /** 备注（手动检查点；≤500 字符）。 */
+  note?: string
+  /** 捕获所在 step 的 step/end 事件 seq（补记；"/rewind step N" 映射）。 */
   stepEndSeq?: number
-  forkSeq?: number
+  /** 会话重放边界：游标之前最近一条 turn/end 的 seq（首轮检查点缺失）。 */
+  sessionBoundary?: number
 }
 
 declare module '@deepseek-ai/dsh-session' {
   interface SessionEventMap {
     /**
-     * 一条工作区检查点被捕获（log-only）。
+     * 一条三态检查点被捕获（log-only）。
      * 注意：当前宿主构建（KNOWN_SESSION_EVENT_TYPES）尚未收录 checkpoint/*，
      * 运行时经自适应门跳过 append；宿主收录后自动开启（见 README「会话事件」）。
      */
     'checkpoint/snapshot': CheckpointRecord
     /**
-     * 检查点边界补记（log-only）：step/end 到达补 stepEndSeq，
-     * turn/end 到达补 forkSeq。
+     * 检查点边界补记（log-only）：step/end 到达补 stepEndSeq。
      */
     'checkpoint/bound': {
       id: string
       turn: number
       step?: number
       stepEndSeq?: number
-      forkSeq?: number
     }
     /** 配额清理（log-only）：被删检查点 id 与触发原因。 */
     'checkpoint/prune': {
@@ -45,21 +57,21 @@ declare module '@deepseek-ai/dsh-session' {
       reason: 'maxSnapshots' | 'maxSnapshotBytes' | 'turnEnd' | 'clear'
     }
     /**
-     * /rewind 回退动作结果（log-only）：三段式事务的关键字段。
-     * outcome: denied（确认门拒绝）| failed（文件恢复失败，未 fork）
-     * | restored-no-fork（文件已恢复但会话未派生）| restored+forked（全成功）。
+     * /rewind 回退动作结果（log-only）：三态事务的关键字段。
+     * outcome: denied（确认门拒绝）| failed（工作区恢复失败，其余未执行）
+     * | partial（工作区已恢复，配置/会话至少一项失败）| restored（全成功）。
+     * target: all | workspace | session | config。
      * preCheckpointId：本次回退前捕获的保护检查点（可用来撤销回退）。
      */
     'checkpoint/rewind': {
       checkpointId: string
       sessionId: string
-      outcome: 'denied' | 'failed' | 'restored-no-fork' | 'restored+forked'
-      provider?: 'git' | 'copy'
-      restored?: number
-      leftovers?: string[]
+      outcome: 'denied' | 'failed' | 'partial' | 'restored'
+      target: 'all' | 'workspace' | 'session' | 'config'
+      workspace?: { restored: number, mode: 'restore' | 'reset-hard' }
+      config?: { durable: boolean, error?: string }
+      session?: { childSessionId?: string, error?: string }
       preCheckpointId?: string
-      childSessionId?: string
-      forkSeq?: number
       error?: string
     }
   }
@@ -78,12 +90,16 @@ declare module '@deepseek-ai/dsh-session-projection' {
       step: number
       time: number
       provider: 'git' | 'copy'
+      kind: 'manual' | 'auto' | 'guard' | 'mutation'
       triggerTool: string
       files: number
       bytes: number
+      tree?: string | null
+      note?: string
+      seq: number
       stepEndSeq?: number
-      forkSeq?: number
-      rewindOutcome?: 'denied' | 'failed' | 'restored-no-fork' | 'restored+forked'
+      sessionBoundary?: number
+      rewindOutcome?: 'denied' | 'failed' | 'partial' | 'restored'
       preCheckpointId?: string
     }>
   }
@@ -98,9 +114,9 @@ export interface Config {
   gitBin?: string
   /** copy provider 快照根目录（默认 $DSH_HOME/dsh-checkpoint-rewind）。 */
   snapshotDir?: string
-  /** 每会话保留的检查点数（最旧优先清理，默认 50）。 */
+  /** 每会话保留的检查点数（最旧优先清理，默认 50；有界存储·数量界）。 */
   maxSnapshots?: number
-  /** 跨会话全局增量字节软配额（默认 512 MiB；每会话最新一条总是保留）。 */
+  /** 跨会话全局增量字节软配额（默认 512 MiB；有界存储·大小界；每会话最新一条总是保留）。 */
   maxSnapshotBytes?: number
   /** 轮次结束时执行配额清理（默认 true）。 */
   pruneOnTurnEnd?: boolean
@@ -119,4 +135,18 @@ export interface Config {
   preRewindCheckpoint?: 'warn' | 'require' | 'off'
   /** copy provider 内容哈希校验（去重 + 恢复完整性，默认 false）。 */
   verifyByHash?: boolean
+  /** 自动间隔快照：step/start 时检查；intervalMinutes=0 每步；enabled=false 关闭。 */
+  autoCheckpoint?: {
+    enabled?: boolean
+    intervalMinutes?: number
+  }
+  /**
+   * 工作区回滚实现：restore（默认安全覆盖，绝不删除检查点后新建的文件）·
+   * reset-hard（CC 对标：git reset --hard <快照提交>，默认关，需显式开启）。
+   */
+  workspaceRestore?: 'restore' | 'reset-hard'
+  /** 注入一句角色陈述式短提示词段落（默认 true，对齐官方 Minimal persona 风格）。 */
+  promptSection?: boolean
+  /** 注册 checkpoint 模型工具（默认 true）。 */
+  checkpointTool?: boolean
 }
