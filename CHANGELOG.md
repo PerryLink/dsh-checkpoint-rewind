@@ -4,6 +4,30 @@ All notable changes to dsh-checkpoint-rewind are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project versions with [SemVer](https://semver.org/).
 
+## [0.5.0] — 2026-08-16
+
+### Added
+
+- **Checkpoint settings-page timeline and pairwise diffs**: a settings
+  panel (`client/` + `lib/panel.mjs` + `lib/wire.mjs` +
+  `lib/settings-schema.mjs`) whose dual-source schema keys stay in sync
+  (cordis.yml Schemastery ⇄ settings zod), with a timeline view of the
+  session's checkpoints and pairwise diffs between snapshots.
+- **Line-level LCS unified diff** (`lib/diff.mjs`): `@@` headers carry the
+  1-based line number of each side's first changed line.
+- **Seed-replay session rewind** (`lib/session.mjs`): session-boundary and
+  replay-seed pure functions; rewinds restore through the official
+  `sessions.create` seed replay.
+- **Per-turn automatic snapshots** plus change-triggered snapshots.
+
+### Changed
+
+- Integration verification aligned with the 0.5.0 default behavior:
+  `/rewind` lists four checkpoints, replay-ready target selection, and
+  child-session notice wording.
+- `package.json#test:integration` now points at the renamed
+  `test/integration/rewind-headless.mjs`.
+
 ## [0.4.0] — 2026-08-15
 
 ### Added
