@@ -197,6 +197,10 @@ El plugin devuelve el id de la nueva sesión en el resultado del comando (`sessi
 
 **¿Qué hace `preview` — y qué no hace?** Resuelve el checkpoint y ejecuta una comparación de solo lectura: qué archivos se sobrescribirían (o recrearían), cuáles ya coinciden y qué archivos creados después del checkpoint se dejarían en su sitio. Nunca pregunta, nunca escribe, nunca bifurca y no registra ningún evento `checkpoint/rewind` — la puerta de aprobación solo se ejecuta en un `/rewind <id>` real.
 
+## Demo
+
+Una ejecución real de integración headless ensamblada (`npm run test:integration`) recorre el flujo completo: el agente modifica archivos a lo largo de dos turnos, luego `/rewind preview` inspecciona el impacto en modo solo lectura (sin puerta de confirmación, sin escrituras) y `/rewind <id>` restaura los archivos y reproduce la sesión en una nueva sesión hija. La ejecución verifica el contenido de los archivos, el contexto del hijo reproducido, el checkpoint de guardia y la supervivencia de los archivos creados después del checkpoint — para los flujos de proveedor copy y git (el flujo git también verifica que `HEAD` y el reflog quedan intactos). El controlador vive en `test/integration/rewind-headless.mjs`.
+
 ## Permisos y datos
 
 - **Permisos**: el manifiesto del workshop declara `workspace:read`, `workspace:write`, `git:read`, `git:write`, `snapshot-storage:write`, `session-log:read`, `settings:write` y `network:none`.

@@ -197,6 +197,10 @@ capture ── fs/write-intent · fs/edit-intent · tools/pre-execute (prepend, 
 
 **`preview` 做什么——又不做什么？** 它解析检查点，然后运行只读比较：哪些文件会被覆盖（或重建）、哪些已经一致、以及检查点之后创建的哪些文件会原样保留。它从不提示、从不写入、从不 fork，也不记录 `checkpoint/rewind` 事件——批准门只在真正的 `/rewind <id>` 上运行。
 
+## 演示
+
+一次真实的组装式 headless 集成运行（`npm run test:integration`）驱动完整流程：代理在两个轮次中修改文件，然后 `/rewind preview` 以只读方式查看影响（无确认门、无写入），`/rewind <id>` 恢复文件并把会话重放进新的子会话。该运行断言文件内容、重放后的子上下文、保护检查点，以及检查点之后创建的文件得以保留 —— 覆盖 copy 与 git 两种 provider 流程（git 流程还断言 `HEAD` 与 reflog 未被触碰）。驱动脚本位于 `test/integration/rewind-headless.mjs`。
+
 ## 权限与数据
 
 - **权限**：workshop 清单声明 `workspace:read`、`workspace:write`、`git:read`、`git:write`、`snapshot-storage:write`、`session-log:read`、`settings:write` 与 `network:none`。
