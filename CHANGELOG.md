@@ -4,6 +4,17 @@ All notable changes to dsh-checkpoint-rewind are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project versions with [SemVer](https://semver.org/).
 
+## [0.5.1] — 2026-08-17
+
+### Fixed
+
+- Profiles without a storage stack now boot: `storageDomain` became an optional service (`ctx.get`, graceful degradation) instead of a hard `inject`, so the plugin no longer leaves the profile hanging at `pending (waiting for service: storageDomain)`. Checkpoint/rewind commands return a structured error naming the exact rows to add (`@deepseek-ai/dsh-storage` + `@deepseek-ai/dsh-storage-json` with config `root` + `@deepseek-ai/dsh-storage-domain` with config `backend: json`), and the automatic snapshot/backfill/prune hooks degrade to log-only warnings.
+- Regression coverage: `test/no-storage.test.mjs` mounts the plugin without `storageDomain` and asserts the graceful degradation (commands explain the fix, event hooks stay quiet).
+
+### Changed
+
+- Five-language READMEs and AGENTS.md document the optional storage stack and the composition snippet.
+
 ## [0.5.0] — 2026-08-16
 
 ### Added

@@ -64,6 +64,22 @@ dsh plugin --profile web add dsh-checkpoint-rewind
 dsh --profile web --dump-config | grep -A4 'id: checkpoint-rewind'
 ```
 
+Checkpoints persist through the `storageDomain` service. The plugin mounts without it and never blocks profile startup — checkpoint/rewind commands then return a structured error naming the exact rows to add. Compose the storage stack once to enable checkpoints:
+
+```yaml
+- insert:
+    - id: checkpoint-rewind-storage
+      name: '@deepseek-ai/dsh-storage'
+    - id: checkpoint-rewind-storage-json
+      name: '@deepseek-ai/dsh-storage-json'
+      config:
+        root: !!js dshHomePath('checkpoint-rewind/storage')
+    - id: checkpoint-rewind-storage-domain
+      name: '@deepseek-ai/dsh-storage-domain'
+      config:
+        backend: json
+```
+
 The package is pure ESM with no build step — `index.mjs` and `lib/` are the shipped artifacts. Workspace mutations now create checkpoints automatically; run `/rewind` to list them:
 
 ```text
@@ -91,6 +107,7 @@ Address a checkpoint by its unique id prefix, by step number, or by `latest`:
 - **git channel** (latest `main`): `dsh plugin --profile web add "github:PerryLink/dsh-checkpoint-rewind#main"` — pure ESM, no `prepare` or `allowBuilds` step.
 - **npm channel** (published releases): `dsh plugin --profile web add dsh-checkpoint-rewind`.
 - **tarball channel**: `npm pack` in this repo, then `dsh plugin --profile web add ./dsh-checkpoint-rewind-<version>.tgz`.
+- **storage stack** (required for checkpoints, optional for mounting): `@deepseek-ai/dsh-storage` + `@deepseek-ai/dsh-storage-json` (config `root`) + `@deepseek-ai/dsh-storage-domain` (config `backend: json`) — see Quick start; the plugin still mounts without them and every command explains the fix.
 - **uninstall**: `dsh plugin --profile web remove dsh-checkpoint-rewind` — snapshot files stay until you delete `$DSH_HOME/dsh-checkpoint-rewind`; git objects are garbage-collected.
 
 ## Configuration
@@ -229,7 +246,7 @@ A real assembled-headless integration run (`npm run test:integration`) drives th
 |---|---|
 | `/rewind <id>` says `rewind cancelled: no confirmation answerer` | No userQuestions/approval channel is mounted — the plugin fails closed. Run in the Web UI (or mount a question provider); `confirmVia` selects the channel. |
 | `/rewind <id>` says `approval requires an open turn …` | Commands run between turns and approval needs a turn — mount userQuestions or set `confirmVia: userQuestions`. |
-| `rewind: checkpoint registry unavailable` | The `checkpoints` storage domain could not open (missing/erroring storage backend). Check the harness logs and the storage-domain backend config. |
+| `rewind: checkpoint registry unavailable` | The `checkpoints` storage domain could not open. Either the `storageDomain` service is not composed (add the storage stack rows from Quick start: `@deepseek-ai/dsh-storage` + `@deepseek-ai/dsh-storage-json` with config `root` + `@deepseek-ai/dsh-storage-domain` with config `backend: json`) or the backend is erroring; check the harness logs. |
 | A checkpoint lists as `fork: pending (turn not closed)` | Its turn has no `turn/end` yet; files can still be restored, but the session replay waits for the turn to close. |
 | `files restored … but the session was NOT replayed` | The transaction's session phase failed (no closed boundary, or replay rejected). Files stay restored; use the printed `rewind guard: <id>` to undo. |
 | `rewind: aborted — the pre-rewind guard checkpoint could not be captured` | `preRewindCheckpoint: require` refused the rewind because the guard capture failed; fix the storage (or set `warn`/`off`). |

@@ -23,9 +23,11 @@
 //   cordis.yml 为 base 层；设置页 Plugins → Checkpoints 标签页展示时间线与两两
 //   diff（lib/panel.mjs + typert.host.mjs + client/）。
 //
-// 只消费公开服务：sessions / storageDomain / commands（inject 声明），
+// 只消费公开服务：sessions / commands（inject 声明）；storageDomain /
 // userQuestions / approval / sessionProjections / settings / tools /
-// systemPrompt 按需可选查找（缺失 = 失败关闭或优雅降级）。
+// systemPrompt 按需可选查找（缺失 = 失败关闭或优雅降级——storageDomain 缺失时
+// 插件照常挂载，checkpoint/rewind 路径返回结构化错误并提示组合方式，绝不
+// 把 profile 卡在 pending）。
 
 import { randomUUID } from 'node:crypto'
 import { Context } from '@deepseek-ai/cordis'
@@ -93,8 +95,8 @@ import { CheckpointPanelService } from './lib/panel.mjs'
 
 export const name = PLUGIN_NAME
 
-/** 必需服务：缺失即加载失败（响亮）。 */
-export const inject = ['sessions', 'storageDomain', 'commands']
+/** 必需服务：缺失即加载失败（响亮）。storageDomain 是可选能力，见 apply 内的降级路径。 */
+export const inject = ['sessions', 'commands']
 
 /**
  * 宿主 append 是否盖章 ignorable 信封（运行时能力探测）。
@@ -317,10 +319,23 @@ export async function apply(ctx, config = {}) {
   }, `${PLUGIN_NAME}.providers`)
 
   // --- 检查点注册表：ctx.storageDomain 域 'checkpoints'（异步打开，命令/快照路径 await）。
-  const tablePromise = ctx.storageDomain.open(checkpointsDomainSpec).then((domain) => {
-    ctx.effect(() => () => { void domain.close() }, `${PLUGIN_NAME}.domain.close`)
-    return domain.table('checkpoints')
-  })
+  // storageDomain 是可选服务：宿主未组合存储栈时插件照常挂载，绝不把 profile
+  // 卡在 pending——checkpoint/rewind 路径按消费方各自处理拒绝（命令返回结构化
+  // 错误并说明组合方法，自动快照/补记/清理只记日志），失败大声、优雅降级。
+  const storageDomain = ctx.get('storageDomain')
+  const tablePromise = storageDomain === undefined
+    ? Promise.reject(registryUnavailable(
+      'the storageDomain service is not composed in this profile — add the storage stack rows '
+      + '(@deepseek-ai/dsh-storage + @deepseek-ai/dsh-storage-json with config.root + '
+      + '@deepseek-ai/dsh-storage-domain with config.backend: json) to enable checkpoints',
+    ))
+    : storageDomain.open(checkpointsDomainSpec).then((domain) => {
+        ctx.effect(() => () => { void domain.close() }, `${PLUGIN_NAME}.domain.close`)
+        return domain.table('checkpoints')
+      })
+  if (storageDomain === undefined) {
+    warn('storageDomain service not composed: checkpoints/rewind stay unavailable (add @deepseek-ai/dsh-storage + @deepseek-ai/dsh-storage-json + @deepseek-ai/dsh-storage-domain rows with backend json to enable them)')
+  }
   tablePromise.catch(() => {}) // 消费方各自处理拒绝；此处仅避免未处理拒绝告警。
 
   // 领域写操作链：快照落盘、边界补记、清理按序执行；命令执行前先 await 排空。

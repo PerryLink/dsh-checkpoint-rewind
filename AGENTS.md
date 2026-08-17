@@ -55,7 +55,7 @@ npm run test:integration   # 组装式 headless 集成验证（test/integration/
 
 ## DSH 插件约束（红线）
 
-- **只消费公开服务**：`sessions` / `storageDomain` / `commands`（`inject` 声明）；`userQuestions` / `approval` 按需可选查找（缺失 = 失败关闭）。不修改 DSH 引擎 / agent-loop / apiproxy / 官方 UI 包。
+- **只消费公开服务**：`sessions` / `commands`（`inject` 声明，缺失即加载失败）；`storageDomain` / `userQuestions` / `approval` / `settings` / `tools` / `systemPrompt` / `sessionProjections` 按需可选查找（缺失 = 失败关闭或优雅降级——`storageDomain` 缺失时插件照常挂载，checkpoint/rewind 路径返回结构化错误并提示组合存储栈，绝不把 profile 卡在 pending）。不修改 DSH 引擎 / agent-loop / apiproxy / 官方 UI 包。
 - **注册即 effect**：一切贡献走 `ctx.effect()` / `ctx.on()` / 服务 `register()`（返回 disposer）；provider 注册的 disposer 交给 `ctx.effect()`；绝不手动收尾。
 - **waterfall 直通**：`fs/write-intent` / `fs/edit-intent` / `tools/pre-execute` 的监听必须调用 `next()` 并原样返回（快照是旁路观察，决策槽仍归策略插件）。
 - **模型可见 ⟺ 落盘**：回退结果与检查点列表由 `command/run` + `command/done`（宿主已知事件，命令运行时自动落盘）+ 领域记录重建；`checkpoint/*` 事件经自适应门追加（宿主收录该类型或支持 `ignorable` 信封时自动开启）。

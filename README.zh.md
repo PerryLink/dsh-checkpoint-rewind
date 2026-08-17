@@ -64,6 +64,22 @@ dsh plugin --profile web add dsh-checkpoint-rewind
 dsh --profile web --dump-config | grep -A4 'id: checkpoint-rewind'
 ```
 
+检查点通过 `storageDomain` 服务持久化。未组合它时插件照常挂载、绝不阻塞 profile 启动——checkpoint/rewind 命令会返回结构化错误并指明要添加的行。一次性组合存储栈即可启用检查点：
+
+```yaml
+- insert:
+    - id: checkpoint-rewind-storage
+      name: '@deepseek-ai/dsh-storage'
+    - id: checkpoint-rewind-storage-json
+      name: '@deepseek-ai/dsh-storage-json'
+      config:
+        root: !!js dshHomePath('checkpoint-rewind/storage')
+    - id: checkpoint-rewind-storage-domain
+      name: '@deepseek-ai/dsh-storage-domain'
+      config:
+        backend: json
+```
+
 该包是纯 ESM，无构建步骤——`index.mjs` 与 `lib/` 即发布产物。工作区变更现在会自动创建检查点；运行 `/rewind` 列出它们：
 
 ```text
@@ -91,6 +107,7 @@ run "/rewind <id>" to restore files and fork the session from that checkpoint
 - **git 渠道**（最新 `main`）：`dsh plugin --profile web add "github:PerryLink/dsh-checkpoint-rewind#main"` —— 纯 ESM，无需 `prepare` 或 `allowBuilds` 步骤。
 - **npm 渠道**（已发布版本）：`dsh plugin --profile web add dsh-checkpoint-rewind`。
 - **tarball 渠道**：在本仓库执行 `npm pack`，然后 `dsh plugin --profile web add ./dsh-checkpoint-rewind-<version>.tgz`。
+- **存储栈**（检查点必需，挂载不必需）：`@deepseek-ai/dsh-storage` + `@deepseek-ai/dsh-storage-json`（配置 `root`）+ `@deepseek-ai/dsh-storage-domain`（配置 `backend: json`）——见快速开始；未组合时插件仍可挂载，每条命令都会说明修复方法。
 - **卸载**：`dsh plugin --profile web remove dsh-checkpoint-rewind` —— 快照文件保留，直到你删除 `$DSH_HOME/dsh-checkpoint-rewind`；git 对象会被垃圾回收。
 
 ## 配置
@@ -229,7 +246,7 @@ capture ── fs/write-intent · fs/edit-intent · tools/pre-execute (prepend, 
 |---|---|
 | `/rewind <id>` 提示 `rewind cancelled: no confirmation answerer` | 没有挂载 userQuestions/approval 通道——插件失败关闭。请在 Web UI 中运行（或挂载一个提问 provider）；`confirmVia` 选择通道。 |
 | `/rewind <id>` 提示 `approval requires an open turn …` | 命令在轮次之间运行，而 approval 需要轮次——挂载 userQuestions 或设 `confirmVia: userQuestions`。 |
-| `rewind: checkpoint registry unavailable` | `checkpoints` 存储域无法打开（存储后端缺失/出错）。检查 harness 日志与存储域后端配置。 |
+| `rewind: checkpoint registry unavailable` | `checkpoints` 存储域无法打开。要么 `storageDomain` 服务未组合（按「快速开始」添加存储栈三行：`@deepseek-ai/dsh-storage` + `@deepseek-ai/dsh-storage-json`（配置 `root`）+ `@deepseek-ai/dsh-storage-domain`（配置 `backend: json`）），要么后端本身出错；检查 harness 日志。 |
 | 某检查点显示为 `fork: pending (turn not closed)` | 它的轮次还没有 `turn/end`；文件仍可恢复，但会话重放要等轮次关闭。 |
 | `files restored … but the session was NOT replayed` | 事务的会话阶段失败（没有已关闭边界，或重放被拒）。文件保持已恢复；用打印出的 `rewind guard: <id>` 撤销。 |
 | `rewind: aborted — the pre-rewind guard checkpoint could not be captured` | `preRewindCheckpoint: require` 因守护捕获失败而拒绝回滚；修复存储（或设 `warn`/`off`）。 |

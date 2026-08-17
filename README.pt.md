@@ -64,6 +64,22 @@ dsh plugin --profile web add dsh-checkpoint-rewind
 dsh --profile web --dump-config | grep -A4 'id: checkpoint-rewind'
 ```
 
+Os checkpoints persistem pelo serviço `storageDomain`. O plugin monta sem ele e nunca bloqueia a inicialização do perfil — os comandos checkpoint/rewind devolvem então um erro estruturado indicando as linhas exatas a adicionar. Componha a pilha de armazenamento uma vez para habilitá-los:
+
+```yaml
+- insert:
+    - id: checkpoint-rewind-storage
+      name: '@deepseek-ai/dsh-storage'
+    - id: checkpoint-rewind-storage-json
+      name: '@deepseek-ai/dsh-storage-json'
+      config:
+        root: !!js dshHomePath('checkpoint-rewind/storage')
+    - id: checkpoint-rewind-storage-domain
+      name: '@deepseek-ai/dsh-storage-domain'
+      config:
+        backend: json
+```
+
 O pacote é ESM puro sem etapa de build — `index.mjs` e `lib/` são os artefatos enviados. As mutações do workspace agora criam checkpoints automaticamente; execute `/rewind` para listá-los:
 
 ```text
@@ -91,6 +107,7 @@ Enderece um checkpoint pelo prefixo de id único, pelo número do passo ou por `
 - **Canal git** (último `main`): `dsh plugin --profile web add "github:PerryLink/dsh-checkpoint-rewind#main"` — ESM puro, sem etapa de `prepare` nem `allowBuilds`.
 - **Canal npm** (versões publicadas): `dsh plugin --profile web add dsh-checkpoint-rewind`.
 - **Canal tarball**: `npm pack` neste repo e depois `dsh plugin --profile web add ./dsh-checkpoint-rewind-<version>.tgz`.
+- **Pilha de armazenamento** (necessária para checkpoints, opcional para montar): `@deepseek-ai/dsh-storage` + `@deepseek-ai/dsh-storage-json` (config `root`) + `@deepseek-ai/dsh-storage-domain` (config `backend: json`) — veja Início rápido; o plugin monta mesmo sem ela e cada comando explica a correção.
 - **Desinstalar**: `dsh plugin --profile web remove dsh-checkpoint-rewind` — os arquivos de instantâneo permanecem até você excluir `$DSH_HOME/dsh-checkpoint-rewind`; os objetos git são coletados pelo garbage collector.
 
 ## Configuração
@@ -229,7 +246,7 @@ Uma execução real de integração headless montada (`npm run test:integration`
 |---|---|
 | `/rewind <id>` diz `rewind cancelled: no confirmation answerer` | Nenhum canal userQuestions/approval está montado — o plugin fecha em falha. Rode na Web UI (ou monte um provedor de perguntas); `confirmVia` seleciona o canal. |
 | `/rewind <id>` diz `approval requires an open turn …` | Os comandos rodam entre turnos e approval precisa de um turno — monte userQuestions ou defina `confirmVia: userQuestions`. |
-| `rewind: checkpoint registry unavailable` | O domínio de armazenamento `checkpoints` não pôde abrir (backend de armazenamento ausente/com erro). Verifique os logs do harness e a configuração do backend do domínio. |
+| `rewind: checkpoint registry unavailable` | O domínio de armazenamento `checkpoints` não pôde abrir. Ou o serviço `storageDomain` não está composto (adicione as linhas da pilha de armazenamento do Início rápido: `@deepseek-ai/dsh-storage` + `@deepseek-ai/dsh-storage-json` com config `root` + `@deepseek-ai/dsh-storage-domain` com config `backend: json`) ou o backend está com erro; verifique os logs do harness. |
 | Um checkpoint aparece como `fork: pending (turn not closed)` | Seu turno ainda não tem `turn/end`; os arquivos ainda podem ser restaurados, mas a reprodução da sessão espera o turno fechar. |
 | `files restored … but the session was NOT replayed` | A fase de sessão da transação falhou (sem limite fechado, ou reprodução rejeitada). Os arquivos permanecem restaurados; use o `rewind guard: <id>` impresso para desfazer. |
 | `rewind: aborted — the pre-rewind guard checkpoint could not be captured` | `preRewindCheckpoint: require` recusou a reversão porque a captura da guarda falhou; corrija o armazenamento (ou defina `warn`/`off`). |

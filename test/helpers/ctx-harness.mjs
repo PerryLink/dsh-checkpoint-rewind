@@ -65,7 +65,8 @@ export async function mountPlugin(opts = {}) {
     fibers.push(await root.plugin(plugin, config))
   }
   const { facility, records, opened } = makeDomainFacility()
-  root.provide('storageDomain', facility)
+  // storageDomain: false 模拟未组合存储栈的宿主（插件必须照常挂载并降级）。
+  if (opts.storageDomain !== false) root.provide('storageDomain', facility)
   if (opts.userQuestions !== undefined) root.provide('userQuestions', opts.userQuestions)
   if (opts.approval !== undefined) root.provide('approval', opts.approval)
   if (opts.tools !== undefined) root.provide('tools', opts.tools)

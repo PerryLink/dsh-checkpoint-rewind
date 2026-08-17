@@ -64,6 +64,22 @@ dsh plugin --profile web add dsh-checkpoint-rewind
 dsh --profile web --dump-config | grep -A4 'id: checkpoint-rewind'
 ```
 
+चेकपॉइंट `storageDomain` सेवा के ज़रिए बने रहते हैं। प्लगइन इसके बिना भी माउंट होता है और प्रोफ़ाइल स्टार्टअप को कभी रोकता नहीं — तब checkpoint/rewind कमांड एक संरचित त्रुटि लौटाते हैं जिसमें जोड़ने वाली सटीक पंक्तियाँ बताई जाती हैं। चेकपॉइंट सक्षम करने के लिए स्टोरेज स्टैक एक बार जोड़ें:
+
+```yaml
+- insert:
+    - id: checkpoint-rewind-storage
+      name: '@deepseek-ai/dsh-storage'
+    - id: checkpoint-rewind-storage-json
+      name: '@deepseek-ai/dsh-storage-json'
+      config:
+        root: !!js dshHomePath('checkpoint-rewind/storage')
+    - id: checkpoint-rewind-storage-domain
+      name: '@deepseek-ai/dsh-storage-domain'
+      config:
+        backend: json
+```
+
 पैकेज शुद्ध ESM है और इसमें कोई बिल्ड चरण नहीं है — `index.mjs` और `lib/` ही शिप किए गए आर्टिफ़ैक्ट हैं। वर्कस्पेस बदलाव अब स्वचालित रूप से चेकपॉइंट बनाते हैं; उन्हें सूचीबद्ध करने के लिए `/rewind` चलाएँ:
 
 ```text
@@ -91,6 +107,7 @@ run "/rewind <id>" to restore files and fork the session from that checkpoint
 - **git चैनल** (नवीनतम `main`): `dsh plugin --profile web add "github:PerryLink/dsh-checkpoint-rewind#main"` — शुद्ध ESM, कोई `prepare` या `allowBuilds` चरण नहीं।
 - **npm चैनल** (प्रकाशित रिलीज़): `dsh plugin --profile web add dsh-checkpoint-rewind`।
 - **tarball चैनल**: इस रेपो में `npm pack`, फिर `dsh plugin --profile web add ./dsh-checkpoint-rewind-<version>.tgz`।
+- **स्टोरेज स्टैक** (चेकपॉइंट के लिए आवश्यक, माउंट के लिए वैकल्पिक): `@deepseek-ai/dsh-storage` + `@deepseek-ai/dsh-storage-json` (कॉन्फ़िग `root`) + `@deepseek-ai/dsh-storage-domain` (कॉन्फ़िग `backend: json`) — त्वरित शुरुआत देखें; इसके बिना भी प्लगइन माउंट होता है और हर कमांड समाधान बताता है।
 - **अनइंस्टॉल**: `dsh plugin --profile web remove dsh-checkpoint-rewind` — स्नैपशॉट फ़ाइलें तब तक रहती हैं जब तक आप `$DSH_HOME/dsh-checkpoint-rewind` नहीं हटाते; git ऑब्जेक्ट गार्बेज-कलेक्ट हो जाते हैं।
 
 ## कॉन्फ़िगरेशन
@@ -229,7 +246,7 @@ capture ── fs/write-intent · fs/edit-intent · tools/pre-execute (prepend, 
 |---|---|
 | `/rewind <id>` कहता है `rewind cancelled: no confirmation answerer` | कोई userQuestions/approval चैनल माउंट नहीं है — प्लगइन विफल-बंद होता है। Web UI में चलाएँ (या प्रश्न प्रदाता माउंट करें); `confirmVia` चैनल चुनता है। |
 | `/rewind <id>` कहता है `approval requires an open turn …` | कमांड टर्न के बीच चलते हैं और approval को टर्न चाहिए — userQuestions माउंट करें या `confirmVia: userQuestions` सेट करें। |
-| `rewind: checkpoint registry unavailable` | `checkpoints` स्टोरेज डोमेन खुल नहीं सका (स्टोरेज बैकएंड अनुपस्थित/त्रुटि)। हार्नेस लॉग और स्टोरेज-डोमेन बैकएंड कॉन्फ़िग जाँचें। |
+| `rewind: checkpoint registry unavailable` | `checkpoints` स्टोरेज डोमेन खुल नहीं सका। या तो `storageDomain` सेवा जुड़ी नहीं है (त्वरित शुरुआत की स्टोरेज स्टैक पंक्तियाँ जोड़ें: `@deepseek-ai/dsh-storage` + `@deepseek-ai/dsh-storage-json` कॉन्फ़िग `root` के साथ + `@deepseek-ai/dsh-storage-domain` कॉन्फ़िग `backend: json` के साथ) या बैकएंड में त्रुटि है; हार्नेस लॉग जाँचें। |
 | कोई चेकपॉइंट `fork: pending (turn not closed)` के रूप में दिखता है | उसके टर्न का अभी `turn/end` नहीं है; फ़ाइलें फिर भी बहाल हो सकती हैं, पर सत्र रीप्ले टर्न बंद होने की प्रतीक्षा करता है। |
 | `files restored … but the session was NOT replayed` | लेनदेन का सत्र चरण विफल रहा (कोई बंद सीमा नहीं, या रीप्ले अस्वीकृत)। फ़ाइलें बहाल रहती हैं; उलटने के लिए प्रिंट किए गए `rewind guard: <id>` का उपयोग करें। |
 | `rewind: aborted — the pre-rewind guard checkpoint could not be captured` | `preRewindCheckpoint: require` ने रोलबैक अस्वीकार किया क्योंकि गार्ड कैप्चर विफल रहा; स्टोरेज ठीक करें (या `warn`/`off` सेट करें)। |
