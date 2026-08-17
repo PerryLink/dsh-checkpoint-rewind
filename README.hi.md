@@ -119,7 +119,7 @@ run "/rewind <id>" to restore files and fork the session from that checkpoint
 | `enabled` | `true` | मास्टर स्विच; `false` पर कमांड, श्रोता और प्रदाता पूरी तरह हटा देता है |
 | `provider` | `auto` | स्नैपशॉट प्रदाता: `auto` (git उपलब्ध हो तो git, वरना copy) · `git` · `copy` |
 | `gitBin` | `git` | git निष्पादन योग्य का पथ |
-| `snapshotDir` | `$DSH_HOME/dsh-checkpoint-rewind` | copy प्रदाता के स्नैपशॉट का मूल |
+| `snapshotDir` | `$DSH_HOME/dsh-checkpoint-rewind` (`$DSH_HOME` सेट न होने पर `~/.dsh/dsh-checkpoint-rewind` फ़ॉलबैक) | copy प्रदाता के स्नैपशॉट का मूल |
 | `maxSnapshots` | `50` | प्रति सत्र रखे गए चेकपॉइंट (सबसे पुराने पहले हटते हैं) |
 | `maxSnapshotBytes` | `536870912` (512 MiB) | वैश्विक वृद्धिशील-बाइट नरम कोटा (प्रति सत्र नवीनतम हमेशा रहता है) |
 | `pruneOnTurnEnd` | `true` | टर्न समाप्त होने पर कोटा छँटाई चलाएँ |

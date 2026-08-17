@@ -119,7 +119,7 @@ Todas las opciones son campos Schemastery `Config` (modificables desde cordis.ym
 | `enabled` | `true` | Interruptor maestro; en `false`, elimina comandos, listeners y proveedores por completo |
 | `provider` | `auto` | Proveedor de instantáneas: `auto` (git si está disponible, si no copy) · `git` · `copy` |
 | `gitBin` | `git` | Ruta del ejecutable de git |
-| `snapshotDir` | `$DSH_HOME/dsh-checkpoint-rewind` | Raíz de las instantáneas del proveedor copy |
+| `snapshotDir` | `$DSH_HOME/dsh-checkpoint-rewind` (repliegue `~/.dsh/dsh-checkpoint-rewind` si `$DSH_HOME` no está definido) | Raíz de las instantáneas del proveedor copy |
 | `maxSnapshots` | `50` | Checkpoints conservados por sesión (los más antiguos se podan primero) |
 | `maxSnapshotBytes` | `536870912` (512 MiB) | Cuota blanda global de bytes incrementales (siempre se conserva el más nuevo por sesión) |
 | `pruneOnTurnEnd` | `true` | Ejecuta la poda de cuota al terminar un turno |

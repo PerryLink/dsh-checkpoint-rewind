@@ -4,6 +4,13 @@ All notable changes to dsh-checkpoint-rewind are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project versions with [SemVer](https://semver.org/).
 
+## [0.5.2] — 2026-08-17
+
+### Fixed
+
+- `resolveSnapshotDir` no longer throws when `$DSH_HOME` is not exported (issue #4): the default copy-provider snapshot root falls back to `~/.dsh/dsh-checkpoint-rewind` — the same location dsh uses by default — instead of crashing the first snapshot capture. "Running under dsh" does not guarantee `$DSH_HOME` is exported, and the safety net must not break the capture path.
+- Regression coverage: `test/workspace.test.mjs` pins every `resolveSnapshotDir` resolution mode, including the unset-`$DSH_HOME` fallback.
+
 ## [0.5.1] — 2026-08-17
 
 ### Fixed

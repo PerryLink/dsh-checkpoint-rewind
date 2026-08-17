@@ -119,7 +119,7 @@ All tunables are Schemastery `Config` fields (changeable from cordis.yml). Nothi
 | `enabled` | `true` | Master switch; `false` removes the commands, listeners, and providers entirely |
 | `provider` | `auto` | Snapshot provider: `auto` (git if available, else copy) · `git` · `copy` |
 | `gitBin` | `git` | Git executable path |
-| `snapshotDir` | `$DSH_HOME/dsh-checkpoint-rewind` | Root for copy-provider snapshots |
+| `snapshotDir` | `$DSH_HOME/dsh-checkpoint-rewind` (fallback `~/.dsh/dsh-checkpoint-rewind` when `$DSH_HOME` is unset) | Root for copy-provider snapshots |
 | `maxSnapshots` | `50` | Checkpoints kept per session (oldest pruned first) |
 | `maxSnapshotBytes` | `536870912` (512 MiB) | Global incremental-byte soft quota (newest per session always retained) |
 | `pruneOnTurnEnd` | `true` | Run quota pruning when a turn ends |

@@ -119,7 +119,7 @@ run "/rewind <id>" to restore files and fork the session from that checkpoint
 | `enabled` | `true` | 总开关；为 `false` 时完全移除命令、监听器与 provider |
 | `provider` | `auto` | 快照 provider：`auto`（有 git 则 git，否则 copy）· `git` · `copy` |
 | `gitBin` | `git` | Git 可执行文件路径 |
-| `snapshotDir` | `$DSH_HOME/dsh-checkpoint-rewind` | copy provider 快照根目录 |
+| `snapshotDir` | `$DSH_HOME/dsh-checkpoint-rewind`（`$DSH_HOME` 未设置时回退 `~/.dsh/dsh-checkpoint-rewind`） | copy provider 快照根目录 |
 | `maxSnapshots` | `50` | 每个会话保留的检查点数（最旧优先清理） |
 | `maxSnapshotBytes` | `536870912`（512 MiB） | 全局增量字节软配额（每会话最新一条总是保留） |
 | `pruneOnTurnEnd` | `true` | 轮次结束时执行配额清理 |
