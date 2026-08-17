@@ -40,6 +40,17 @@
 5. **Seed-replay session rollback** — session rollback replays events up to the checkpoint boundary through the official `sessions.create` seed API into a new child session; the original session keeps its full history.
 6. **Settings page timeline** — the `Plugins → Checkpoints` tab renders the session's checkpoints with pairwise line-level diffs.
 
+## Why another rewind plugin?
+
+| Plugin | What it sells | Restores files? | Rewinds the session? |
+|---|---|---|---|
+| **dsh-checkpoint-rewind** (this) | git-object snapshots + three-state rollback + one-shot restore | ✅ full workspace state | ✅ seed-replay child session |
+| [Anionex/dsh-turn-rewind](https://github.com/Anionex/dsh-turn-rewind) | persistent Change Ledger of per-mutation deltas | ✅ by replaying inverse deltas | ✅ its own ledger model |
+| [LingLambda/dsh-undo](https://github.com/LingLambda/dsh-undo) | pure context rollback to the last completed step | ❌ | ✅ context only |
+| [Mongfayi/dsh-recall](https://github.com/Mongfayi/dsh-recall) | message recall (remove a turn and everything after) | ❌ (explicitly) | ✅ turn removal |
+
+The difference in one sentence: **dsh-checkpoint-rewind captures the *workspace state* with side-effect-free git primitives before each mutation, and makes "back to step N" one approved command — guard checkpoint first, files restored second, config restored third, session replayed fourth, each phase logged.** No delta bookkeeping to drift, no message-level editing (that belongs to a different plugin), no cross-device sync.
+
 ## Quick start
 
 ```sh
@@ -53,7 +64,27 @@ dsh plugin --profile web add dsh-checkpoint-rewind
 dsh --profile web --dump-config | grep -A4 'id: checkpoint-rewind'
 ```
 
-The package is pure ESM with no build step — `index.mjs` and `lib/` are the shipped artifacts. Workspace mutations now create checkpoints automatically; run `/rewind` to list them.
+The package is pure ESM with no build step — `index.mjs` and `lib/` are the shipped artifacts. Workspace mutations now create checkpoints automatically; run `/rewind` to list them:
+
+```text
+rewind: 3 checkpoints (newest last):
+#a1b2c3d4 · (git) · turn 2 step 1 · 2026-08-14 12:00:01 (3 min ago) · trigger: bash · 4 files · 1.2 MiB
+#b2c3d4e5 · (git) · turn 2 step 3 · 2026-08-14 12:00:41 · trigger: str_replace_editor · 2 files · 310 KiB
+#c3d4e5f6 · (copy) · turn 3 step 1 · 2026-08-14 12:01:10 · trigger: write · 1 file · 90 KiB
+run "/rewind <id>" to restore files and fork the session from that checkpoint
+```
+
+Address a checkpoint by its unique id prefix, by step number, or by `latest`:
+
+```text
+/rewind b2c3d4e5
+/rewind step 2
+/rewind latest
+/rewind preview b2c3d4e5   # read-only: show which files would change, touch nothing
+/rewind clear              # confirmed deletion of this session's checkpoints (files untouched)
+```
+
+`preview` resolves through the same addressing and prints the impact without asking for confirmation or writing anything.
 
 ## Install & uninstall
 
@@ -87,6 +118,19 @@ All tunables are Schemastery `Config` fields (changeable from cordis.yml). Nothi
 | `promptSection` | `true` | Inject a short role-statement prompt section |
 | `checkpointTool` | `true` | Register the `checkpoint` model tool |
 
+```yaml
+- insert:
+    - id: checkpoint-rewind
+      name: dsh-checkpoint-rewind
+      config:
+        provider: auto
+        maxSnapshots: 50
+        maxSnapshotBytes: 536870912
+        pruneOnTurnEnd: true
+        confirmVia: auto
+        preRewindCheckpoint: warn
+```
+
 ## Tools & surfaces
 
 | Surface | Kind | Notes |
@@ -99,27 +143,95 @@ All tunables are Schemastery `Config` fields (changeable from cordis.yml). Nothi
 | `checkpoints` projection | session projection | Timeline strip folded from the session log |
 | Settings page timeline | client | `Plugins → Checkpoints` tab with pairwise diffs |
 
+## Safety model
+
+- **Git history is untouchable.** The git provider runs only whitelisted side-effect-free primitives — `stash create`, `commit-tree`, `restore --worktree`, `ls-tree`, `diff-tree`, `ls-files`, `status`, `rev-parse` — enforced by a runtime assertion, and object refs are validated as hex ids before being passed to git (a tampered record cannot inject git options). **No `reset --hard` by default, no `clean`, no index/history mutation, ever** (see `workspaceRestore` below).
+- **Overwrite rollback, never deletion.** Restore only overwrites captured files, and the git provider restores **explicit paths** (`git restore … -- .` would delete files `git add`-ed after the checkpoint). Files created after the checkpoint (untracked **or** staged) are *reported* and left in place.
+- **No writes through links, no path traversal.** The copy provider validates checkpoint refs before joining them into snapshot-directory paths, and refuses to restore through a destination (or ancestor) that has become a symbolic link — so a restore can never follow a link out of the workspace.
+- **Restore requires approval.** Overwriting user files always goes through the confirmation seam with `ask` semantics; a missing, throwing, or answering-no answerer **fails closed**. `/rewind preview` is the read-only way to inspect the impact first.
+- **Rewind is reversible.** Before restoring, a guard checkpoint captures the current state; restoring the guard undoes the rewind. `preRewindCheckpoint: require` aborts the rewind when the guard cannot be captured.
+- **Fixed-order transaction.** Guard first, workspace second, config third, session replay fourth; every phase is logged; a failed restore leaves files, checkpoints, and session untouched.
+- **`workspaceRestore: 'reset-hard'` is CC-equivalent and opt-in.** It runs `git reset --hard <snapshot commit>` (branch head moves to the snapshot commit; pre-snapshot history stays recoverable via reflog; untracked files untouched). It is off by default.
+- **Model-visible ⟺ logged.** Everything a user or model sees reconstructs from `command/run` + `command/done` (and, once the host knows them, `checkpoint/*` events) plus the durable `checkpoints` domain.
+
+## How it works
+
+```text
+capture ── fs/write-intent · fs/edit-intent · tools/pre-execute (prepend, pass-through)
+        ── step/start auto interval ── /checkpoint · checkpoint tool ── pre-rewind guard
+             │
+             ▼  ProviderRegistry.resolve(auto)  →  git: stash create / commit-tree
+             │                                     copy: incremental dir + hardlinks
+             ▼
+        checkpoints storage domain (SQLite rows / JSON file)  +  checkpoint/* event (adaptive gate)
+
+/rewind <target> ── confirm (userQuestions / approval, fail-closed) ──▶ guard checkpoint
+             ├─ workspace: provider.restore(ref)  (restore | reset-hard)
+             ├─ config:   settings namespace write-back (persisted)
+             └─ session:  sessions.create(seed replay) → new child session (original untouched)
+```
+
+Full decision record, event vocabulary, and the provider seam contract: [ARCHITECTURE.md](ARCHITECTURE.md).
+
+## Session events (rc.6 note)
+
+The plugin declares `checkpoint/snapshot`, `checkpoint/bound`, `checkpoint/prune`, and `checkpoint/rewind` as log-only `SessionEventMap` members. Harness rc.6 has **no plugin event-registration surface** and `Session.append` silently drops unknown option keys, so appending unknown types would make the session unreadable on reload. The plugin therefore appends through an **adaptive gate**: a runtime probe (on a detached, never-persisted session store) detects whether the host's `append` stamps the `ignorable` envelope — on rc.6 the gate stays closed; on hosts that support it, `checkpoint/*` events are appended with `ignorable: true` automatically. Until then the authoritative audit chain is `command/run` + `command/done` (harness-known) plus the durable `checkpoints` storage domain.
+
+## Web UI anchor
+
+The plugin returns the new session id in the command result (`session: <id>`) and the Web shell can navigate there. The **session-projection unit `checkpoints` is shipped**: whenever `ctx.sessionProjections` exists, the plugin registers the unit via `ctx.inject` (folds `checkpoint/snapshot|bound|prune|rewind` into a whole-value list) — it stays an empty list on rc.6 hosts until a harness build ships the `checkpoint/*` vocabulary or the `ignorable` envelope, then fills in with zero plugin changes.
+
+## FAQ
+
+**Does this replace git?** No — it *uses* git where available. In a git repo you get byte-perfect, deduplicated snapshot objects without touching history; in any other directory the copy provider does the same with plain files. Regular commits remain your long-term history.
+
+**Why not `git reset --hard` by default?** Because destroying state is not the job of a safety net. The plugin only creates unreferenced objects and performs worktree-only, path-explicit restores by default, so a bad rewind can never lose history, the index, or files created after the checkpoint. `reset-hard` is available behind `workspaceRestore: 'reset-hard'` for users who explicitly want CC parity.
+
+**Can I rewind to a step in the middle of a turn?** File restoration is step-precise (`/rewind step <N>` = nearest snapshot ≤ N). The session replay, however, respects the harness's replay granularity: the child session is seeded up to the checkpoint's turn boundary.
+
+**What happens if nobody can answer the confirmation?** Nothing is touched — the plugin fails closed (`unavailable`/`rejected`), keeps the checkpoint, and returns an explanatory error. With `confirmVia: approval` on rc.6 the message says to mount userQuestions, because approval requires an open turn and commands run between turns.
+
+**Can I undo a rewind?** Yes — every approved rewind captures a guard checkpoint of the pre-rewind state first; the result prints `rewind guard: <id>`, and `/rewind <guard-id>` restores that state.
+
+**How do I address checkpoints?** Unique id prefix (the 8-char short id in the list works), `/rewind step <N>`, `/rewind latest`, or `/rewind clear` to delete this session's checkpoints (files untouched). `/rewind preview <target>` uses the same addressing to show the impact without changing anything.
+
+**What does `preview` do — and not do?** It resolves the checkpoint, then runs a read-only comparison: which files would be overwritten (or recreated), which already match, and which files created after the checkpoint would be left in place. It never prompts, never writes, never forks, and records no `checkpoint/rewind` event — the approval gate only runs on a real `/rewind <id>`.
+
 ## Permissions & data
 
 - **Permissions**: the workshop manifest declares `workspace:read`, `workspace:write`, `git:read`, `git:write`, `snapshot-storage:write`, `session-log:read`, `settings:write`, and `network:none`.
 - **Data**: checkpoint records live in the `checkpoints` storage domain (SQLite rows or a JSON file); copy snapshots live under `snapshotDir`. Fully local — no network, no credentials.
-- **Session log**: `checkpoint/*` events are appended through an adaptive gate (only when the host knows the types or supports the `ignorable` envelope); the authoritative audit chain is `command/run` + `command/done` plus the durable domain.
+- **Session log**: `checkpoint/*` events are appended through the adaptive gate; the authoritative audit chain is `command/run` + `command/done` plus the durable domain.
 
 ## Security boundaries
 
-- **Git history is untouchable.** The git provider runs only whitelisted side-effect-free primitives (`stash create`, `commit-tree`, `restore --worktree`, …); `reset --hard` only exists behind the opt-in `workspaceRestore: 'reset-hard'` mode. No `git clean`, ever.
+- **Git history is untouchable.** Whitelisted side-effect-free primitives; `reset --hard` only behind the opt-in `workspaceRestore: 'reset-hard'` mode. No `git clean`, ever.
 - **Overwrite rollback, never deletion.** Restore overwrites captured files only; files created after the checkpoint are reported and left in place.
 - **No writes through links, no path traversal.** Copy `ref`s are validated as snapshot ids; restore refuses to follow symbolic links out of the workspace.
-- **Restore requires approval.** Overwriting user files always goes through the confirmation seam; a missing or denying answerer fails closed.
-- **Rewind is reversible.** A guard checkpoint of the pre-rewind state is captured first; `/rewind <guard-id>` undoes the rewind.
-- **Model-visible ⟺ logged.** Everything a user or model sees reconstructs from `command/run` + `command/done` and the durable `checkpoints` domain.
+- **Restore requires approval.** A missing or denying answerer fails closed.
+- **Rewind is reversible.** A guard checkpoint of the pre-rewind state is captured first.
 
 ## Known limitations
 
-- On rc.6, `checkpoint/*` session events are suppressed by the adaptive gate (the host does not know the types); the audit chain rides `command/run` + `command/done` plus the storage domain until a host ships the vocabulary or the `ignorable` envelope.
+- On rc.6, `checkpoint/*` session events are suppressed by the adaptive gate; the audit chain rides `command/run` + `command/done` plus the storage domain until a host ships the vocabulary or the `ignorable` envelope.
 - `confirmVia: approval` needs an open turn, and commands run between turns — mount userQuestions (or set `confirmVia: userQuestions`) on rc.6.
 - Session rollback creates a **new child session** seeded from the checkpoint boundary; it never rewrites or truncates the original session.
-- `workspaceRestore: 'reset-hard'` is CC-equivalent and moves the branch head to the snapshot commit; it is off by default.
+- `workspaceRestore: 'reset-hard'` moves the branch head to the snapshot commit; it is off by default.
+- A checkpoint captured before any closed turn has no replay boundary — session rollback then creates a fresh child session with empty context.
+
+## Troubleshooting
+
+| Symptom | Cause / fix |
+|---|---|
+| `/rewind <id>` says `rewind cancelled: no confirmation answerer` | No userQuestions/approval channel is mounted — the plugin fails closed. Run in the Web UI (or mount a question provider); `confirmVia` selects the channel. |
+| `/rewind <id>` says `approval requires an open turn …` | Commands run between turns and approval needs a turn — mount userQuestions or set `confirmVia: userQuestions`. |
+| `rewind: checkpoint registry unavailable` | The `checkpoints` storage domain could not open (missing/erroring storage backend). Check the harness logs and the storage-domain backend config. |
+| A checkpoint lists as `fork: pending (turn not closed)` | Its turn has no `turn/end` yet; files can still be restored, but the session replay waits for the turn to close. |
+| `files restored … but the session was NOT replayed` | The transaction's session phase failed (no closed boundary, or replay rejected). Files stay restored; use the printed `rewind guard: <id>` to undo. |
+| `rewind: aborted — the pre-rewind guard checkpoint could not be captured` | `preRewindCheckpoint: require` refused the rewind because the guard capture failed; fix the storage (or set `warn`/`off`). |
+| A checkpoint lists as `(copy)` even though the directory is a repo | Unborn HEAD (no initial commit): git snapshot primitives require HEAD, so the plugin degrades to `copy` until the first commit. |
+| `MISSING_CREDENTIAL` in headless runs | Unrelated to this plugin: no `DEEPSEEK_API_KEY` is configured for the model provider. |
+| Snapshot storage grows | Pruning runs after every snapshot and at `turn/end` (`pruneOnTurnEnd`); lower `maxSnapshots` / `maxSnapshotBytes`, run `/rewind clear`, or delete `$DSH_HOME/dsh-checkpoint-rewind` after uninstalling. |
 
 ## Development
 
@@ -129,6 +241,8 @@ npm test                  # node --test test/**/*.test.mjs (provider suites incl
 npm run test:integration  # assembled-headless verification (test/integration/)
 ```
 
+No build step: pure ESM — `index.mjs`/`lib/` are the published artifacts.
+
 ## Topics
 
 `deepseek-harness`, `dsh`, `dsh-plugin`, `rewind`, `checkpoint`, `snapshot`, `session-replay`, `session-fork`, `config-restore`, `workspace-safety`, `undo`, `cordis-plugin`
@@ -136,6 +250,28 @@ npm run test:integration  # assembled-headless verification (test/integration/)
 ## Contributors
 
 - [@PerryLink](https://github.com/PerryLink) — creator and maintainer: the three-state checkpoint model, the git/copy provider seam, the three-phase rewind transaction, the Settings page timeline, docs, CI/CD and releases.
+
+## PerryLink DSH Plugin Family
+
+This project is one of the DeepSeek Harness plugins maintained by [PerryLink](https://github.com/PerryLink). If this one helps you, the others likely will too:
+
+| Plugin | One-liner |
+|---|---|
+| [dsh-mcp-panel](https://github.com/PerryLink/dsh-mcp-panel) | Read-only MCP runtime panel: /mcp command + Settings tab with status, tools and errors |
+| [dsh-doublecheck](https://github.com/PerryLink/dsh-doublecheck) | Engineering-discipline guard: requirements grill, test gates, adversary review |
+| [dsh-background-agents](https://github.com/PerryLink/dsh-background-agents) | Durable background child agents with a Web UI sidebar, messaging and interrupt |
+| [dsh-lsp-actions](https://github.com/PerryLink/dsh-lsp-actions) | LSP diagnostics, formatting, completion, code actions and rename over language servers |
+| [dsh-output-styles](https://github.com/PerryLink/dsh-output-styles) | Claude Code outputStyles-equivalent runtime style switching |
+| **[dsh-checkpoint-rewind](https://github.com/PerryLink/dsh-checkpoint-rewind)** | Claude Code /rewind-equivalent: snapshots, session forks, one-shot restore |
+| [dsh-permission-rules](https://github.com/PerryLink/dsh-permission-rules) | Claude Code-style declarative allow/deny/ask permission rules with audit |
+| [dsh-auto-review](https://github.com/PerryLink/dsh-auto-review) | Second-model auto-review on the approval chain, fail-closed by default |
+| [dsh-memento](https://github.com/PerryLink/dsh-memento) | Approval-gated cross-session memory: ctx.memory seam + SQLite + memory tool |
+| [dsh-skill-pack-security](https://github.com/PerryLink/dsh-skill-pack-security) | Security-audit skill pack: secret scan, dependency and supply-chain review |
+| [dsh-session-pin](https://github.com/PerryLink/dsh-session-pin) | Pin sessions in the Web sidebar with durable ordering |
+| [dsh-composer-history](https://github.com/PerryLink/dsh-composer-history) | Terminal-style input history for the web composer: arrows, Ctrl+R search |
+| [dsh-github](https://github.com/PerryLink/dsh-github) | GitHub PR/issues integration for DSH, every write gated by approval |
+| [dsh-plugin-guide](https://github.com/PerryLink/dsh-plugin-guide) | Plugin-development knowledge base as an on-demand agent skill |
+| [dsh-claude-move](https://github.com/PerryLink/dsh-claude-move) | Migrate Claude Code sessions, memory, skills and CLAUDE.md into DSH |
 
 ## License
 
