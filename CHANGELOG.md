@@ -4,6 +4,13 @@ All notable changes to dsh-checkpoint-rewind are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project versions with [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- `checkpointPanel/timeline` accepts calls without a `limit` (issue #5): the wire descriptor now declares `acceptsUndefined: true` on the `limit` parameter. The Typert gateway's exact-args check only authorizes an omitted JSON field via that flag (or the `src-json` codec mode); a zod `.optional()` schema validates a provided value but never authorized the field's absence, so the client's initial `timeline({})` call was rejected before the service ran.
+- Regression coverage: `test/panel.test.mjs` pins the `acceptsUndefined` descriptor contract.
+
 ## [0.5.2] — 2026-08-17
 
 ### Fixed
