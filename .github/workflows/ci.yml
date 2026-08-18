@@ -25,8 +25,26 @@ jobs:
       - name: Install
         run: npm ci --no-audit --no-fund
 
+      - name: Type gate
+        run: npm run check
+
       - name: Unit tests
         run: npm test
+
+      - name: Coverage
+        run: npm run coverage
+
+      - name: Lint
+        run: npm run lint
+
+      - name: README sync (five languages)
+        run: npm run check:readmes
+
+      - name: Verify self-contained dependency specs
+        run: npm run verify:self-contained
+
+      - name: Verify shipped artifacts
+        run: npm run verify:artifacts
 
       - name: Assembled-headless integration
         run: npm run test:integration
