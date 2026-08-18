@@ -10,6 +10,8 @@ this project versions with [SemVer](https://semver.org/).
 
 - `checkpointPanel/timeline` accepts calls without a `limit` (issue #5): the wire descriptor now declares `acceptsUndefined: true` on the `limit` parameter. The Typert gateway's exact-args check only authorizes an omitted JSON field via that flag (or the `src-json` codec mode); a zod `.optional()` schema validates a provided value but never authorized the field's absence, so the client's initial `timeline({})` call was rejected before the service ran.
 - Regression coverage: `test/panel.test.mjs` pins the `acceptsUndefined` descriptor contract.
+- `checkpointPanel/timeline` and `checkpointPanel/diff` no longer fail with `Cannot read private member #deps` (issue #6): `CheckpointPanelService` stores its dependencies in a plain `_deps` property. Remote invocations resolve the service through cordis's traceable proxy, where `this` is a Proxy of the instance and private-brand checks on `#private` fields throw; plain data properties pass through the proxy's get trap untouched. Internal helper classes never resolved through `ctx.get()` are unaffected and keep their `#private` fields.
+- Regression coverage: `test/panel.test.mjs` drives both panel methods through a `Proxy` of the service instance, reproducing the cordis traceable-proxy invocation shape.
 
 ## [0.5.2] — 2026-08-17
 
