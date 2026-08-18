@@ -52,7 +52,7 @@ try {
   await ctx.loader.await()
 
   // Authoritative registries carry the plugin's contributions.
-  const session = ctx.sessions.create(SessionId('dsh-checkpoint-rewind-loader-runner'), { meta: { cwd: 'C:/work/proj' } })
+  const session = ctx.sessions.create(SessionId('dsh-checkpoint-rewind-loader-runner'), { meta: { cwd: resolve('work/proj') } })
   const agent = /** @type {any} */ ({
     id: session.id,
     options: { provider: 'deepseek', model: 'demo-model' },

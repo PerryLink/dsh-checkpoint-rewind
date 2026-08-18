@@ -9,6 +9,7 @@
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { resolve } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
@@ -40,7 +41,9 @@ function makeAgent(/** @type {any} */ session) {
 async function mountHarness(config = {}) {
   const ctx = new Context()
   await ctx.plugin(SessionStore)
-  const session = ctx.sessions.create(SessionId('dsh-checkpoint-rewind-lifecycle'), { meta: { cwd: 'C:/work/proj' } })
+  // A real platform-absolute path: a Windows-style literal reads as relative
+  // on POSIX runners and the session header rejects it at mount.
+  const session = ctx.sessions.create(SessionId('dsh-checkpoint-rewind-lifecycle'), { meta: { cwd: resolve('work/proj') } })
   ctx.provide('systemPrompt', { tools: () => () => undefined, section: () => () => undefined })
   ctx.provide('storageDomain', makeDomainFacility().facility)
   await ctx.plugin(ToolRuntime)
