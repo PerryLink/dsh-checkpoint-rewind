@@ -24,7 +24,7 @@
 
 | Surface | Status |
 |---|---|
-| Harness | DeepSeek Harness `0.1.0-rc.6` (peers pinned to `0.1.0-rc.6`) |
+| Harness | DeepSeek Harness `0.1.0-rc.8` (peers `>=0.1.0-rc.8 <0.2.0`) |
 | Node | `^22.19.0 \|\| >=24.0.0` |
 | Platforms | All (host commands + listeners; optional Settings page timeline via the settings capability) |
 | Model | Any (no model calls — snapshots and restores are deterministic) |
@@ -190,13 +190,13 @@ capture ── fs/write-intent · fs/edit-intent · tools/pre-execute (prepend, 
 
 Full decision record, event vocabulary, and the provider seam contract: [ARCHITECTURE.md](ARCHITECTURE.md).
 
-## Session events (rc.6 note)
+## Session events (rc.8 note)
 
-The plugin declares `checkpoint/snapshot`, `checkpoint/bound`, `checkpoint/prune`, and `checkpoint/rewind` as log-only `SessionEventMap` members. Harness rc.6 has **no plugin event-registration surface** and `Session.append` silently drops unknown option keys, so appending unknown types would make the session unreadable on reload. The plugin therefore appends through an **adaptive gate**: a runtime probe (on a detached, never-persisted session store) detects whether the host's `append` stamps the `ignorable` envelope — on rc.6 the gate stays closed; on hosts that support it, `checkpoint/*` events are appended with `ignorable: true` automatically. Until then the authoritative audit chain is `command/run` + `command/done` (harness-known) plus the durable `checkpoints` storage domain.
+The plugin declares `checkpoint/snapshot`, `checkpoint/bound`, `checkpoint/prune`, and `checkpoint/rewind` as log-only `SessionEventMap` members. Harness rc.8 has **no plugin event-registration surface** and `Session.append` silently drops unknown option keys, so appending unknown types would make the session unreadable on reload. The plugin therefore appends through an **adaptive gate**: a runtime probe (on a detached, never-persisted session store) detects whether the host's `append` stamps the `ignorable` envelope — on rc.8 the gate stays closed; on hosts that support it, `checkpoint/*` events are appended with `ignorable: true` automatically. Until then the authoritative audit chain is `command/run` + `command/done` (harness-known) plus the durable `checkpoints` storage domain.
 
 ## Web UI anchor
 
-The plugin returns the new session id in the command result (`session: <id>`) and the Web shell can navigate there. The **session-projection unit `checkpoints` is shipped**: whenever `ctx.sessionProjections` exists, the plugin registers the unit via `ctx.inject` (folds `checkpoint/snapshot|bound|prune|rewind` into a whole-value list) — it stays an empty list on rc.6 hosts until a harness build ships the `checkpoint/*` vocabulary or the `ignorable` envelope, then fills in with zero plugin changes.
+The plugin returns the new session id in the command result (`session: <id>`) and the Web shell can navigate there. The **session-projection unit `checkpoints` is shipped**: whenever `ctx.sessionProjections` exists, the plugin registers the unit via `ctx.inject` (folds `checkpoint/snapshot|bound|prune|rewind` into a whole-value list) — it stays an empty list on rc.8 hosts until a harness build ships the `checkpoint/*` vocabulary or the `ignorable` envelope, then fills in with zero plugin changes.
 
 ## FAQ
 
@@ -206,7 +206,7 @@ The plugin returns the new session id in the command result (`session: <id>`) an
 
 **Can I rewind to a step in the middle of a turn?** File restoration is step-precise (`/rewind step <N>` = nearest snapshot ≤ N). The session replay, however, respects the harness's replay granularity: the child session is seeded up to the checkpoint's turn boundary.
 
-**What happens if nobody can answer the confirmation?** Nothing is touched — the plugin fails closed (`unavailable`/`rejected`), keeps the checkpoint, and returns an explanatory error. With `confirmVia: approval` on rc.6 the message says to mount userQuestions, because approval requires an open turn and commands run between turns.
+**What happens if nobody can answer the confirmation?** Nothing is touched — the plugin fails closed (`unavailable`/`rejected`), keeps the checkpoint, and returns an explanatory error. With `confirmVia: approval` on rc.8 the message says to mount userQuestions, because approval requires an open turn and commands run between turns.
 
 **Can I undo a rewind?** Yes — every approved rewind captures a guard checkpoint of the pre-rewind state first; the result prints `rewind guard: <id>`, and `/rewind <guard-id>` restores that state.
 
@@ -234,8 +234,8 @@ A real assembled-headless integration run (`npm run test:integration`) drives th
 
 ## Known limitations
 
-- On rc.6, `checkpoint/*` session events are suppressed by the adaptive gate; the audit chain rides `command/run` + `command/done` plus the storage domain until a host ships the vocabulary or the `ignorable` envelope.
-- `confirmVia: approval` needs an open turn, and commands run between turns — mount userQuestions (or set `confirmVia: userQuestions`) on rc.6.
+- On rc.8, `checkpoint/*` session events are suppressed by the adaptive gate; the audit chain rides `command/run` + `command/done` plus the storage domain until a host ships the vocabulary or the `ignorable` envelope.
+- `confirmVia: approval` needs an open turn, and commands run between turns — mount userQuestions (or set `confirmVia: userQuestions`) on rc.8.
 - Session rollback creates a **new child session** seeded from the checkpoint boundary; it never rewrites or truncates the original session.
 - `workspaceRestore: 'reset-hard'` moves the branch head to the snapshot commit; it is off by default.
 - A checkpoint captured before any closed turn has no replay boundary — session rollback then creates a fresh child session with empty context.
@@ -257,7 +257,7 @@ A real assembled-headless integration run (`npm run test:integration`) drives th
 ## Development
 
 ```sh
-npm install               # peer deps: @deepseek-ai/dsh-session@0.1.0-rc.6, schemastery, zod
+npm install               # peer deps: @deepseek-ai/dsh-session@0.1.0-rc.8, schemastery, zod
 npm test                  # node --test test/**/*.test.mjs (provider suites incl.)
 npm run test:integration  # assembled-headless verification (test/integration/)
 ```

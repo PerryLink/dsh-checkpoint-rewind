@@ -4,7 +4,13 @@ All notable changes to dsh-checkpoint-rewind are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project versions with [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.5.3] — 2026-08-21
+
+### Changed
+
+- Upgrade to DeepSeek Harness rc.8: every `@deepseek-ai/dsh-*` peer is now `>=0.1.0-rc.8 <0.2.0` and every dev dependency is pinned to `0.1.0-rc.8`. The workshop compatibility declaration now lists `0.1.0-rc.8`.
+- Adapt to the rc.8 `commands` service: `execute(agent, line, images, signal)` now takes an image list before the cancellation signal — the test helpers, the loader composition runner, and the compat workflow's pinned harness are updated to the four-argument call shape. Plugin handlers keep consuming `invocation.agent` / `rawInput` / `signal` unchanged.
+- README (five languages), AGENTS.md and ARCHITECTURE.md now describe the rc.8 adaptive-gate status: rc.8 still ships no plugin event-registration surface and `Session.append` still drops the `ignorable` option, so the gate stays closed and the audit chain remains `command/run` + `command/done` plus the durable `checkpoints` domain.
 
 ### Fixed
 
