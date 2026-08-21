@@ -107,7 +107,7 @@ async function agentMutates(root, agent, turn, step, file, content, tool = 'bash
 }
 
 async function executeCommand(root, agent, line) {
-  const execution = await root.commands.execute(agent, line, new AbortController().signal)
+  const execution = await root.commands.execute(agent, line, [], new AbortController().signal)
   assert.ok(execution, `command ${line} executed`)
   return execution.result
 }

@@ -88,7 +88,7 @@ try {
   // Real behavior: the /rewind command through the real commands service. With
   // no storage stack composed it must return the structured "storageDomain not
   // composed" error, proving the handler is actually wired.
-  const execution = await ctx.commands.execute(agent, '/rewind', new AbortController().signal)
+  const execution = await ctx.commands.execute(agent, '/rewind', [], new AbortController().signal)
   const text = execution?.result?.text ?? ''
   if (!text.includes('storageDomain')) {
     throw new Error(`Loader composition: /rewind returned ${JSON.stringify(execution?.result)}`)

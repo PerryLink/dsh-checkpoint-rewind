@@ -7,7 +7,7 @@ import assert from 'node:assert/strict'
 import { mountPlugin, openStep, closeStep, settle } from './helpers/ctx-harness.mjs'
 
 function command(app, line) {
-  return app.root.commands.execute(app.agent, line, new AbortController().signal)
+  return app.root.commands.execute(app.agent, line, [], new AbortController().signal)
 }
 
 describe('storageDomain 未组合（可选服务降级）', () => {
