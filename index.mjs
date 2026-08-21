@@ -69,7 +69,7 @@ import {
   registryUnavailable,
 } from './lib/errors.mjs'
 import { workspaceKeyOf, resolveSnapshotDir } from './lib/workspace.mjs'
-import { checkpointsDomainSpec } from './lib/domain.mjs'
+import { checkpointsDomainSpec, checkpointsDomainSpecV1 } from './lib/domain.mjs'
 import {
   formatCheckpointDiff,
   formatCheckpointList,
@@ -324,6 +324,10 @@ export async function apply(ctx, config = {}) {
   // storageDomain 是可选服务：宿主未组合存储栈时插件照常挂载，绝不把 profile
   // 卡在 pending——checkpoint/rewind 路径按消费方各自处理拒绝（命令返回结构化
   // 错误并说明组合方法，自动快照/补记/清理只记日志），失败大声、优雅降级。
+  // 域双版本：0.5.x 是 v2 生产者（kind/config 必填）；0.4.x 时代的介质是 v1
+  // （可选 forkSeq）。后端对版本不匹配抛 version-mismatch 且无迁移，先按 v2
+  // 打开（介质不存在则创建 v2），失败回退 v1 容错 spec：旧记录照常可读，
+  // 新记录按 v2 形状写入同一介质（消费方 dsh-checkpoint-diff 同为双版本容错）。
   const storageDomain = ctx.get('storageDomain')
   const tablePromise = storageDomain === undefined
     ? Promise.reject(registryUnavailable(
@@ -331,10 +335,26 @@ export async function apply(ctx, config = {}) {
       + '(@deepseek-ai/dsh-storage + @deepseek-ai/dsh-storage-json with config.root + '
       + '@deepseek-ai/dsh-storage-domain with config.backend: json) to enable checkpoints',
     ))
-    : storageDomain.open(checkpointsDomainSpec).then((domain) => {
-        ctx.effect(() => () => { void domain.close() }, `${PLUGIN_NAME}.domain.close`)
-        return domain.table('checkpoints')
-      })
+    : (async () => {
+        let lastError
+        for (const spec of [checkpointsDomainSpec, checkpointsDomainSpecV1]) {
+          try {
+            const domain = await storageDomain.open(spec)
+            ctx.effect(() => () => { void domain.close() }, `${PLUGIN_NAME}.domain.close`)
+            if (spec === checkpointsDomainSpecV1) {
+              logger.warn('checkpoints medium is domain v1 (rewind 0.4.x era): opened in compatibility mode — existing records stay readable and new records use the v2 shape; the storage layer has no automatic migration, so the medium keeps its v1 header until it is recreated')
+            }
+            return domain.table('checkpoints')
+          } catch (error) {
+            lastError = error
+            // version-mismatch / malformed-medium 是后端 StorageError（code 稳定）：
+            // 介质属于另一版本 → 换 spec 重试；其余错误（already-open 等）直接失败。
+            if (error?.code === 'version-mismatch' || error?.code === 'malformed-medium') continue
+            throw error
+          }
+        }
+        throw lastError
+      })()
   if (storageDomain === undefined) {
     warn('storageDomain service not composed: checkpoints/rewind stay unavailable (add @deepseek-ai/dsh-storage + @deepseek-ai/dsh-storage-json + @deepseek-ai/dsh-storage-domain rows with backend json to enable them)')
   }
@@ -1482,6 +1502,7 @@ export {
   diffLines,
   configDiff,
   checkpointsDomainSpec,
+  checkpointsDomainSpecV1,
   checkpointsProjectionDefinition,
   checkpointSettingsSchema,
   validateCheckpointSettings,

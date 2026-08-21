@@ -4,6 +4,13 @@ All notable changes to dsh-checkpoint-rewind are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project versions with [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- Checkpoint capture no longer silently fails on media created by 0.4.x. The storage layer (`@deepseek-ai/dsh-storage-json`) rejects a version mismatch with `version-mismatch` and has no migration, so after the 0.5.0 domain bump (v1 → v2) the plugin could not open an existing v1 medium: the registry stayed unavailable and every checkpoint/rewrite path failed while logs kept growing. The plugin now opens the domain dual-version like its consumers (`dsh-checkpoint-diff`): it tries the v2 spec first (fresh media are still created as v2) and falls back to a v1-compatible spec on `version-mismatch`/`malformed-medium`. The v1 fallback uses a tolerant record schema (v2 fields optional plus `forkSeq`), so 0.4.x records stay readable, new captures are stored in the v2 shape in the same medium, and both shapes coexist. A warning is logged when compatibility mode is active; the medium keeps its v1 header until it is recreated (no automatic migration in the storage layer).
+- Regression coverage: `test/medium-compat.test.mjs` pins the v1-medium fallback (old records readable, new captures v2-shaped), the v2-medium path, fresh-medium v2 creation, and the tolerant schema accepting both record shapes.
+
 ## [0.5.3] — 2026-08-21
 
 ### Changed
