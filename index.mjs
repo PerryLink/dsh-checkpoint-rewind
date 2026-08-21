@@ -829,7 +829,7 @@ export async function apply(ctx, config = {}) {
               'restore with /rewind <id> (all three states) or /rewind workspace|session|config <id>',
             ].join('\n')
           },
-          presentCall: (args) => `Capture a manual checkpoint${typeof args?.note === 'string' && args.note.length > 0 ? ` (“${args.note}”)` : ''}`,
+          presentCall: (args) => ({ card: 'generic', title: `Capture a manual checkpoint${typeof args?.note === 'string' && args.note.length > 0 ? ` (“${args.note}”)` : ''}` }),
         })), `${PLUGIN_NAME}.checkpoint-tool`)
       }
     }
