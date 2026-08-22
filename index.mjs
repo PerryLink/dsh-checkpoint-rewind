@@ -514,7 +514,8 @@ export async function apply(ctx, config = {}) {
       }
       if (result === null) {
         logger.debug(`checkpoint deduped: workspace unchanged (trigger ${opts.triggerTool})`)
-        return { deduped: true }
+        const detail = await dedupDetailOf(provider, previous, { cwd, key: workspaceKeyOf(cwd) })
+        return { deduped: true, detail }
       }
       const note = typeof opts.note === 'string' && opts.note.trim().length > 0
         ? opts.note.trim().slice(0, LIMITS.MAX_NOTE_LENGTH)
@@ -550,6 +551,41 @@ export async function apply(ctx, config = {}) {
       warn(`checkpoint capture failed (trigger ${opts.triggerTool}): ${messageOf(error)}`)
       return { failed: messageOf(error) }
     }
+  }
+
+  /**
+   * 去重时的补充说明（尽力而为；任何失败静默降级为空串，绝不阻断去重路径）：
+   * - git provider 存在未跟踪文件时提示纳管（git 快照只覆盖已跟踪文件，
+   *   未跟踪文件即使有改动也不会被捕获，用户需要 `git add` 纳入索引）；
+   * - 去重基准是自动快照时说明该状态已被自动快照记录（手动调用紧随自动
+   *   快照之后时会看到这条，避免"调用成功却无新记录"的困惑）。
+   * @param {import('./lib/providers/definition.mjs').SnapshotProvider} provider - 已解析的快照 provider。
+   * @param {object|undefined} previous - 去重基准记录（latestRecordFor 结果）。
+   * @param {{cwd: string, key: string}} workspace - 工作区。
+   * @returns {Promise<string>} 补充说明（多行或空串）。
+   */
+  async function dedupDetailOf(provider, previous, workspace) {
+    const lines = []
+    try {
+      if (typeof provider.untrackedFiles === 'function') {
+        const untracked = await provider.untrackedFiles(workspace)
+        if (untracked.length > 0) {
+          lines.push(`${untracked.length} untracked file(s) are not covered by git snapshots — stage them with \`git add\` to include them in future checkpoints`)
+        }
+      }
+    } catch (error) {
+      logger.debug(`checkpoint dedup hint: untracked scan failed (${messageOf(error)})`)
+    }
+    if (previous !== undefined && previous.triggerTool === 'auto') {
+      lines.push(`the latest checkpoint (#${String(previous.id).slice(0, 8)}, auto, seq ${previous.seq}) already records this exact workspace state`)
+    }
+    return lines.join('\n')
+  }
+
+  /** 去重结果文本：基础句 + 可选补充说明（多行）。 */
+  function dedupedCheckpointText(detail) {
+    const base = 'checkpoint: workspace unchanged since the last checkpoint — nothing new was captured'
+    return typeof detail === 'string' && detail.length > 0 ? `${base}\n${detail}` : base
   }
 
   /**
@@ -797,7 +833,7 @@ export async function apply(ctx, config = {}) {
               note: typeof args?.note === 'string' ? args.note : undefined,
             })
             if (result === undefined) return 'checkpoint: session has no workspace or no turn/step history yet'
-            if (result.deduped === true) return 'checkpoint: workspace unchanged since the last checkpoint — nothing new was captured'
+            if (result.deduped === true) return dedupedCheckpointText(result.detail)
             if (result.failed !== undefined) return `checkpoint: capture failed (${result.failed}) — no checkpoint was created`
             const record = result.record
             return [
@@ -1398,7 +1434,7 @@ export async function apply(ctx, config = {}) {
       return { kind: 'error', text: 'checkpoint: session has no workspace or no turn/step history yet' }
     }
     if (result.deduped === true) {
-      return { kind: 'success', text: 'checkpoint: workspace unchanged since the last checkpoint — nothing new was captured' }
+      return { kind: 'success', text: dedupedCheckpointText(result.detail) }
     }
     if (result.failed !== undefined) {
       return { kind: 'error', text: `checkpoint: capture failed (${result.failed}) — no checkpoint was created` }
