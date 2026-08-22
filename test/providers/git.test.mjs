@@ -335,6 +335,26 @@ describe('git provider（scripted runner）', () => {
     assert.deepEqual(result, { changed: 3, added: 1, removed: 1, names: ['a.txt', 'gone.txt', 'new.txt'] })
     assert.equal(calls.some((args) => args[0] === 'restore' || args[0] === 'reset'), false, 'diffFiles 绝不写工作区')
   })
+
+  it('untrackedFiles：ls-files --others --exclude-standard 只读清单', async () => {
+    const { run, calls } = scriptedGit({
+      'ls-files --others --exclude-standard': { code: 0, stdout: 'new.txt\nsub/dir.txt\n', stderr: '' },
+    })
+    const provider = makeGitProvider({ gitBin: 'git', run })
+    const result = await provider.untrackedFiles(workspace)
+    assert.deepEqual(result, ['new.txt', 'sub/dir.txt'])
+    assert.deepEqual(calls, [['ls-files', '--others', '--exclude-standard']])
+  })
+
+  it('untrackedFiles：空输出返回空清单（无未跟踪文件）', async () => {
+    const { run, calls } = scriptedGit({
+      'ls-files --others --exclude-standard': { code: 0, stdout: '', stderr: '' },
+    })
+    const provider = makeGitProvider({ gitBin: 'git', run })
+    const result = await provider.untrackedFiles(workspace)
+    assert.deepEqual(result, [])
+    assert.deepEqual(calls, [['ls-files', '--others', '--exclude-standard']])
+  })
 })
 
 describe('git provider（真实 git，能力检测）', () => {

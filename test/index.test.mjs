@@ -4,6 +4,7 @@
 
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { spawn } from 'node:child_process'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -865,6 +866,62 @@ describe('/checkpoint 命令', () => {
     assert.ok(Array.isArray(manual.config) === false && typeof manual.config === 'object', '记录携带配置快照')
     assert.equal(manual.config.provider, 'copy')
     await app.dispose()
+  })
+
+  it('去重且最新记录为自动快照：消息说明该状态已被自动快照记录', async () => {
+    const cwd = await makeWorkspace({ 'a.txt': 'A1' })
+    const snapshotDir = await makeSnapDir()
+    const app = await mountPlugin({ cwd, config: { provider: 'copy', snapshotDir, autoCheckpoint: { enabled: true, intervalMinutes: 0 } } })
+    openStep(app.session, 1, 1)
+    await waitForRecords(app.records, 1)
+    const deduped = await command(app, '/checkpoint')
+    assert.equal(deduped?.result.kind, 'success')
+    assert.match(deduped?.result.text, /nothing new was captured/)
+    assert.match(deduped?.result.text, /already records this exact workspace state/)
+    assert.match(deduped?.result.text, /\(#[0-9a-f]{8}, auto, seq \d+\)/)
+    assert.doesNotMatch(deduped?.result.text, /untracked/, 'copy provider 无未跟踪概念')
+    await app.dispose()
+  })
+
+  it('去重且存在未跟踪文件（git provider）：消息提示 git add 纳管', async (t) => {
+    const repo = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-rewind-cp-'))
+    const runReal = async (args) => {
+      const result = await new Promise((resolve, reject) => {
+        const child = spawn('git', args, { cwd: repo, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+        let stdout = ''
+        let stderr = ''
+        child.stdout.on('data', (c) => { stdout += String(c) })
+        child.stderr.on('data', (c) => { stderr += String(c) })
+        child.on('error', reject)
+        child.on('close', (code) => resolve({ code: code ?? 0, stdout, stderr }))
+      })
+      return result
+    }
+    const init = await runReal(['init', '-q']).catch((error) => {
+      t.skip(`git init unavailable (${error.message})`)
+      return undefined
+    })
+    if (init === undefined) return
+    await runReal(['config', 'user.email', 'test@example.com'])
+    await runReal(['config', 'user.name', 'tester'])
+    await runReal(['config', 'core.autocrlf', 'false'])
+    await fs.writeFile(path.join(repo, 'a.txt'), 'A1')
+    await runReal(['add', '-A'])
+    await runReal(['commit', '-q', '-m', 'initial'])
+    const snapshotDir = await makeSnapDir()
+    const app = await mountPlugin({ cwd: repo, config: { provider: 'git', snapshotDir } })
+    openStep(app.session, 1, 1)
+    await dispatchWriteIntent(app.root, app.agent, 'bash')
+    await waitForRecords(app.records, 1)
+    await fs.writeFile(path.join(repo, 'untracked.txt'), 'not covered\n')
+    const deduped = await command(app, '/checkpoint')
+    assert.equal(deduped?.result.kind, 'success')
+    assert.match(deduped?.result.text, /nothing new was captured/)
+    assert.match(deduped?.result.text, /1 untracked file\(s\) are not covered by git snapshots/)
+    assert.match(deduped?.result.text, /git add/)
+    assert.doesNotMatch(deduped?.result.text, /already records this exact workspace state/, '基准是变更快照而非自动快照')
+    await app.dispose()
+    await fs.rm(repo, { recursive: true, force: true })
   })
 
   it('/checkpoint list 与 /checkpoint diff <a> <b>（文件/配置/会话差）', async () => {
