@@ -150,7 +150,7 @@ describe('confirmRewind（无回答者）', () => {
 })
 
 describe('会话事件自适应门', () => {
-  it('宿主未收录的类型不 append（rc.8 持久化加载安全）', () => {
+  it('宿主未收录的类型不 append（rc.2 持久化加载安全）', () => {
     const gate = makeEventGate(new Set(['known/type']))
     const appended = []
     const session = {

@@ -4,10 +4,12 @@ All notable changes to dsh-checkpoint-rewind are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project versions with [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.5.4] — 2026-08-22
 
 ### Changed
 
+- Upgrade to DeepSeek Harness rc.2 (`0.1.1-rc.2`): every `@deepseek-ai/dsh-*` dev dependency is pinned to `0.1.1-rc.2` and the workshop compatibility declaration lists `0.1.1-rc.2`; peers stay `>=0.1.0-rc.8 <0.2.0` because the plugin's required service surface (`commands`, `session`, `llm`, `tools`, `storage-domain`, `typert-protocol`) is unchanged from rc.8. The compat workflow's pinned harness and base/headless rows move to `0.1.1-rc.2`.
+- Adapt the `checkpoints` session-projection unit to the rc.2 `ProjectionDefinition` contract: the wire schema moves from the top-level `schema` into `wire.viewSchema` (alongside `view`), and the persisted fold state is now validated by the required `stateSchema` (`z.record(checkpointWireSchema)`); `stateVersion` stays `0` (non-negative integer, now enforced at registration). `index.mjs` registers the unit unchanged — the shape change is confined to `lib/projection.mjs`.
 - The checkpoint dedup reply no longer leaves the user guessing. When a manual `checkpoint` call is deduplicated (workspace tree identical to the latest snapshot), the message still says nothing new was captured, but now appends an explanation when one is warranted: if the dedup baseline is an automatic snapshot, it notes that the latest checkpoint (auto, seq) already records the exact workspace state — an auto snapshot may have just captured the same tree moments earlier, which previously made a successful dedup look like a failed capture; if the git provider sees untracked files, it notes that git snapshots only cover tracked files and suggests staging them with `git add` so future checkpoints include them. The hints are best-effort: a provider-side failure degrades silently to the plain message, and the copy provider (whole-directory snapshots, no untracked concept) never sees the git-only hint.
 - The git provider exposes a new optional read-only method `untrackedFiles(workspace)` (`git ls-files --others --exclude-standard`, the same whitelist verb restore/preview already use) so consumers can surface the tracked-only coverage gap; restore and preview reuse the extracted implementation.
 - Regression coverage: `test/index.test.mjs` pins the auto-snapshot hint (copy provider) and the untracked-files hint (real git repository, skip-guarded); `test/providers/git.test.mjs` pins the `untrackedFiles` method with a scripted runner (list + empty output).

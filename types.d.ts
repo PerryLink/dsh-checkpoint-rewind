@@ -81,7 +81,7 @@ declare module '@deepseek-ai/dsh-session-projection' {
   interface SessionProjectionMap {
     /**
      * Web UI 检查点条的全量列表值（最新在尾）。
-     * 折叠 checkpoint/snapshot|bound|prune|rewind 事件得到；rc.8 宿主
+     * 折叠 checkpoint/snapshot|bound|prune|rewind 事件得到；rc.2 宿主
      * 未收录该词汇时恒为空列表（见 README「会话事件」）。
      */
     checkpoints: Array<{

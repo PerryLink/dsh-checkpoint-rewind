@@ -86,12 +86,16 @@ describe('checkpoints 投影单元（纯折叠）', () => {
     assert.deepEqual(viewCheckpointsProjection(state).map((entry) => entry.id), ['a', 'b'])
   })
 
-  it('wire schema 校验 view 输出', () => {
+  it('wire schema 校验 view 输出；stateSchema 校验折叠状态', () => {
     let state = initCheckpointsProjection()
     state = applyCheckpointsProjection(state, snapshotEvent(record()))
     const view = viewCheckpointsProjection(state)
-    const parsed = checkpointsProjectionDefinition.schema.safeParse(view)
+    const parsed = checkpointsProjectionDefinition.wire.viewSchema.safeParse(view)
     assert.equal(parsed.success, true)
+    // rc.2 契约：stateSchema 校验持久缓存的内部状态（id → wire 记录）。
+    const stateParsed = checkpointsProjectionDefinition.stateSchema.safeParse(state)
+    assert.equal(stateParsed.success, true)
+    assert.equal(checkpointsProjectionDefinition.stateVersion, 0, 'stateVersion 必填且为非负整数')
   })
 })
 

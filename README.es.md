@@ -24,7 +24,7 @@
 
 | Superficie | Estado |
 |---|---|
-| Harness | DeepSeek Harness `0.1.0-rc.8` (peers `>=0.1.0-rc.8 <0.2.0`) |
+| Harness | DeepSeek Harness `0.1.1-rc.2` (peers `>=0.1.0-rc.8 <0.2.0`) |
 | Node | `^22.19.0 \|\| >=24.0.0` |
 | Plataformas | Todas (comandos + listeners de host; línea de tiempo de Ajustes opcional mediante la capacidad settings) |
 | Modelo | Cualquiera (sin llamadas al modelo — las instantáneas y restauraciones son deterministas) |
@@ -190,13 +190,13 @@ capture ── fs/write-intent · fs/edit-intent · tools/pre-execute (prepend, 
 
 Registro de decisiones completo, vocabulario de eventos y contrato de la costura de proveedores: [ARCHITECTURE.md](ARCHITECTURE.md).
 
-## Eventos de sesión (nota rc.8)
+## Eventos de sesión (nota rc.2)
 
-El plugin declara `checkpoint/snapshot`, `checkpoint/bound`, `checkpoint/prune` y `checkpoint/rewind` como miembros `SessionEventMap` solo de log. El harness rc.8 **no tiene superficie de registro de eventos para plugins** y `Session.append` descarta silenciosamente las claves de opciones desconocidas, por lo que añadir tipos desconocidos haría la sesión ilegible al recargarla. Por eso el plugin añade a través de una **puerta adaptativa**: una sonda en tiempo de ejecución (sobre un almacén de sesión separado, nunca persistido) detecta si el `append` del host sella el sobre `ignorable` — en rc.8 la puerta permanece cerrada; en hosts que lo soportan, los eventos `checkpoint/*` se añaden automáticamente con `ignorable: true`. Hasta entonces, la cadena de auditoría autoritativa es `command/run` + `command/done` (conocidos por el harness) más el dominio de almacenamiento durable `checkpoints`.
+El plugin declara `checkpoint/snapshot`, `checkpoint/bound`, `checkpoint/prune` y `checkpoint/rewind` como miembros `SessionEventMap` solo de log. El harness rc.2 **no tiene superficie de registro de eventos para plugins** y `Session.append` descarta silenciosamente las claves de opciones desconocidas, por lo que añadir tipos desconocidos haría la sesión ilegible al recargarla. Por eso el plugin añade a través de una **puerta adaptativa**: una sonda en tiempo de ejecución (sobre un almacén de sesión separado, nunca persistido) detecta si el `append` del host sella el sobre `ignorable` — en rc.2 la puerta permanece cerrada; en hosts que lo soportan, los eventos `checkpoint/*` se añaden automáticamente con `ignorable: true`. Hasta entonces, la cadena de auditoría autoritativa es `command/run` + `command/done` (conocidos por el harness) más el dominio de almacenamiento durable `checkpoints`.
 
 ## Ancla de Web UI
 
-El plugin devuelve el id de la nueva sesión en el resultado del comando (`session: <id>`) y el shell web puede navegar allí. **La unidad de proyección de sesión `checkpoints` viene incluida**: siempre que `ctx.sessionProjections` exista, el plugin registra la unidad vía `ctx.inject` (pliega `checkpoint/snapshot|bound|prune|rewind` en una lista de valor completo) — permanece como lista vacía en hosts rc.8 hasta que una build del harness incluya el vocabulario `checkpoint/*` o el sobre `ignorable`, y entonces se llena sin cambios en el plugin.
+El plugin devuelve el id de la nueva sesión en el resultado del comando (`session: <id>`) y el shell web puede navegar allí. **La unidad de proyección de sesión `checkpoints` viene incluida**: siempre que `ctx.sessionProjections` exista, el plugin registra la unidad vía `ctx.inject` (pliega `checkpoint/snapshot|bound|prune|rewind` en una lista de valor completo) — permanece como lista vacía en hosts rc.2 hasta que una build del harness incluya el vocabulario `checkpoint/*` o el sobre `ignorable`, y entonces se llena sin cambios en el plugin.
 
 ## FAQ
 
@@ -206,7 +206,7 @@ El plugin devuelve el id de la nueva sesión en el resultado del comando (`sessi
 
 **¿Puedo rebobinar a un paso en medio de un turno?** La restauración de archivos es precisa a nivel de paso (`/rewind step <N>` = la instantánea más cercana ≤ N). Sin embargo, la reproducción de la sesión respeta la granularidad de reproducción del harness: la sesión hija se siembra hasta el límite de turno del checkpoint.
 
-**¿Qué pasa si nadie puede responder a la confirmación?** No se toca nada — el plugin cierra en fallo (`unavailable`/`rejected`), conserva el checkpoint y devuelve un error explicativo. Con `confirmVia: approval` en rc.8 el mensaje dice que montes userQuestions, porque approval requiere un turno abierto y los comandos se ejecutan entre turnos.
+**¿Qué pasa si nadie puede responder a la confirmación?** No se toca nada — el plugin cierra en fallo (`unavailable`/`rejected`), conserva el checkpoint y devuelve un error explicativo. Con `confirmVia: approval` en rc.2 el mensaje dice que montes userQuestions, porque approval requiere un turno abierto y los comandos se ejecutan entre turnos.
 
 **¿Puedo deshacer una reversión?** Sí — cada reversión aprobada captura primero un checkpoint de guardia del estado previo a la reversión; el resultado imprime `rewind guard: <id>`, y `/rewind <guard-id>` restaura ese estado.
 
@@ -234,8 +234,8 @@ Una ejecución real de integración headless ensamblada (`npm run test:integrati
 
 ## Limitaciones conocidas
 
-- En rc.8, los eventos de sesión `checkpoint/*` son suprimidos por la puerta adaptativa; la cadena de auditoría usa `command/run` + `command/done` más el dominio de almacenamiento hasta que un host incluya el vocabulario o el sobre `ignorable`.
-- `confirmVia: approval` necesita un turno abierto, y los comandos se ejecutan entre turnos — monta userQuestions (o define `confirmVia: userQuestions`) en rc.8.
+- En rc.2, los eventos de sesión `checkpoint/*` son suprimidos por la puerta adaptativa; la cadena de auditoría usa `command/run` + `command/done` más el dominio de almacenamiento hasta que un host incluya el vocabulario o el sobre `ignorable`.
+- `confirmVia: approval` necesita un turno abierto, y los comandos se ejecutan entre turnos — monta userQuestions (o define `confirmVia: userQuestions`) en rc.2.
 - La reversión de sesión crea una **nueva sesión hija** sembrada desde el límite del checkpoint; nunca reescribe ni trunca la sesión original.
 - `workspaceRestore: 'reset-hard'` mueve la cabeza de la rama al commit de la instantánea; está desactivado por defecto.
 - Un checkpoint capturado antes de cualquier turno cerrado no tiene límite de reproducción — la reversión de sesión crea entonces una sesión hija nueva con contexto vacío.
@@ -257,7 +257,7 @@ Una ejecución real de integración headless ensamblada (`npm run test:integrati
 ## Desarrollo
 
 ```sh
-npm install               # peer deps: @deepseek-ai/dsh-session@0.1.0-rc.8, schemastery, zod
+npm install               # peer deps: @deepseek-ai/dsh-session@0.1.1-rc.2, schemastery, zod
 npm test                  # node --test test/**/*.test.mjs (incl. suites de proveedores)
 npm run test:integration  # verificación headless ensamblada (test/integration/)
 ```

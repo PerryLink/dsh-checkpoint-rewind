@@ -24,7 +24,7 @@
 
 | 方面 | 状态 |
 |---|---|
-| Harness | DeepSeek Harness `0.1.0-rc.8`（peer 依赖范围 `>=0.1.0-rc.8 <0.2.0`） |
+| Harness | DeepSeek Harness `0.1.1-rc.2`（peer 依赖范围 `>=0.1.0-rc.8 <0.2.0`） |
 | Node | `^22.19.0 \|\| >=24.0.0` |
 | 平台 | 全部（宿主命令 + 监听器；通过 settings 能力提供可选设置页时间线） |
 | 模型 | 任意（不调用模型 —— 快照与恢复是确定性的） |
@@ -190,13 +190,13 @@ capture ── fs/write-intent · fs/edit-intent · tools/pre-execute (prepend, 
 
 完整决策记录、事件词汇表与 provider 接缝契约：[ARCHITECTURE.md](ARCHITECTURE.md)。
 
-## 会话事件（rc.8 说明）
+## 会话事件（rc.2 说明）
 
-该插件将 `checkpoint/snapshot`、`checkpoint/bound`、`checkpoint/prune` 与 `checkpoint/rewind` 声明为仅日志的 `SessionEventMap` 成员。Harness rc.8 **没有插件事件注册面**，且 `Session.append` 会静默丢弃未知选项键，因此追加未知类型会让会话在重新加载时无法读取。该插件因此通过**自适应门**追加：运行时探测（在一个分离的、永不持久化的会话存储上）检测宿主的 `append` 是否会盖章 `ignorable` 信封——在 rc.8 上门保持关闭；在支持它的宿主上，`checkpoint/*` 事件会自动以 `ignorable: true` 追加。在那之前，权威审计链是 `command/run` + `command/done`（宿主已知）加上持久化的 `checkpoints` 存储领域。
+该插件将 `checkpoint/snapshot`、`checkpoint/bound`、`checkpoint/prune` 与 `checkpoint/rewind` 声明为仅日志的 `SessionEventMap` 成员。Harness rc.2 **没有插件事件注册面**，且 `Session.append` 不会盖章 `ignorable` 信封（其第三个参数是 surface intent 而非选项），因此追加未知类型会让会话在重新加载时无法读取。该插件因此通过**自适应门**追加：运行时探测（在一个分离的、永不持久化的会话存储上）检测宿主的 `append` 是否会盖章 `ignorable` 信封——在 rc.2 上门保持关闭；在支持它的宿主上，`checkpoint/*` 事件会自动以 `ignorable: true` 追加。在那之前，权威审计链是 `command/run` + `command/done`（宿主已知）加上持久化的 `checkpoints` 存储领域。
 
 ## Web UI 锚点
 
-插件在命令结果中返回新会话 id（`session: <id>`），Web shell 可以跳转过去。**会话投影单元 `checkpoints` 已随附**：每当 `ctx.sessionProjections` 存在时，插件通过 `ctx.inject` 注册该单元（把 `checkpoint/snapshot|bound|prune|rewind` 折叠成整值列表）——在 rc.8 宿主上它保持空列表，直到某个 harness 版本随附 `checkpoint/*` 词汇表或 `ignorable` 信封，届时零插件改动即可填充。
+插件在命令结果中返回新会话 id（`session: <id>`），Web shell 可以跳转过去。**会话投影单元 `checkpoints` 已随附**：每当 `ctx.sessionProjections` 存在时，插件通过 `ctx.inject` 注册该单元（把 `checkpoint/snapshot|bound|prune|rewind` 折叠成整值列表）——在 rc.2 宿主上它保持空列表，直到某个 harness 版本随附 `checkpoint/*` 词汇表或 `ignorable` 信封，届时零插件改动即可填充。
 
 ## FAQ
 
@@ -206,7 +206,7 @@ capture ── fs/write-intent · fs/edit-intent · tools/pre-execute (prepend, 
 
 **能回退到某一轮中间的某一步吗？** 文件恢复是步骤级精确的（`/rewind step <N>` = ≤ N 的最近快照）。但会话重放遵循 harness 的重放粒度：子会话被种子填充到检查点的轮次边界。
 
-**如果没人能回答确认会怎样？** 不触碰任何内容——插件失败关闭（`unavailable`/`rejected`），保留检查点，并返回解释性错误。在 rc.8 上使用 `confirmVia: approval` 时，消息会提示挂载 userQuestions，因为 approval 需要开放的轮次，而命令在轮次之间运行。
+**如果没人能回答确认会怎样？** 不触碰任何内容——插件失败关闭（`unavailable`/`rejected`），保留检查点，并返回解释性错误。在 rc.2 上使用 `confirmVia: approval` 时，消息会提示挂载 userQuestions，因为 approval 需要开放的轮次，而命令在轮次之间运行。
 
 **能撤销一次回滚吗？** 能——每次经批准的回滚都会先捕获回滚前状态的守护检查点；结果会打印 `rewind guard: <id>`，`/rewind <guard-id>` 会恢复该状态。
 
@@ -234,8 +234,8 @@ capture ── fs/write-intent · fs/edit-intent · tools/pre-execute (prepend, 
 
 ## 已知限制
 
-- 在 rc.8 上，`checkpoint/*` 会话事件被自适应门抑制；在宿主随附该词汇表或 `ignorable` 信封之前，审计链由 `command/run` + `command/done` 加存储领域承担。
-- `confirmVia: approval` 需要开放的轮次，而命令在轮次之间运行——在 rc.8 上请挂载 userQuestions（或设 `confirmVia: userQuestions`）。
+- 在 rc.2 上，`checkpoint/*` 会话事件被自适应门抑制；在宿主随附该词汇表或 `ignorable` 信封之前，审计链由 `command/run` + `command/done` 加存储领域承担。
+- `confirmVia: approval` 需要开放的轮次，而命令在轮次之间运行——在 rc.2 上请挂载 userQuestions（或设 `confirmVia: userQuestions`）。
 - 会话回退会从检查点边界创建一个**新的子会话**；它绝不改写或截断原会话。
 - `workspaceRestore: 'reset-hard'` 会把分支头移动到快照提交；默认关闭。
 - 在任何已关闭轮次之前捕获的检查点没有重放边界——此时会话回退会创建一个上下文为空的崭新子会话。
@@ -257,7 +257,7 @@ capture ── fs/write-intent · fs/edit-intent · tools/pre-execute (prepend, 
 ## 开发
 
 ```sh
-npm install               # peer 依赖：@deepseek-ai/dsh-session@0.1.0-rc.8、schemastery、zod
+npm install               # peer 依赖：@deepseek-ai/dsh-session@0.1.1-rc.2、schemastery、zod
 npm test                  # node --test test/**/*.test.mjs（含 provider 套件）
 npm run test:integration  # 组装式 headless 验证（test/integration/）
 ```

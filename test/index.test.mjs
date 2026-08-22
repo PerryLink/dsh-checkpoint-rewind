@@ -106,7 +106,7 @@ describe('配置与挂载', () => {
     await assert.rejects(() => mountPlugin({ config: { preRewindCheckpoint: 'always' } }), /preRewindCheckpoint/)
   })
 
-  it('probeIgnorableAppend：rc.8 宿主不支持 ignorable 信封 → false（自适应门保持关闭）', async () => {
+  it('probeIgnorableAppend：rc.2 宿主不支持 ignorable 信封 → false（自适应门保持关闭）', async () => {
     const { probeIgnorableAppend } = await import('../index.mjs')
     assert.equal(probeIgnorableAppend(), false)
   })
@@ -506,7 +506,7 @@ describe('/rewind 命令', () => {
     await app.dispose()
   })
 
-  it('rc.8 自适应门：checkpoint/* 未被宿主收录时不 append（会话仍可加载）', async () => {
+  it('rc.2 自适应门：checkpoint/* 未被宿主收录时不 append（会话仍可加载）', async () => {
     assert.equal(KNOWN_SESSION_EVENT_TYPES.has('checkpoint/snapshot'), false)
     const cwd = await makeWorkspace({ 'a.txt': 'A1' })
     const snapshotDir = await makeSnapDir()
