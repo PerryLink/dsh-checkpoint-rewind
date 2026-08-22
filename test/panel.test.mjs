@@ -34,7 +34,7 @@ function recordOf(over = {}) {
 function makeDeps(records) {
   const table = new Map(records.map((record) => [record.id, record]))
   return {
-    tablePromise: Promise.resolve(table),
+    getTable: () => Promise.resolve(table),
     ops: Promise.resolve(),
     registry: {
       get: (name) => name === 'copy'

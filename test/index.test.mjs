@@ -1042,6 +1042,12 @@ describe('checkpoint 模型工具与提示词段落', () => {
     const output = await def.execute({ note: '工具捕获' }, { agent: app.agent })
     assert.match(output, /checkpoint: captured #/)
     assert.match(output, /note/)
+    // presentCall 契约回归：返回对象卡片（ToolEventView {card, …}），不是字符串——
+    // 字符串会让宿主整页拒绝历史响应（session.history zod 校验 invalid_type）。
+    const view = def.presentCall({ note: '工具捕获' })
+    assert.equal(view?.card, 'generic')
+    assert.match(view?.title, /工具捕获/)
+    assert.equal(typeof def.presentCall({}), 'object', '无 note 也返回对象卡片')
     const records = await recordsOf(app.records)
     assert.equal(records.length, 1)
     assert.equal(records[0][1].kind, 'manual')

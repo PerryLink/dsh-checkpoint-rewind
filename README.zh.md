@@ -221,7 +221,7 @@ capture ── fs/write-intent · fs/edit-intent · tools/pre-execute (prepend, 
 ## 权限与数据
 
 - **权限**：workshop 清单声明 `workspace:read`、`workspace:write`、`git:read`、`git:write`、`snapshot-storage:write`、`session-log:read`、`settings:write` 与 `network:none`。
-- **数据**：检查点记录位于 `checkpoints` 存储域（SQLite 行或 JSON 文件）；copy 快照位于 `snapshotDir`。完全本地——无网络、无凭据。
+- **数据**：检查点记录位于 `checkpoints` 存储域（SQLite 行或 JSON 文件）；copy 快照位于 `snapshotDir`。完全本地——无网络、无凭据。存储域按双版本打开：0.4.x 时代的介质（域 v1）以兼容模式打开，旧记录保持可读、新捕获按 v2 形状落盘——升级插件永远不会遗弃既有介质。
 - **会话日志**：`checkpoint/*` 事件经自适应门追加；权威审计链是 `command/run` + `command/done` 加上持久化领域。
 
 ## 安全边界

@@ -6,6 +6,11 @@
 // - storageDomain 是 mock 领域 facility：内存表，实现 open(spec) → domain.table(name)
 //   返回真实 KvTable 形状的 {get, put, delete, update, entries(): [K,V] 迭代器, keys, size}；
 // - userQuestions/approval 按测试注入（默认两者缺失 → 确认门失败关闭）。
+//
+// 介质版本语义对齐真 json 后端（@deepseek-ai/dsh-storage-json 的 parse）：
+// - mediumVersion 指定 = 介质已存在且盖该版本章：open 的 spec.version 不匹配时
+//   抛 {code: 'version-mismatch'}（与后端 StorageError 同 code）；
+// - mediumVersion 缺省 = 新介质：任意 spec 版本可创建，首次 open 后按该 spec 盖章。
 
 import { Context } from '@deepseek-ai/cordis'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
@@ -16,13 +21,17 @@ import { checkpointsDomainSpec } from '../../lib/domain.mjs'
 /**
  * 构造 mock 存储领域 facility（'checkpoints' 单表内存实现）。
  * 返回的 `records` 是权威记录 Map（测试直接断言）。
- * @returns {{facility: object, records: Map<string, object>, opened: object[]}}
+ * @param {object} [opts] - {mediumVersion}。
+ * @returns {{facility: object, records: Map<string, object>, opened: object[], specVersions: number[]}}
  */
-export function makeDomainFacility() {
+export function makeDomainFacility({ mediumVersion } = {}) {
   const store = new Map()
   const records = new Map()
   store.set(checkpointsDomainSpec.name, records)
   const opened = []
+  const specVersions = []
+  // 已存在介质的版本；undefined = 新介质（首个 spec 创建并盖章）。
+  let sealedVersion = mediumVersion
   const makeTable = (map) => ({
     get: (key) => map.get(key),
     put: async (key, value) => { map.set(key, value) },
@@ -39,6 +48,13 @@ export function makeDomainFacility() {
   const facility = {
     async open(spec) {
       if (spec.name !== checkpointsDomainSpec.name) throw new Error(`unexpected domain ${spec.name}`)
+      if (sealedVersion !== undefined && spec.version !== sealedVersion) {
+        throw Object.assign(
+          new Error(`unit '${spec.name}': stored version ${sealedVersion} != expected ${spec.version}`),
+          { code: 'version-mismatch' },
+        )
+      }
+      if (sealedVersion === undefined) sealedVersion = spec.version
       const map = store.get(spec.name) ?? new Map()
       store.set(spec.name, map)
       const domain = {
@@ -47,16 +63,17 @@ export function makeDomainFacility() {
         close: async () => {},
       }
       opened.push(domain)
+      specVersions.push(spec.version)
       return domain
     },
   }
-  return { facility, records, opened }
+  return { facility, records, opened, specVersions }
 }
 
 /**
  * 组装完整测试上下文。
- * @param {object} [opts] - {config, userQuestions, approval, cwd, sessionId}。
- * @returns {Promise<{root: Context, dispose: () => Promise<void>, records: Map, opened: object[], agent: object, session: object, makeSession: (cwd?: string) => object}>}
+ * @param {object} [opts] - {config, userQuestions, approval, cwd, sessionId, mediumVersion, seedRecords}。
+ * @returns {Promise<{root: Context, dispose: () => Promise<void>, records: Map, opened: object[], specVersions: number[], agent: object, session: object, makeSession: (cwd?: string) => object}>}
  */
 export async function mountPlugin(opts = {}) {
   const root = new Context()
@@ -64,9 +81,16 @@ export async function mountPlugin(opts = {}) {
   const mount = async (plugin, config) => {
     fibers.push(await root.plugin(plugin, config))
   }
-  const { facility, records, opened } = makeDomainFacility()
-  // storageDomain: false 模拟未组合存储栈的宿主（插件必须照常挂载并降级）。
-  if (opts.storageDomain !== false) root.provide('storageDomain', facility)
+  const { facility, records, opened, specVersions } = makeDomainFacility({ mediumVersion: opts.mediumVersion })
+  // 预置介质记录（v1/v2 形状均可；测试直接放进权威 Map，open 后立即可见）。
+  for (const [key, record] of Object.entries(opts.seedRecords ?? {})) {
+    records.set(key, record)
+  }
+  // storageDomain: false 模拟未组合存储栈的宿主（插件必须照常挂载并降级）；
+  // 'late' 模拟挂载时序竞态：插件 apply 完成后再提供服务（dsh-storage-domain 的
+  // apply 异步，rewind 行不 inject 时可能抢先完成——注册表必须经惰性 getter
+  // 在首次使用时解析到服务，见 test/storage-lazy.test.mjs）。
+  if (opts.storageDomain !== false && opts.storageDomain !== 'late') root.provide('storageDomain', facility)
   if (opts.userQuestions !== undefined) root.provide('userQuestions', opts.userQuestions)
   if (opts.approval !== undefined) root.provide('approval', opts.approval)
   if (opts.tools !== undefined) root.provide('tools', opts.tools)
@@ -85,6 +109,8 @@ export async function mountPlugin(opts = {}) {
     // 直接用默认导出的 apply 手动挂载等价于 config 全默认；此处传入自定义 config。
     apply: (ctx) => plugin.apply(ctx, config),
   }))
+  // 'late'：插件 apply 完成后才提供 storageDomain——竞态窗口已过，首次使用必须仍能解析。
+  if (opts.storageDomain === 'late') root.provide('storageDomain', facility)
 
   // 合成绝对路径（跨平台）：session 头校验要求绝对路径，Windows 风格 'C:/…'
   // 在 Linux 上只是相对路径。目录无需真实存在——快照 walk 读不到即得空快照。
@@ -95,6 +121,7 @@ export async function mountPlugin(opts = {}) {
     root,
     records,
     opened,
+    specVersions,
     agent,
     session,
     makeSession: (dir = cwd) => {

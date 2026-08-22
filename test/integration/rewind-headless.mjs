@@ -4,6 +4,9 @@
 // 真 storage-domain + 真 user-questions（测试回答者 + 假 agents 注册表）+
 // dsh-checkpoint-rewind。模拟 agent 两个轮次分别改两个文件 →
 // /rewind 列表 → /rewind <id> 回退 → 断言文件内容与 fork 会话上下文。
+// 另有一个 v1 介质流程：预置 0.4.x 时代的 checkpoints.json（unit.version 1 +
+// forkSeq 记录），断言真实 json 后端的版本校验下插件回退 v1 容错 spec——
+// 旧记录可读、新捕获按 v2 形状写入同一介质、头部保持 v1。
 //
 // 用法：node test/integration/rewind-headless.mjs（需先 npm install）。
 
@@ -42,7 +45,7 @@ async function gitAvailable() {
 
 /**
  * 组装完整上下文并挂载插件。
- * @param {object} opts - {cwd, snapshotDir, config}。
+ * @param {object} opts - {cwd, snapshotDir, config, storageRoot}。
  */
 async function mount(opts) {
   const root = new Context()
@@ -51,7 +54,9 @@ async function mount(opts) {
     fibers.push(await root.plugin(plugin, config))
   }
   await mount(Storage)
-  await mount(Object.assign({}, storageJson), { root: await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-rewind-storage-')) })
+  // storageRoot 可预置（v1 介质流程先写好 checkpoints.json 再挂载）；缺省临时目录。
+  const storageRoot = opts.storageRoot ?? await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-rewind-storage-'))
+  await mount(Object.assign({}, storageJson), { root: storageRoot })
   await mount(Object.assign({}, storageDomain), { backend: 'json' })
   await mount(SessionStore)
   await mount(CommandRuntime)
@@ -234,6 +239,73 @@ async function gitFlowIfAvailable() {
   log('git flow: PASS')
 }
 
+/**
+ * 附流程：v1 介质（0.4.x 时代）——真实 json 后端版本校验下的双版本回退。
+ * 回归：0.5.3 在 v1 介质上 open 抛 version-mismatch，捕获静默失效。
+ */
+async function v1MediumFlow() {
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-rewind-int-ws-'))
+  const snapshotDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-rewind-int-snap-'))
+  const storageRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-rewind-int-storage-'))
+  const fileA = path.join(workspace, 'a.txt')
+  await fs.writeFile(fileA, 'A-v1\n')
+  // 预置 0.4.x 时代的介质：unit.version 1 + 一条 v1 记录（forkSeq，无 kind/config）。
+  const v1Record = {
+    id: 'v1-record-0001',
+    sessionId: 'integration-session',
+    cwd: workspace,
+    seq: 1,
+    time: Date.now() - 60000,
+    provider: 'git',
+    triggerTool: 'write',
+    turn: 1,
+    step: 1,
+    files: 1,
+    bytes: 4,
+    ref: 'a'.repeat(40),
+    forkSeq: 0,
+  }
+  const medium = {
+    unit: { name: 'checkpoints', version: 1 },
+    global: null,
+    tables: { checkpoints: { [v1Record.id]: v1Record } },
+  }
+  await fs.writeFile(path.join(storageRoot, 'checkpoints.json'), `${JSON.stringify(medium, null, 2)}\n`, 'utf8')
+
+  const { root, agent, dispose } = await mount({ cwd: workspace, snapshotDir, storageRoot })
+  log('v1 medium flow: mounted; storage', storageRoot)
+
+  // 回退打开成功：旧记录立即可读（kind 缺失降级 [mutation]）。
+  const list0 = await executeCommand(root, agent, '/rewind')
+  assert.equal(list0.kind, 'success')
+  assert.match(list0.text, /1 checkpoint/)
+  assert.match(list0.text, /\[mutation\]/, 'v1 记录无 kind → 降级标签')
+  assert.match(list0.text, /\(git\)/)
+  log('  /rewind list on v1 medium:\n' + list0.text.split('\n').map((line) => `    ${line}`).join('\n'))
+
+  // 捕获恢复：新记录按 v2 形状写入同一介质；介质头部保持 v1。
+  await agentMutates(root, agent, 1, 1, fileA, 'A-v2\n')
+  const list1 = await executeCommand(root, agent, '/rewind')
+  assert.equal(list1.kind, 'success')
+  assert.match(list1.text, /3 checkpoints/, 'v1 种子 + auto + fs/write-intent 各一条')
+  assert.match(list1.text, /\(copy\)/, '新捕获经 auto→copy 解析')
+
+  const after = JSON.parse(await fs.readFile(path.join(storageRoot, 'checkpoints.json'), 'utf8'))
+  assert.equal(after.unit.version, 1, '介质头部保持 v1（存储层无迁移，兼容模式不升级）')
+  const records = after.tables.checkpoints
+  assert.equal(records[v1Record.id].forkSeq, 0, '旧 v1 记录原样保留')
+  const fresh = Object.values(records).find((record) => record.id !== v1Record.id && record.kind === 'mutation')
+  assert.ok(fresh, '新记录已落盘')
+  assert.equal(fresh.kind, 'mutation', '新记录为 v2 形状（kind 落盘）')
+  assert.equal(typeof fresh.config, 'object', '新记录携带配置快照')
+  assert.equal(fresh.forkSeq, undefined, '新记录不带 v1 字段')
+  log('  medium header version:', after.unit.version, '· records:', Object.keys(records).length)
+
+  await dispose()
+  log('v1 medium flow: PASS')
+}
+
 await mainCopyFlow()
 await gitFlowIfAvailable()
+await v1MediumFlow()
 log('integration: ALL PASS')

@@ -221,7 +221,7 @@ Uma execução real de integração headless montada (`npm run test:integration`
 ## Permissões e dados
 
 - **Permissões**: o manifesto do workshop declara `workspace:read`, `workspace:write`, `git:read`, `git:write`, `snapshot-storage:write`, `session-log:read`, `settings:write` e `network:none`.
-- **Dados**: os registros de checkpoint vivem no domínio de armazenamento `checkpoints` (linhas SQLite ou um arquivo JSON); os instantâneos de cópia vivem sob `snapshotDir`. Totalmente local — sem rede, sem credenciais.
+- **Dados**: os registros de checkpoint vivem no domínio de armazenamento `checkpoints` (linhas SQLite ou um arquivo JSON); os instantâneos de cópia vivem sob `snapshotDir`. Totalmente local — sem rede, sem credenciais. O domínio é aberto em versão dupla: mídias da era 0.4.x (domínio v1) são abertas em modo de compatibilidade que mantém os registros antigos legíveis e grava as novas capturas no formato v2 — atualizar o plugin nunca órfã uma mídia existente.
 - **Log de sessão**: os eventos `checkpoint/*` são anexados pela porta adaptativa; a cadeia de auditoria autoritativa é `command/run` + `command/done` mais o domínio durável.
 
 ## Limites de segurança
