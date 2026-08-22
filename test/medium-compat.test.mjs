@@ -118,11 +118,12 @@ describe('存储介质版本兼容（回归：0.5.3 打不开 v1 介质）', () 
       seedRecords: { [seed.id]: seed },
       config: { provider: 'auto', snapshotDir },
     })
-    // v2 打开被 version-mismatch 拒绝 → 回退 v1：域只以版本 1 打开过一次。
+    // 首次使用（/checkpoint list）才惰性打开域：v2 打开被 version-mismatch
+    // 拒绝 → 回退 v1：域只以版本 1 打开过一次。
+    const list0 = await command(app, '/checkpoint list')
     assert.deepEqual(app.specVersions, [1])
 
     // 旧记录立即可读：列表包含 v1 记录，kind 缺失降级为 [mutation]。
-    const list0 = await command(app, '/checkpoint list')
     assert.equal(list0?.result.kind, 'success')
     assert.match(list0?.result.text, /checkpoint: 1 checkpoint/)
     assert.match(list0?.result.text, /\[mutation\]/)
@@ -160,11 +161,11 @@ describe('存储介质版本兼容（回归：0.5.3 打不开 v1 介质）', () 
       seedRecords: { [seed.id]: seed },
       config: { provider: 'auto', snapshotDir },
     })
-    assert.deepEqual(app.specVersions, [2])
-
     openStep(app.session, 1, 1)
     await dispatchWriteIntent(app.root, app.agent, 'write')
     const records = await waitForRecords(app.records, 2)
+    // 首次使用（捕获）才惰性打开域：v2 介质直接以版本 2 打开，无回退。
+    assert.deepEqual(app.specVersions, [2])
     const fresh = records.find(([, record]) => record.id !== seed.id)[1]
     assert.equal(fresh.kind, 'mutation')
     assert.equal(typeof fresh.config, 'object')
@@ -173,6 +174,9 @@ describe('存储介质版本兼容（回归：0.5.3 打不开 v1 介质）', () 
 
   it('新介质（不存在）创建为 v2', async () => {
     const app = await mountPlugin({})
+    // 首次使用（/rewind 列表）才惰性打开域：新介质按首个 spec 创建并盖 v2 章。
+    const result = await command(app, '/rewind')
+    assert.equal(result?.result.kind, 'success')
     assert.deepEqual(app.specVersions, [2])
     await app.dispose()
   })

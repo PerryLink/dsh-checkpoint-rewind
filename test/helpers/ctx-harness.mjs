@@ -86,8 +86,11 @@ export async function mountPlugin(opts = {}) {
   for (const [key, record] of Object.entries(opts.seedRecords ?? {})) {
     records.set(key, record)
   }
-  // storageDomain: false 模拟未组合存储栈的宿主（插件必须照常挂载并降级）。
-  if (opts.storageDomain !== false) root.provide('storageDomain', facility)
+  // storageDomain: false 模拟未组合存储栈的宿主（插件必须照常挂载并降级）；
+  // 'late' 模拟挂载时序竞态：插件 apply 完成后再提供服务（dsh-storage-domain 的
+  // apply 异步，rewind 行不 inject 时可能抢先完成——注册表必须经惰性 getter
+  // 在首次使用时解析到服务，见 test/storage-lazy.test.mjs）。
+  if (opts.storageDomain !== false && opts.storageDomain !== 'late') root.provide('storageDomain', facility)
   if (opts.userQuestions !== undefined) root.provide('userQuestions', opts.userQuestions)
   if (opts.approval !== undefined) root.provide('approval', opts.approval)
   if (opts.tools !== undefined) root.provide('tools', opts.tools)
@@ -106,6 +109,8 @@ export async function mountPlugin(opts = {}) {
     // 直接用默认导出的 apply 手动挂载等价于 config 全默认；此处传入自定义 config。
     apply: (ctx) => plugin.apply(ctx, config),
   }))
+  // 'late'：插件 apply 完成后才提供 storageDomain——竞态窗口已过，首次使用必须仍能解析。
+  if (opts.storageDomain === 'late') root.provide('storageDomain', facility)
 
   // 合成绝对路径（跨平台）：session 头校验要求绝对路径，Windows 风格 'C:/…'
   // 在 Linux 上只是相对路径。目录无需真实存在——快照 walk 读不到即得空快照。
