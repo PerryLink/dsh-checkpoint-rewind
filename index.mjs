@@ -328,37 +328,44 @@ export async function apply(ctx, config = {}) {
   // （可选 forkSeq）。后端对版本不匹配抛 version-mismatch 且无迁移，先按 v2
   // 打开（介质不存在则创建 v2），失败回退 v1 容错 spec：旧记录照常可读，
   // 新记录按 v2 形状写入同一介质（消费方 dsh-checkpoint-diff 同为双版本容错）。
-  const storageDomain = ctx.get('storageDomain')
-  const tablePromise = storageDomain === undefined
-    ? Promise.reject(registryUnavailable(
-      'the storageDomain service is not composed in this profile — add the storage stack rows '
-      + '(@deepseek-ai/dsh-storage + @deepseek-ai/dsh-storage-json with config.root + '
-      + '@deepseek-ai/dsh-storage-domain with config.backend: json) to enable checkpoints',
-    ))
-    : (async () => {
-        let lastError
-        for (const spec of [checkpointsDomainSpec, checkpointsDomainSpecV1]) {
-          try {
-            const domain = await storageDomain.open(spec)
-            ctx.effect(() => () => { void domain.close() }, `${PLUGIN_NAME}.domain.close`)
-            if (spec === checkpointsDomainSpecV1) {
-              logger.warn('checkpoints medium is domain v1 (rewind 0.4.x era): opened in compatibility mode — existing records stay readable and new records use the v2 shape; the storage layer has no automatic migration, so the medium keeps its v1 header until it is recreated')
+  // 惰性解析 + 记忆化：sibling 行按服务可用顺序挂载，dsh-storage-domain 的 apply
+  // 是异步的（先开池/介质再注册服务），apply 时一次性 ctx.get() 会抢先取到
+  // undefined 且永不重查——注册表从此永久不可用（一切捕获静默失败）。首次使用
+  // 时再解析：届时组合必然已完成；storage 栈真缺失时首次使用即 reject 并给出
+  // 组合指引（与 dsh-checkpoint-diff 对 sessionQuery 的惰性 getter 处理一致）。
+  let tablePromise
+  const getTablePromise = () => {
+    if (tablePromise !== undefined) return tablePromise
+    const storageDomain = ctx.get('storageDomain')
+    tablePromise = storageDomain === undefined
+      ? Promise.reject(registryUnavailable(
+        'the storageDomain service is not composed in this profile — add the storage stack rows '
+        + '(@deepseek-ai/dsh-storage + @deepseek-ai/dsh-storage-json with config.root + '
+        + '@deepseek-ai/dsh-storage-domain with config.backend: json) to enable checkpoints',
+      ))
+      : (async () => {
+          let lastError
+          for (const spec of [checkpointsDomainSpec, checkpointsDomainSpecV1]) {
+            try {
+              const domain = await storageDomain.open(spec)
+              ctx.effect(() => () => { void domain.close() }, `${PLUGIN_NAME}.domain.close`)
+              if (spec === checkpointsDomainSpecV1) {
+                logger.warn('checkpoints medium is domain v1 (rewind 0.4.x era): opened in compatibility mode — existing records stay readable and new records use the v2 shape; the storage layer has no automatic migration, so the medium keeps its v1 header until it is recreated')
+              }
+              return domain.table('checkpoints')
+            } catch (error) {
+              lastError = error
+              // version-mismatch / malformed-medium 是后端 StorageError（code 稳定）：
+              // 介质属于另一版本 → 换 spec 重试；其余错误（already-open 等）直接失败。
+              if (error?.code === 'version-mismatch' || error?.code === 'malformed-medium') continue
+              throw error
             }
-            return domain.table('checkpoints')
-          } catch (error) {
-            lastError = error
-            // version-mismatch / malformed-medium 是后端 StorageError（code 稳定）：
-            // 介质属于另一版本 → 换 spec 重试；其余错误（already-open 等）直接失败。
-            if (error?.code === 'version-mismatch' || error?.code === 'malformed-medium') continue
-            throw error
           }
-        }
-        throw lastError
-      })()
-  if (storageDomain === undefined) {
-    warn('storageDomain service not composed: checkpoints/rewind stay unavailable (add @deepseek-ai/dsh-storage + @deepseek-ai/dsh-storage-json + @deepseek-ai/dsh-storage-domain rows with backend json to enable them)')
+          throw lastError
+        })()
+    tablePromise.catch(() => {}) // 消费方各自处理拒绝；此处仅避免未处理拒绝告警。
+    return tablePromise
   }
-  tablePromise.catch(() => {}) // 消费方各自处理拒绝；此处仅避免未处理拒绝告警。
 
   // 领域写操作链：快照落盘、边界补记、清理按序执行；命令执行前先 await 排空。
   let ops = Promise.resolve()
@@ -515,7 +522,7 @@ export async function apply(ctx, config = {}) {
     try {
       const cursor = session.seq
       const boundary = sessionBoundaryAt(session.events, cursor)
-      const table = await tablePromise
+      const table = await getTablePromise()
       const provider = await registry.resolve(liveConfig.provider, { cwd, key: workspaceKeyOf(cwd) })
       const previous = latestRecordFor(table, session.id, cwd)
       const previousRef = previous !== undefined && previous.provider === provider.name ? previous.ref : undefined
@@ -659,7 +666,7 @@ export async function apply(ctx, config = {}) {
   /** step/end 补记：该 step 内未关联的检查点获得 stepEndSeq（"回到第 N 步"映射）。 */
   function backfillStepEnd(session, turn, step, endSeq) {
     schedule(async () => {
-      const table = await tablePromise
+      const table = await getTablePromise()
       for (const [key, record] of table.entries()) {
         if (record.sessionId !== session.id || record.turn !== turn || record.step !== step || record.stepEndSeq !== undefined) continue
         await table.put(key, { ...record, stepEndSeq: endSeq })
@@ -678,7 +685,7 @@ export async function apply(ctx, config = {}) {
     for (const id of ids) {
       const record = entries.find(entry => entry.key === id)?.value
       try {
-        const table = await tablePromise
+        const table = await getTablePromise()
         await table.delete(id)
       } catch (error) {
         warn(`checkpoint ${id} record deletion failed: ${messageOf(error)}`)
@@ -704,7 +711,7 @@ export async function apply(ctx, config = {}) {
    */
   function pruneAll(triggerSession, reason) {
     return schedule(async () => {
-      const table = await tablePromise
+      const table = await getTablePromise()
       const entries = [...table.entries()].map(([key, value]) => ({ key, value }))
       const plan = prunePlan(entries, { maxSnapshots: liveConfig.maxSnapshots, maxSnapshotBytes: liveConfig.maxSnapshotBytes })
       if (plan.ids.length === 0) return
@@ -766,7 +773,7 @@ export async function apply(ctx, config = {}) {
 
   // --- 设置页面板 wire 服务（checkpointPanel Remote：时间线 + 两两 diff；只读）。
   await ctx.plugin(CheckpointPanelService, {
-    tablePromise,
+    getTable: getTablePromise,
     ops,
     registry,
     getLive: () => liveConfig,
@@ -845,7 +852,7 @@ export async function apply(ctx, config = {}) {
    * @returns {Promise<object[]>} 记录数组。
    */
   async function mineFor(session, cwd) {
-    const table = await tablePromise
+    const table = await getTablePromise()
     return [...table.entries()]
       .filter(([, record]) => record.sessionId === session.id && workspaceKeyOf(record.cwd) === workspaceKeyOf(cwd))
       .map(([, record]) => record)
@@ -1156,10 +1163,10 @@ export async function apply(ctx, config = {}) {
     if (typeof cwd !== 'string' || cwd.length === 0) {
       return { kind: 'error', text: 'rewind: session has no workspace cwd' }
     }
-    let table
     try {
       await ops
-      table = await tablePromise
+      // 注册表可用性校验（首次使用惰性解析）；表本身由 mineFor 经同一 getter 取。
+      await getTablePromise()
     } catch (error) {
       const err = registryUnavailable(messageOf(error))
       logger.error(err.message)
