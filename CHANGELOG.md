@@ -4,6 +4,12 @@ All notable changes to dsh-checkpoint-rewind are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project versions with [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- Align the `@deepseek-ai/schemastery` peer (and dev) range to `^3.18.0` from the overly broad `>=3.0.0`, matching the harness's shipped schemastery (3.18.x) and the rest of the `@deepseek-ai/dsh-*` peer surface. No functional change.
+
 ## [0.5.4] — 2026-08-22
 
 ### Changed
