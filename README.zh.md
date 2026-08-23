@@ -271,6 +271,11 @@ npm run test:integration  # 组装式 headless 验证（test/integration/）
 ## 贡献者
 
 - [@PerryLink](https://github.com/PerryLink) —— 创建者与维护者：三态检查点模型、git/copy provider 接缝、三阶段回滚事务、设置页时间线、文档、CI/CD 与发布。
+- [@tmpdot](https://github.com/tmpdot)（rmUnlucky）—— v1 介质双版本兼容（#8）、惰性 `storageDomain` 解析（#9）、checkpoint 去重回复提示（#10），以及 `$DSH_HOME` 未设置时快照目录回退的 bug 报告（#4）。
+- [@shipinliang](https://github.com/shipinliang) —— checkpoint 面板 wire 契约报告：`limit` 参数缺失 `acceptsUndefined`（#5）与 `#deps` 私有字段代理失败（#6）。
+- [@hwz1456](https://github.com/hwz1456) —— web profile 检查点捕获报告（#3）。
+- [@Andiii208](https://github.com/Andiii208) —— `plugin_check` 发布规范报告（#2）。
+- [@alexchenzl](https://github.com/alexchenzl)（Ashu）—— DSH Directory 收录邀请（#7）。
 
 ## PerryLink DSH 插件家族
 

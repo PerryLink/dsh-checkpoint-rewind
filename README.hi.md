@@ -271,6 +271,11 @@ npm run test:integration  # असेंबल्ड-हेडलेस सत�
 ## योगदानकर्ता
 
 - [@PerryLink](https://github.com/PerryLink) — निर्माता और अनुरक्षक: तीन-अवस्था चेकपॉइंट मॉडल, git/copy प्रदाता सीम, तीन-चरण रोलबैक लेनदेन, सेटिंग्स-पृष्ठ टाइमलाइन, दस्तावेज़, CI/CD और रिलीज़।
+- [@tmpdot](https://github.com/tmpdot) (rmUnlucky) — v1 मीडिया दोहरे-संस्करण संगतता (#8), आलसी `storageDomain` समाधान (#9), checkpoint डिडुप उत्तर संकेत (#10), और `$DSH_HOME` अनसेट स्नैपशॉट-डायरेक्टरी बग रिपोर्ट (#4)।
+- [@shipinliang](https://github.com/shipinliang) — checkpoint पैनल wire-अनुबंध रिपोर्ट: `limit` पैरामीटर पर अनुपस्थित `acceptsUndefined` (#5) और `#deps` निजी-फ़ील्ड प्रॉक्सी विफलता (#6)।
+- [@hwz1456](https://github.com/hwz1456) — web-profile checkpoint-कैप्चर रिपोर्ट (#3)।
+- [@Andiii208](https://github.com/Andiii208) — `plugin_check` प्रकाशन-विशिष्टता रिपोर्ट (#2)।
+- [@alexchenzl](https://github.com/alexchenzl) (Ashu) — DSH डायरेक्टरी सूचीबद्धता आमंत्रण (#7)।
 
 ## PerryLink DSH प्लगइन परिवार
 

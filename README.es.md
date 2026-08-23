@@ -271,6 +271,11 @@ Sin paso de build: ESM puro — `index.mjs`/`lib/` son los artefactos publicados
 ## Contribuidores
 
 - [@PerryLink](https://github.com/PerryLink) — creador y mantenedor: el modelo de checkpoint de tres estados, la costura de proveedores git/copy, la transacción de reversión en tres fases, la línea de tiempo de Ajustes, la documentación, CI/CD y releases.
+- [@tmpdot](https://github.com/tmpdot) (rmUnlucky) — compatibilidad de doble versión para medios v1 (#8), resolución perezosa de `storageDomain` (#9), pistas de respuesta en la deduplicación de checkpoints (#10) y el informe del bug del directorio de instantáneas con `$DSH_HOME` sin definir (#4).
+- [@shipinliang](https://github.com/shipinliang) — informes del contrato wire del panel de checkpoints: el `acceptsUndefined` ausente en el parámetro `limit` (#5) y el fallo de proxy por el campo privado `#deps` (#6).
+- [@hwz1456](https://github.com/hwz1456) — informe de captura de checkpoints en el perfil web (#3).
+- [@Andiii208](https://github.com/Andiii208) — informe de la especificación de publicación de `plugin_check` (#2).
+- [@alexchenzl](https://github.com/alexchenzl) (Ashu) — invitación al listado del DSH Directory (#7).
 
 ## Familia de plugins DSH de PerryLink
 

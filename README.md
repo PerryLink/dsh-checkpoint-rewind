@@ -272,6 +272,11 @@ No build step: pure ESM — `index.mjs`/`lib/` are the published artifacts.
 ## Contributors
 
 - [@PerryLink](https://github.com/PerryLink) — creator and maintainer: the three-state checkpoint model, the git/copy provider seam, the three-phase rewind transaction, the Settings page timeline, docs, CI/CD and releases.
+- [@tmpdot](https://github.com/tmpdot) (rmUnlucky) — v1-medium dual-version compatibility (#8), lazy `storageDomain` resolution (#9), checkpoint dedup reply hints (#10), and the `$DSH_HOME`-unset snapshot-dir bug report (#4).
+- [@shipinliang](https://github.com/shipinliang) — checkpoint panel wire-contract reports: the missing `acceptsUndefined` on the `limit` parameter (#5) and the `#deps` private-field proxy failure (#6).
+- [@hwz1456](https://github.com/hwz1456) — web-profile checkpoint-capture report (#3).
+- [@Andiii208](https://github.com/Andiii208) — `plugin_check` publishing-spec report (#2).
+- [@alexchenzl](https://github.com/alexchenzl) (Ashu) — DSH Directory listing invitation (#7).
 
 ## PerryLink DSH Plugin Family
 
