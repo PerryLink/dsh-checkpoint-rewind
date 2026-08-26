@@ -132,6 +132,8 @@ run "/rewind <id>" to restore files and fork the session from that checkpoint
 | `autoCheckpoint.enabled` | `true` | `step/start` 上的自动间隔快照 |
 | `autoCheckpoint.intervalMinutes` | `0` | 间隔；`0` = 每步 |
 | `workspaceRestore` | `restore` | 工作区回滚：`restore`（安全覆盖）· `reset-hard`（CC 风格，需显式开启） |
+| `diffRenderer` | `pairwise` | 设置页差异渲染器：`pairwise`（行级文本）· `side-by-side`（逐文件双栏） |
+| `selectiveRestore` | `true` | 逐文件选择性恢复（`/rewind … --files`）以及面板的逐文件复选框 + 大小合计 |
 | `promptSection` | `true` | 注入一句角色陈述式提示词段落 |
 | `checkpointTool` | `true` | 注册 `checkpoint` 模型工具 |
 

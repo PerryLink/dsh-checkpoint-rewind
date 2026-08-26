@@ -132,6 +132,8 @@ Todas las opciones son campos Schemastery `Config` (modificables desde cordis.ym
 | `autoCheckpoint.enabled` | `true` | Instantáneas automáticas por intervalo en `step/start` |
 | `autoCheckpoint.intervalMinutes` | `0` | Intervalo; `0` = cada paso |
 | `workspaceRestore` | `restore` | Reversión del workspace: `restore` (sobrescritura segura) · `reset-hard` (estilo CC, opt-in) |
+| `diffRenderer` | `pairwise` | Renderizador de diff de la página de ajustes: `pairwise` (texto línea a línea) · `side-by-side` (dos columnas por archivo) |
+| `selectiveRestore` | `true` | Restauración selectiva por archivo (`/rewind … --files`) y la casilla por archivo del panel + total de tamaño |
 | `promptSection` | `true` | Inyecta una sección breve de rol en el prompt |
 | `checkpointTool` | `true` | Registra la herramienta de modelo `checkpoint` |
 

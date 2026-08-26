@@ -132,6 +132,8 @@ run "/rewind <id>" to restore files and fork the session from that checkpoint
 | `autoCheckpoint.enabled` | `true` | `step/start` पर स्वचालित अंतराल स्नैपशॉट |
 | `autoCheckpoint.intervalMinutes` | `0` | अंतराल; `0` = हर चरण |
 | `workspaceRestore` | `restore` | वर्कस्पेस रोलबैक: `restore` (सुरक्षित अधिलेखन) · `reset-hard` (CC शैली, ऑप्ट-इन) |
+| `diffRenderer` | `pairwise` | सेटिंग्स-पेज diff रेंडरर: `pairwise` (लाइन-स्तरीय टेक्स्ट) · `side-by-side` (प्रति-फ़ाइल दो-कॉलम) |
+| `selectiveRestore` | `true` | प्रति-फ़ाइल चयनात्मक बहाली (`/rewind … --files`) और पैनल का प्रति-फ़ाइल चेकबॉक्स + आकार योग |
 | `promptSection` | `true` | एक संक्षिप्त भूमिका-वाक्य प्रॉम्प्ट अनुभाग इंजेक्ट करें |
 | `checkpointTool` | `true` | `checkpoint` मॉडल टूल पंजीकृत करें |
 
