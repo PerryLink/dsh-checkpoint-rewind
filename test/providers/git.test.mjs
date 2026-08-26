@@ -204,6 +204,24 @@ describe('git provider（scripted runner）', () => {
     assert.deepEqual(result.leftovers, [])
   })
 
+  it('restore：files 选择性恢复只恢复指定路径；未知路径失败关闭', async () => {
+    const { run, calls } = scriptedGit({
+      [`ls-tree -r --name-only ${SHA}`]: { code: 0, stdout: 'a.txt\nb.txt\n', stderr: '' },
+      [`diff --name-only ${SHA} --`]: { code: 0, stdout: 'a.txt\n', stderr: '' },
+      [`restore --source=${SHA} --worktree -- a.txt`]: { code: 0, stdout: '', stderr: '' },
+      'ls-files --others --exclude-standard': { code: 0, stdout: '', stderr: '' },
+      [`diff --name-only --diff-filter=A ${SHA} --`]: { code: 0, stdout: '', stderr: '' },
+    })
+    const provider = makeGitProvider({ gitBin: 'git', run })
+    const result = await provider.restore(workspace, SHA, undefined, ['a.txt'])
+    assert.equal(result.restored, 1)
+    assert.deepEqual(calls[2], ['restore', `--source=${SHA}`, '--worktree', '--', 'a.txt'], '只恢复勾选路径')
+    await assert.rejects(
+      () => provider.restore(workspace, SHA, undefined, ['nope.txt']),
+      /unknown file\(s\) not present in the checkpoint tree: nope\.txt/,
+    )
+  })
+
   it('restore：git 报错 → providerFailed（响亮失败）', async () => {
     const { run } = scriptedGit({
       [`ls-tree -r --name-only ${SHA}`]: { code: 0, stdout: 'a.txt\n', stderr: '' },
@@ -230,10 +248,14 @@ describe('git provider（scripted runner）', () => {
       [`diff --name-only ${SHA} --`]: { code: 0, stdout: 'a.txt\nstaged.txt\n', stderr: '' },
       'ls-files --others --exclude-standard': { code: 0, stdout: 'new.txt\n', stderr: '' },
       [`diff --name-only --diff-filter=A ${SHA} --`]: { code: 0, stdout: 'staged.txt\n', stderr: '' },
+      [`ls-tree -r -l ${SHA}`]: { code: 0, stdout: '100644 blob x 1234\ta.txt\n100644 blob y 5678\tb.txt\n', stderr: '' },
     })
     const provider = makeGitProvider({ gitBin: 'git', run })
     const result = await provider.preview(workspace, SHA)
-    assert.deepEqual(result, { restore: 1, unchanged: 1, leftovers: ['new.txt', 'staged.txt'], changes: ['a.txt'] })
+    assert.deepEqual(result, {
+      restore: 1, unchanged: 1, leftovers: ['new.txt', 'staged.txt'], changes: ['a.txt'],
+      entries: [{ path: 'a.txt', bytes: 1234 }],
+    })
     assert.equal(calls.some((args) => args[0] === 'restore'), false, 'preview 不执行 restore')
   })
 
@@ -332,7 +354,14 @@ describe('git provider（scripted runner）', () => {
     })
     const provider = makeGitProvider({ gitBin: 'git', run })
     const result = await provider.diffFiles(workspace, SHA, SHA2)
-    assert.deepEqual(result, { changed: 3, added: 1, removed: 1, names: ['a.txt', 'gone.txt', 'new.txt'] })
+    assert.deepEqual(result, {
+      changed: 3, added: 1, removed: 1, names: ['a.txt', 'gone.txt', 'new.txt'],
+      entries: [
+        { path: 'a.txt', status: 'changed' },
+        { path: 'gone.txt', status: 'removed' },
+        { path: 'new.txt', status: 'added' },
+      ],
+    })
     assert.equal(calls.some((args) => args[0] === 'restore' || args[0] === 'reset'), false, 'diffFiles 绝不写工作区')
   })
 

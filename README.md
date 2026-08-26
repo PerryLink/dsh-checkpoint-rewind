@@ -98,10 +98,11 @@ Address a checkpoint by its unique id prefix, by step number, or by `latest`:
 /rewind step 2
 /rewind latest
 /rewind preview b2c3d4e5   # read-only: show which files would change, touch nothing
+/rewind workspace b2c3d4e5 --files src/a.ts,src/b.ts   # selective restore: only these files (approval-gated)
 /rewind clear              # confirmed deletion of this session's checkpoints (files untouched)
 ```
 
-`preview` resolves through the same addressing and prints the impact without asking for confirmation or writing anything.
+`preview` resolves through the same addressing and prints the impact without asking for confirmation or writing anything. `--files` restores only the named files through the same approval-gated transaction (unknown paths fail closed; it is incompatible with `workspaceRestore: reset-hard` and disabled when `selectiveRestore: false`).
 
 ## Install & uninstall
 
@@ -133,6 +134,8 @@ All tunables are Schemastery `Config` fields (changeable from cordis.yml). Nothi
 | `autoCheckpoint.enabled` | `true` | Automatic interval snapshots on `step/start` |
 | `autoCheckpoint.intervalMinutes` | `0` | Interval; `0` = every step |
 | `workspaceRestore` | `restore` | Workspace rollback: `restore` (safe overwrite) · `reset-hard` (CC-style, opt-in) |
+| `diffRenderer` | `pairwise` | Settings-page diff renderer: `pairwise` (line-level text) · `side-by-side` (per-file two-column) |
+| `selectiveRestore` | `true` | Per-file selective restore (`/rewind … --files`) and the panel's per-file checkbox + size total |
 | `promptSection` | `true` | Inject a short role-statement prompt section |
 | `checkpointTool` | `true` | Register the `checkpoint` model tool |
 
@@ -159,7 +162,7 @@ All tunables are Schemastery `Config` fields (changeable from cordis.yml). Nothi
 | `fs/write-intent` · `fs/edit-intent` · `tools/pre-execute` | listeners | Pre-mutation capture (prepend pass-through; never steals the policy slot) |
 | `session/event` | listener | Turn/step tracking, auto interval, boundary backfill, turn-end pruning |
 | `checkpoints` projection | session projection | Timeline strip folded from the session log |
-| Settings page timeline | client | `Plugins → Checkpoints` tab with pairwise diffs |
+| Settings page timeline | client | `Plugins → Checkpoints` tab with pairwise (`diffRenderer`) diffs and per-file selective restore (`selectiveRestore`) |
 
 ## Safety model
 

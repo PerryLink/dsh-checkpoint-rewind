@@ -145,6 +145,10 @@ export interface Config {
    * reset-hard（CC 对标：git reset --hard <快照提交>，默认关，需显式开启）。
    */
   workspaceRestore?: 'restore' | 'reset-hard'
+  /** 设置页两两 diff 的渲染器：pairwise（默认行级文本）· side-by-side（per-file 并排）。 */
+  diffRenderer?: 'pairwise' | 'side-by-side'
+  /** 逐文件勾选 + 选择性恢复（/rewind … --files）开关（默认 true）。 */
+  selectiveRestore?: boolean
   /** 注入一句角色陈述式短提示词段落（默认 true，对齐官方 Minimal persona 风格）。 */
   promptSection?: boolean
   /** 注册 checkpoint 模型工具（默认 true）。 */

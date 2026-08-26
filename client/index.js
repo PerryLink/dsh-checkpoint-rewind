@@ -58,6 +58,12 @@ window.__ModuleLoader__.load({
       return value
     }
 
+    function parseRestorePreviewResult(value) {
+      assertPlain(value, 'restorePreview')
+      if (!Array.isArray(value.files)) failShape('restorePreview.files', value.files)
+      return value
+    }
+
     var PANEL_INVOCATIONS = Object.freeze([
       Object.freeze({
         id: 'dsh-checkpoint-rewind#checkpointPanel/timeline',
@@ -111,6 +117,29 @@ window.__ModuleLoader__.load({
         }),
         sourceLocation: SOURCE_LOCATION,
       }),
+      Object.freeze({
+        id: 'dsh-checkpoint-rewind#checkpointPanel/restorePreview',
+        service: 'checkpointPanel',
+        namespace: 'checkpointPanel',
+        method: 'restorePreview',
+        invocation: Object.freeze({ kind: 'direct' }),
+        parameters: Object.freeze([
+          Object.freeze({
+            name: 'id', wire: 'id', source: 'json',
+            codec: Object.freeze({
+              mode: 'strict',
+              typeSymbol: 'dsh-checkpoint-rewind/types#CheckpointIdRef',
+              schema: Object.freeze({ parse: parseIdRef }),
+            }),
+          }),
+        ]),
+        result: Object.freeze({
+          mode: 'strict',
+          typeSymbol: 'dsh-checkpoint-rewind/types#RestorePreviewResult',
+          schema: Object.freeze({ parse: parseRestorePreviewResult }),
+        }),
+        sourceLocation: SOURCE_LOCATION,
+      }),
     ])
 
     var NS = 'settings.checkpointRewind'
@@ -155,6 +184,18 @@ window.__ModuleLoader__.load({
         copied: 'Copied',
         diffNote: 'Diff',
         guardBadge: 'guard',
+        restoreSelect: 'Restore files…',
+        restoreTitle: 'Selective restore',
+        restoreHint: 'Tick the files to restore. The restore itself runs in the session: approval-gated, with a guard checkpoint first.',
+        restoreLoading: 'Loading files…',
+        restoreError: 'Failed to load restore preview',
+        selectAll: 'Select all',
+        deselectAll: 'Clear',
+        selectedSize: '{n} file(s) · {bytes} selected',
+        copyRestore: 'Copy /rewind --files',
+        restoreTruncated: '… and more files',
+        rendererPairwise: 'pairwise',
+        rendererSideBySide: 'side-by-side',
       },
       zh: {
         tab: '检查点',
@@ -195,6 +236,18 @@ window.__ModuleLoader__.load({
         copied: '已复制',
         diffNote: '对比',
         guardBadge: '保护',
+        restoreSelect: '恢复文件…',
+        restoreTitle: '选择性恢复',
+        restoreHint: '勾选要恢复的文件。实际恢复在会话内执行：先过审批门，并先捕获保护检查点。',
+        restoreLoading: '正在加载文件…',
+        restoreError: '加载恢复预览失败',
+        selectAll: '全选',
+        deselectAll: '清空',
+        selectedSize: '已选 {n} 个文件 · {bytes}',
+        copyRestore: '复制 /rewind --files',
+        restoreTruncated: '… 以及更多文件',
+        rendererPairwise: '逐行',
+        rendererSideBySide: '并排',
       },
     }
 
@@ -228,6 +281,14 @@ window.__ModuleLoader__.load({
       '[data-dsh-checkpoint-rewind] .dcr-pre .add { color: #10b981; }',
       '[data-dsh-checkpoint-rewind] .dcr-pre .del { color: #ef4444; }',
       '[data-dsh-checkpoint-rewind] .dcr-pre .hunk { color: var(--ds-color-text-muted, #888); }',
+      '[data-dsh-checkpoint-rewind] .dcr-ss { display: flex; flex-direction: column; gap: 2px; font-family: ui-monospace, monospace; font-size: 11px; }',
+      '[data-dsh-checkpoint-rewind] .dcr-ss-row { display: grid; grid-template-columns: 1fr 64px 1fr; gap: 8px; align-items: baseline; }',
+      '[data-dsh-checkpoint-rewind] .dcr-ss-left, [data-dsh-checkpoint-rewind] .dcr-ss-right { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }',
+      '[data-dsh-checkpoint-rewind] .dcr-ss-left.del { color: #ef4444; }',
+      '[data-dsh-checkpoint-rewind] .dcr-ss-right.add { color: #10b981; }',
+      '[data-dsh-checkpoint-rewind] .dcr-ss-empty { color: var(--ds-color-text-muted, #aaa); }',
+      '[data-dsh-checkpoint-rewind] .dcr-ss-badge { text-align: center; font-size: 10px; border: 1px solid var(--ds-color-border, #ccc); border-radius: 999px; color: var(--ds-color-text-muted, #666); }',
+      '[data-dsh-checkpoint-rewind] .dcr-file-path { font-family: ui-monospace, monospace; font-size: 12px; flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }',
       '[data-dsh-checkpoint-rewind] .dcr-hint { border: 1px dashed var(--ds-color-border, #ccc); border-radius: 6px; padding: 8px 10px; color: var(--ds-color-text-muted, #777); font-size: 12px; }',
       '[data-dsh-checkpoint-rewind] .dcr-error { color: #ef4444; }',
       '[data-dsh-checkpoint-rewind] .dcr-empty { color: var(--ds-color-text-muted, #888); padding: 12px 0; }',
@@ -279,10 +340,227 @@ window.__ModuleLoader__.load({
       }))
     }
 
+    // --- 渲染器 seam（镜像 lib/render.mjs 契约：diff 数据 → 渲染输入 → React）。
+    // pairwise（现状默认）与 side-by-side（per-file 并排）；未知 id 回落 pairwise，
+    // 绝不破坏现有 diff 视图（失败关闭）。
+    function sideBySideConfigRows(text) {
+      var rows = []
+      var pendingLeft = null
+      String(text || '').split('\n').forEach(function (line) {
+        if (line.startsWith('-')) {
+          if (pendingLeft !== null) rows.push({ left: pendingLeft, right: null })
+          pendingLeft = line.slice(1)
+        } else if (line.startsWith('+')) {
+          var right = line.slice(1)
+          if (pendingLeft !== null) {
+            rows.push({ left: pendingLeft, right: right })
+            pendingLeft = null
+          } else {
+            rows.push({ left: null, right: right })
+          }
+        } else {
+          if (pendingLeft !== null) { rows.push({ left: pendingLeft, right: null }); pendingLeft = null }
+          rows.push({ left: line, right: line })
+        }
+      })
+      if (pendingLeft !== null) rows.push({ left: pendingLeft, right: null })
+      return rows
+    }
+
+    function sideBySideFileRows(entries) {
+      return (entries || []).map(function (entry) {
+        if (entry.status === 'added') return { path: entry.path, status: 'added', left: false, right: true }
+        if (entry.status === 'removed') return { path: entry.path, status: 'removed', left: true, right: false }
+        return { path: entry.path, status: 'changed', left: true, right: true }
+      })
+    }
+
+    function filesSummary(result, t) {
+      var files = result.files || {}
+      return t('filesChanged')
+        .replace('{changed}', String(files.changed ?? 0))
+        .replace('{added}', String(files.added ?? 0))
+        .replace('{removed}', String(files.removed ?? 0))
+    }
+
+    function renderSessionSection(result, t) {
+      var s = result.session || {}
+      return createElement('div', { className: 'dcr-diff-section', key: 'session' },
+        createElement('h4', null, t('sessionTitle')),
+        createElement('p', { className: 'dcr-meta' }, t('sessionDelta')
+          .replace('{fromSeq}', String(s.fromSeq ?? 0))
+          .replace('{fromTurn}', String(s.fromTurn ?? '-'))
+          .replace('{fromStep}', String(s.fromStep ?? '-'))
+          .replace('{toSeq}', String(s.toSeq ?? 0))
+          .replace('{toTurn}', String(s.toTurn ?? '-'))
+          .replace('{toStep}', String(s.toStep ?? '-'))
+          .replace('{dropped}', String(s.dropped ?? 0))))
+    }
+
+    function renderNotesLine(result, t) {
+      return createElement('p', { className: 'dcr-meta', key: 'notes' },
+        t('fromNote') + ': ' + (result.fromNote ?? t('noNote')) + ' · ' + t('toNote') + ': ' + (result.toNote ?? t('noNote')))
+    }
+
+    function renderPairwiseDiff(result, t) {
+      var files = result.files || {}
+      var fileItems = (files.names || []).map(function (name) {
+        return createElement('li', { key: name }, name)
+      })
+      if (files.truncated) fileItems.push(createElement('li', { key: 'more' }, t('filesTruncated')))
+      return [
+        createElement('div', { className: 'dcr-diff-section', key: 'files' },
+          createElement('h4', null, t('filesTitle')),
+          createElement('p', { className: 'dcr-meta' }, filesSummary(result, t)),
+          fileItems.length > 0 ? createElement('ul', { className: 'dcr-file-list' }, fileItems) : null),
+        createElement('div', { className: 'dcr-diff-section', key: 'config' },
+          createElement('h4', null, t('configTitle')),
+          result.configDiff && result.configDiff.changed
+            ? createElement('p', { className: 'dcr-meta' }, t('configChanged').replace('{lines}', String(result.configDiff.lines)))
+            : createElement('p', { className: 'dcr-meta' }, t('configUnchanged')),
+          result.configDiff && result.configDiff.changed ? renderConfigDiff(result.configDiff.text) : null),
+        renderSessionSection(result, t),
+        renderNotesLine(result, t),
+      ]
+    }
+
+    function renderSideBySideDiff(result, t) {
+      var files = result.files || {}
+      var fileRows = sideBySideFileRows(files.entries).map(function (row) {
+        return createElement('div', { className: 'dcr-ss-row', key: row.path },
+          createElement('span', { className: 'dcr-ss-left' }, row.left ? row.path : '\u00a0'),
+          createElement('span', { className: 'dcr-ss-badge', 'data-status': row.status }, row.status),
+          createElement('span', { className: 'dcr-ss-right' }, row.right ? row.path : '\u00a0'))
+      })
+      var configRows = sideBySideConfigRows(result.configDiff && result.configDiff.text).map(function (row, index) {
+        return createElement('div', { className: 'dcr-ss-row', key: 'c' + index },
+          createElement('span', { className: 'dcr-ss-left' + (row.left === null ? ' dcr-ss-empty' : ' del') }, row.left === null ? '\u00a0' : row.left),
+          createElement('span', { className: 'dcr-ss-right' + (row.right === null ? ' dcr-ss-empty' : ' add') }, row.right === null ? '\u00a0' : row.right))
+      })
+      return [
+        createElement('div', { className: 'dcr-diff-section', key: 'files' },
+          createElement('h4', null, t('filesTitle')),
+          createElement('p', { className: 'dcr-meta' }, filesSummary(result, t)),
+          fileRows.length > 0 ? createElement('div', { className: 'dcr-ss' }, fileRows) : null),
+        createElement('div', { className: 'dcr-diff-section', key: 'config' },
+          createElement('h4', null, t('configTitle')),
+          result.configDiff && result.configDiff.changed
+            ? createElement('p', { className: 'dcr-meta' }, t('configChanged').replace('{lines}', String(result.configDiff.lines)))
+            : createElement('p', { className: 'dcr-meta' }, t('configUnchanged')),
+          result.configDiff && result.configDiff.changed ? createElement('div', { className: 'dcr-ss' }, configRows) : null),
+        renderSessionSection(result, t),
+        renderNotesLine(result, t),
+      ]
+    }
+
+    var diffRenderers = { pairwise: renderPairwiseDiff, 'side-by-side': renderSideBySideDiff }
+
+    function resolveDiffRenderer(id) {
+      return diffRenderers[id] || diffRenderers.pairwise
+    }
+
+    // --- 选择性恢复面板（逐文件勾选 + 大小统计；只读，实际恢复走会话内 /rewind）。
+    function RestorePanel(props) {
+      var id = props.id
+      var t = props.t
+      var restorePreview = props.restorePreview
+      var viewState = useState({ status: 'loading' })
+      var view = viewState[0]
+      var setView = viewState[1]
+      var selectedState = useState(null)
+      var selected = selectedState[0]
+      var setSelected = selectedState[1]
+      var copiedState = useState(false)
+      var copied = copiedState[0]
+      var setCopied = copiedState[1]
+
+      useEffect(function () {
+        var current = true
+        setView({ status: 'loading' })
+        Promise.resolve().then(function () { return restorePreview(id) }).then(
+          function (result) {
+            if (!current) return
+            setView({ status: 'ready', result })
+            setSelected(new Set((result.files || []).map(function (f) { return f.path })))
+          },
+          function (error) {
+            if (current) setView({ status: 'error', message: error instanceof Error ? error.message : String(error) })
+          },
+        )
+        return function () { current = false }
+      }, [restorePreview, id])
+
+      var toggle = function (path) {
+        setSelected(function (current) {
+          var next = current === null ? new Set() : new Set(current)
+          if (next.has(path)) next.delete(path)
+          else next.add(path)
+          return next
+        })
+      }
+
+      var readyFiles = view.status === 'ready' ? (view.result.files || []) : []
+
+      var copyRestore = function () {
+        var chosen = readyFiles.filter(function (f) { return selected !== null && selected.has(f.path) })
+        if (chosen.length === 0) return
+        var text = '/rewind workspace ' + id.slice(0, 8) + ' --files ' + chosen.map(function (f) { return f.path }).join(',')
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(
+            function () { setCopied(true); setTimeout(function () { setCopied(false) }, 1500) },
+            function () {},
+          )
+        }
+      }
+
+      var children = []
+      children.push(createElement('div', { className: 'dcr-diff-head', key: 'head' },
+        createElement('span', { className: 'dcr-id' }, t('restoreTitle') + ' #' + id.slice(0, 8)),
+        createElement('div', { className: 'dcr-actions' },
+          createElement('button', {
+            type: 'button', className: 'dcr-button',
+            onClick: function () { setSelected(new Set(readyFiles.map(function (f) { return f.path }))) },
+          }, t('selectAll')),
+          createElement('button', { type: 'button', className: 'dcr-button', onClick: function () { setSelected(new Set()) } }, t('deselectAll')),
+        )))
+
+      if (view.status === 'loading') {
+        children.push(createElement('p', { className: 'dcr-meta', key: 'loading' }, t('restoreLoading')))
+      } else if (view.status === 'error') {
+        children.push(createElement('p', { className: 'dcr-error', key: 'error' }, t('restoreError') + ': ' + view.message))
+      } else {
+        var result = view.result
+        if (result.error !== null) {
+          children.push(createElement('p', { className: 'dcr-error', key: 'error' }, result.error))
+        } else if (readyFiles.length === 0) {
+          children.push(createElement('p', { className: 'dcr-empty', key: 'empty' }, t('empty')))
+        } else {
+          var chosenFiles = readyFiles.filter(function (f) { return selected !== null && selected.has(f.path) })
+          var chosenBytes = chosenFiles.reduce(function (sum, f) { return sum + (Number.isFinite(f.bytes) ? f.bytes : 0) }, 0)
+          children.push(createElement('p', { className: 'dcr-meta', key: 'size' },
+            t('selectedSize').replace('{n}', String(chosenFiles.length)).replace('{bytes}', formatBytes(chosenBytes))))
+          children.push(createElement('div', { className: 'dcr-list', key: 'files' }, readyFiles.map(function (f) {
+            var checked = selected !== null && selected.has(f.path)
+            return createElement('label', { className: 'dcr-row', key: f.path },
+              createElement('input', { type: 'checkbox', checked: checked, onChange: function () { toggle(f.path) } }),
+              createElement('span', { className: 'dcr-file-path' }, f.path),
+              createElement('span', { className: 'dcr-badge' }, formatBytes(f.bytes)))
+          })))
+          if (result.truncated) children.push(createElement('p', { className: 'dcr-meta', key: 'truncated' }, t('restoreTruncated')))
+        }
+      }
+      children.push(createElement('div', { className: 'dcr-hint', key: 'hint' },
+        createElement('div', null, t('restoreHint')),
+        createElement('button', { type: 'button', className: 'dcr-button', onClick: copyRestore }, copied ? t('copied') : t('copyRestore')),
+      ))
+      return createElement('div', { className: 'dcr-diff', key: 'restore' }, children)
+    }
+
     // --- 标签页组件（纯 React.createElement，无 JSX）。---
     function CheckpointTab(props) {
       var timeline = props.timeline
       var diff = props.diff
+      var restorePreview = props.restorePreview
       var t = props.t
 
       var viewState = useState({ status: 'loading' })
@@ -304,6 +582,9 @@ window.__ModuleLoader__.load({
       var copiedState = useState(false)
       var copied = copiedState[0]
       var setCopied = copiedState[1]
+      var restoreTargetState = useState(null)
+      var restoreTarget = restoreTargetState[0]
+      var setRestoreTarget = restoreTargetState[1]
 
       useEffect(function () {
         var current = true
@@ -348,12 +629,18 @@ window.__ModuleLoader__.load({
         }
       }, [selectedIds, selectedA, selectedB])
 
+      var selectiveRestore = snapshot !== null && snapshot.selectiveRestore === true
+
       var toggleSelect = function (id, role) {
         if (role === 'a') {
           setSelectedA(function (current) { return current === id ? null : id })
         } else {
           setSelectedB(function (current) { return current === id ? null : id })
         }
+      }
+
+      var toggleRestoreTarget = function (id) {
+        setRestoreTarget(function (current) { return current === id ? null : id })
       }
 
       var children = []
@@ -424,6 +711,12 @@ window.__ModuleLoader__.load({
                 'data-role': 'b',
                 onClick: function () { toggleSelect(row.id, 'b') },
               }, t('selectB')),
+              selectiveRestore ? createElement('button', {
+                type: 'button',
+                className: 'dcr-select',
+                'data-role': 'restore',
+                onClick: function () { toggleRestoreTarget(row.id) },
+              }, t('restoreSelect')) : null,
             )
           })))
 
@@ -440,41 +733,8 @@ window.__ModuleLoader__.load({
               if (result.error !== null) {
                 diffChildren.push(createElement('p', { className: 'dcr-error', key: 'diff-error' }, result.error))
               } else {
-                var fileItems = result.files.names.map(function (name) {
-                  return createElement('li', { key: name }, name)
-                })
-                if (result.files.truncated) {
-                  fileItems.push(createElement('li', { key: 'more' }, t('filesTruncated')))
-                }
-                diffChildren.push(createElement('div', { className: 'dcr-diff-section', key: 'files' },
-                  createElement('h4', null, t('filesTitle')),
-                  createElement('p', { className: 'dcr-meta' },
-                    t('filesChanged')
-                      .replace('{changed}', String(result.files.changed))
-                      .replace('{added}', String(result.files.added))
-                      .replace('{removed}', String(result.files.removed))),
-                  fileItems.length > 0 ? createElement('ul', { className: 'dcr-file-list' }, fileItems) : null,
-                ))
-                diffChildren.push(createElement('div', { className: 'dcr-diff-section', key: 'config' },
-                  createElement('h4', null, t('configTitle')),
-                  result.configDiff.changed
-                    ? createElement('p', { className: 'dcr-meta' }, t('configChanged').replace('{lines}', String(result.configDiff.lines)))
-                    : createElement('p', { className: 'dcr-meta' }, t('configUnchanged')),
-                  result.configDiff.changed ? renderConfigDiff(result.configDiff.text) : null,
-                ))
-                diffChildren.push(createElement('div', { className: 'dcr-diff-section', key: 'session' },
-                  createElement('h4', null, t('sessionTitle')),
-                  createElement('p', { className: 'dcr-meta' }, t('sessionDelta')
-                    .replace('{fromSeq}', String(result.session.fromSeq))
-                    .replace('{fromTurn}', String(result.session.fromTurn ?? '-'))
-                    .replace('{fromStep}', String(result.session.fromStep ?? '-'))
-                    .replace('{toSeq}', String(result.session.toSeq))
-                    .replace('{toTurn}', String(result.session.toTurn ?? '-'))
-                    .replace('{toStep}', String(result.session.toStep ?? '-'))
-                    .replace('{dropped}', String(result.session.dropped))),
-                ))
-                diffChildren.push(createElement('p', { className: 'dcr-meta', key: 'notes' },
-                  t('fromNote') + ': ' + (result.fromNote ?? t('noNote')) + ' · ' + t('toNote') + ': ' + (result.toNote ?? t('noNote'))))
+                var render = resolveDiffRenderer(snapshot ? snapshot.diffRenderer : undefined)
+                diffChildren.push.apply(diffChildren, render(result, t))
               }
             }
             children.push(createElement('div', { className: 'dcr-diff', key: 'diff' },
@@ -491,6 +751,15 @@ window.__ModuleLoader__.load({
                 createElement('button', { type: 'button', className: 'dcr-button', onClick: copyRewind }, copied ? t('copied') : t('copy')),
               ),
             ))
+          }
+
+          if (selectiveRestore && restoreTarget !== null) {
+            children.push(createElement(RestorePanel, {
+              key: 'restore-panel',
+              id: restoreTarget,
+              t,
+              restorePreview,
+            }))
           }
         }
       }
@@ -516,6 +785,7 @@ window.__ModuleLoader__.load({
         var t = scope.locale.bind(NS)
         var timeline = function (args) { return Promise.resolve(scope.remote.checkpointPanel.timeline(args && args.limit)).then(unwrap) }
         var diff = function (from, to) { return Promise.resolve(scope.remote.checkpointPanel.diff(from, to)).then(unwrap) }
+        var restorePreview = function (id) { return Promise.resolve(scope.remote.checkpointPanel.restorePreview(id)).then(unwrap) }
         scope.slots.inject('settings.plugins.tab', function () {
           return scope.slots.register({
             name: 'settings.plugins.tab',
@@ -523,7 +793,7 @@ window.__ModuleLoader__.load({
             order: 20,
             label: function () { return t('tab') },
             locale: NS,
-            inject: function () { return { timeline, diff } },
+            inject: function () { return { timeline, diff, restorePreview } },
           }, CheckpointTab)
         })
       })

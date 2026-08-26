@@ -201,6 +201,23 @@ describe('copy provider', () => {
     assert.equal(await fs.readFile(path.join(cwd, 'later.txt'), 'utf8'), 'later')
   })
 
+  it('restore：files 选择性恢复只恢复指定文件；未知路径失败关闭', async () => {
+    const cwd = await makeWorkspace({ 'a.txt': 'A1', 'b.txt': 'B1' })
+    const { provider } = await makeProvider()
+    const ws = { cwd, key: cwd }
+    const snapshot = await provider.snapshot(ws, { triggerTool: 'bash' })
+    await fs.writeFile(path.join(cwd, 'a.txt'), 'A2')
+    await fs.writeFile(path.join(cwd, 'b.txt'), 'B2')
+    const result = await provider.restore(ws, snapshot.ref, undefined, ['a.txt'])
+    assert.equal(result.restored, 1, '只恢复勾选的 a.txt')
+    assert.equal(await fs.readFile(path.join(cwd, 'a.txt'), 'utf8'), 'A1', '勾选文件已恢复')
+    assert.equal(await fs.readFile(path.join(cwd, 'b.txt'), 'utf8'), 'B2', '未勾选文件保持不变')
+    await assert.rejects(
+      () => provider.restore(ws, snapshot.ref, undefined, ['nope.txt']),
+      /unknown file\(s\) not present in the checkpoint manifest: nope\.txt/,
+    )
+  })
+
   it('restore：清单损坏 → 响亮失败', async () => {
     const cwd = await makeWorkspace({ 'a.txt': 'A1' })
     const { provider, snapshotDir } = await makeProvider()
@@ -370,7 +387,10 @@ describe('copy provider', () => {
     await fs.writeFile(path.join(cwd, 'a.txt'), 'A2!!')
     await fs.writeFile(path.join(cwd, 'new.txt'), 'new')
     const preview = await provider.preview(ws, snapshot.ref)
-    assert.deepEqual(preview, { restore: 1, unchanged: 1, leftovers: ['new.txt'], changes: ['a.txt'] })
+    assert.deepEqual(preview, {
+      restore: 1, unchanged: 1, leftovers: ['new.txt'], changes: ['a.txt'],
+      entries: [{ path: 'a.txt', bytes: 'A1'.length }],
+    })
     assert.equal(await fs.readFile(path.join(cwd, 'a.txt'), 'utf8'), 'A2!!', 'preview 不写文件')
     assert.equal(await fs.readFile(path.join(cwd, 'new.txt'), 'utf8'), 'new')
   })

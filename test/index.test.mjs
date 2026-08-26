@@ -973,6 +973,49 @@ describe('三态独立回滚（rewind workspace|session|config）', () => {
     await app.dispose()
   })
 
+  it('/rewind workspace <id> --files：只恢复勾选文件（未勾选保持现状）', async () => {
+    const cwd = await makeWorkspace({ 'a.txt': 'A1', 'b.txt': 'B1' })
+    const snapshotDir = await makeSnapDir()
+    const app = await mountPlugin({ cwd, userQuestions: approvingQuestions(), config: { provider: 'copy', snapshotDir } })
+    openStep(app.session, 1, 1)
+    await dispatchWriteIntent(app.root, app.agent, 'bash')
+    await waitForRecords(app.records, 1)
+    await fs.writeFile(path.join(cwd, 'a.txt'), 'A2!')
+    await fs.writeFile(path.join(cwd, 'b.txt'), 'B2!')
+    closeStep(app.session, 1, 1, true)
+    const id = (await recordsOf(app.records))[0][1].id
+    const result = await command(app, `/rewind workspace ${id} --files a.txt`)
+    assert.equal(result?.result.kind, 'success')
+    assert.match(result?.result.text, /workspace: restored 1 file\(s\)/)
+    assert.equal(await fs.readFile(path.join(cwd, 'a.txt'), 'utf8'), 'A1', '勾选文件已恢复')
+    assert.equal(await fs.readFile(path.join(cwd, 'b.txt'), 'utf8'), 'B2!', '未勾选文件保持现状')
+    await app.dispose()
+  })
+
+  it('/rewind --files 与 session/config 目标互斥；关闭开关时拒绝', async () => {
+    const cwd = await makeWorkspace({ 'a.txt': 'A1' })
+    const snapshotDir = await makeSnapDir()
+    const app = await mountPlugin({ cwd, userQuestions: approvingQuestions(), config: { provider: 'copy', snapshotDir } })
+    openStep(app.session, 1, 1)
+    await dispatchWriteIntent(app.root, app.agent, 'bash')
+    await waitForRecords(app.records, 1)
+    closeStep(app.session, 1, 1, true)
+    const id = (await recordsOf(app.records))[0][1].id
+    const sessionTarget = await command(app, `/rewind session ${id} --files a.txt`)
+    assert.match(sessionTarget?.result.text, /--files applies only to a workspace restore/)
+    await app.dispose()
+
+    const disabled = await mountPlugin({ cwd, userQuestions: approvingQuestions(), config: { provider: 'copy', snapshotDir: await makeSnapDir(), selectiveRestore: false } })
+    openStep(disabled.session, 1, 1)
+    await dispatchWriteIntent(disabled.root, disabled.agent, 'bash')
+    await waitForRecords(disabled.records, 1)
+    closeStep(disabled.session, 1, 1, true)
+    const id2 = (await recordsOf(disabled.records))[0][1].id
+    const denied = await command(disabled, `/rewind workspace ${id2} --files a.txt`)
+    assert.match(denied?.result.text, /selective restore is disabled/)
+    await disabled.dispose()
+  })
+
   it('/rewind session <id>：只重放会话（文件不动）', async () => {
     const cwd = await makeWorkspace({ 'a.txt': 'A1' })
     const snapshotDir = await makeSnapDir()

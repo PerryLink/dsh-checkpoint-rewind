@@ -38,7 +38,14 @@ function makeDeps(records) {
     ops: Promise.resolve(),
     registry: {
       get: (name) => name === 'copy'
-        ? { name: 'copy', diffFiles: async () => ({ changed: 1, added: 0, removed: 0, names: ['a.txt'] }) }
+        ? {
+          name: 'copy',
+          diffFiles: async () => ({
+            changed: 1, added: 0, removed: 0, names: ['a.txt'],
+            entries: [{ path: 'a.txt', status: 'changed' }],
+          }),
+          preview: async () => ({ restore: 2, unchanged: 1, leftovers: [], changes: ['a.txt', 'b.txt'], entries: [{ path: 'a.txt', bytes: 10 }, { path: 'b.txt', bytes: 20 }] }),
+        }
         : undefined,
     },
     getLive: () => ({ maxSnapshots: 8, maxSnapshotBytes: 1024 }),
@@ -74,6 +81,13 @@ describe('CheckpointPanelService 经 traceable proxy 调用（issue #6 回归）
     assert.equal(snapshot.maxSnapshotBytes, 1024)
   })
 
+  it('timeline：渲染器与选择性恢复开关有防御默认（getLive 缺失字段不抛错）', async () => {
+    const proxy = makeProxiedService([recordOf()])
+    const snapshot = await proxy.timeline()
+    assert.equal(snapshot.diffRenderer, 'pairwise', '缺失时回落 pairwise')
+    assert.equal(snapshot.selectiveRestore, false, '缺失时默认关闭')
+  })
+
   it('timeline：limit 缺席回退默认上限，显式 limit 封顶', async () => {
     const records = [1, 2, 3].map((n) => recordOf({ id: `aaaa111${n}`, time: 1000 + n, seq: 10 + n }))
     const proxy = makeProxiedService(records)
@@ -88,7 +102,25 @@ describe('CheckpointPanelService 经 traceable proxy 调用（issue #6 回归）
     const result = await proxy.diff('aaaa', 'bbbb')
     assert.equal(result.error, null)
     assert.deepEqual(result.files.names, ['a.txt'])
+    assert.deepEqual(result.files.entries, [{ path: 'a.txt', status: 'changed' }])
     assert.equal(result.session.fromSeq, 10)
     assert.equal(result.session.toSeq, 20)
+  })
+
+  it('restorePreview：返回逐文件条目 + 字节大小（只读）', async () => {
+    const proxy = makeProxiedService([recordOf({ id: 'aaaa1111', ref: 'ref-a' })])
+    const result = await proxy.restorePreview('aaaa')
+    assert.equal(result.error, null)
+    assert.equal(result.provider, 'copy')
+    assert.deepEqual(result.files, [{ path: 'a.txt', bytes: 10 }, { path: 'b.txt', bytes: 20 }])
+    assert.equal(result.totalBytes, 30)
+    assert.equal(result.truncated, false)
+  })
+
+  it('restorePreview：未知 id 返回 error（不抛业务异常）', async () => {
+    const proxy = makeProxiedService([recordOf()])
+    const result = await proxy.restorePreview('nope')
+    assert.match(result.error, /unknown checkpoint id/)
+    assert.deepEqual(result.files, [])
   })
 })

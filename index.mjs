@@ -43,6 +43,7 @@ import {
   COMMAND_NAME,
   CONFIRM_CHANNELS,
   DEFAULTS,
+  DIFF_RENDERER_MODES,
   LIMITS,
   MANUAL_TRIGGER,
   PLUGIN_NAME,
@@ -154,6 +155,9 @@ export function probeIgnorableAppend() {
  *   自动间隔快照：step/start 时检查；intervalMinutes=0 每步；enabled=false 关闭（默认开、每步）。
  * @property {'restore'|'reset-hard'} [workspaceRestore] 工作区回滚实现（默认 restore 安全覆盖；
  *   reset-hard = git reset --hard <快照提交>，CC 对标，默认关）。
+ * @property {'pairwise'|'side-by-side'} [diffRenderer] 设置页两两 diff 的渲染器（默认 pairwise
+ *   行级文本；side-by-side = per-file 并排）。
+ * @property {boolean} [selectiveRestore] 逐文件勾选 + 选择性恢复（/rewind … --files）开关（默认 true）。
  * @property {boolean} [promptSection] 注入一句角色陈述式短提示词段落（默认 true）。
  * @property {boolean} [checkpointTool] 注册 checkpoint 模型工具（默认 true）。
  */
@@ -179,6 +183,8 @@ export const Config = Schema.object({
     intervalMinutes: DEFAULTS.AUTO_CHECKPOINT_INTERVAL_MINUTES,
   }),
   workspaceRestore: Schema.union(Object.values(WORKSPACE_RESTORE_MODES)).default(DEFAULTS.WORKSPACE_RESTORE),
+  diffRenderer: Schema.union(Object.values(DIFF_RENDERER_MODES)).default(DEFAULTS.DIFF_RENDERER),
+  selectiveRestore: Schema.boolean().default(DEFAULTS.SELECTIVE_RESTORE),
   promptSection: Schema.boolean().default(DEFAULTS.PROMPT_SECTION),
   checkpointTool: Schema.boolean().default(DEFAULTS.CHECKPOINT_TOOL),
 })
@@ -208,6 +214,8 @@ export function resolveConfig(config = {}) {
       intervalMinutes: config.autoCheckpoint?.intervalMinutes ?? DEFAULTS.AUTO_CHECKPOINT_INTERVAL_MINUTES,
     },
     workspaceRestore: config.workspaceRestore ?? DEFAULTS.WORKSPACE_RESTORE,
+    diffRenderer: config.diffRenderer ?? DEFAULTS.DIFF_RENDERER,
+    selectiveRestore: config.selectiveRestore ?? DEFAULTS.SELECTIVE_RESTORE,
     promptSection: config.promptSection ?? DEFAULTS.PROMPT_SECTION,
     checkpointTool: config.checkpointTool ?? DEFAULTS.CHECKPOINT_TOOL,
   }
@@ -223,6 +231,12 @@ export function resolveConfig(config = {}) {
   }
   if (!Object.values(WORKSPACE_RESTORE_MODES).includes(resolved.workspaceRestore)) {
     throw badConfig(`workspaceRestore ${JSON.stringify(resolved.workspaceRestore)} must be one of restore|reset-hard`)
+  }
+  if (!Object.values(DIFF_RENDERER_MODES).includes(resolved.diffRenderer)) {
+    throw badConfig(`diffRenderer ${JSON.stringify(resolved.diffRenderer)} must be one of pairwise|side-by-side`)
+  }
+  if (typeof resolved.selectiveRestore !== 'boolean') {
+    throw badConfig('selectiveRestore must be a boolean')
   }
   if (typeof resolved.gitBin !== 'string' || resolved.gitBin.length === 0) {
     throw badConfig('gitBin must be a non-empty string')
@@ -1260,6 +1274,20 @@ export async function apply(ctx, config = {}) {
     }
     const record = target.record
 
+    // 选择性恢复（--files）：只允许 workspace 目标、必须启用开关、且与
+    // reset-hard 互斥（reset-hard 整体移动分支头，无法按文件过滤）。失败关闭。
+    if (parsed.files !== undefined) {
+      if (!targets.workspace) {
+        return { kind: 'error', text: 'rewind: --files applies only to a workspace restore (use /rewind workspace <id> --files …)' }
+      }
+      if (liveConfig.selectiveRestore !== true) {
+        return { kind: 'error', text: 'rewind: selective restore is disabled (selectiveRestore: false); remove --files or enable it' }
+      }
+      if (liveConfig.workspaceRestore === WORKSPACE_RESTORE_MODES.RESET_HARD) {
+        return { kind: 'error', text: 'rewind: --files selective restore is incompatible with workspaceRestore: reset-hard (use workspaceRestore: restore)' }
+      }
+    }
+
     // 回滚前影响摘要（三态各自 diff，确认前知情权）。
     let impact
     try {
@@ -1274,6 +1302,9 @@ export async function apply(ctx, config = {}) {
       '',
       'impact:',
       formatImpact(record, impact),
+      ...(parsed.files !== undefined
+        ? ['', `selective restore: only ${parsed.files.length} file(s) will be overwritten:`, ...parsed.files.map(file => `  ${file}`)]
+        : []),
     ].join('\n')
 
     // 确认门：任何覆盖/回滚写操作必须先经 ask 语义，无回答者失败关闭。
@@ -1333,7 +1364,7 @@ export async function apply(ctx, config = {}) {
       try {
         restore = useResetHard
           ? await provider.resetHard({ cwd, key: workspaceKeyOf(cwd) }, record.ref, signal)
-          : await provider.restore({ cwd, key: workspaceKeyOf(cwd) }, record.ref, signal)
+          : await provider.restore({ cwd, key: workspaceKeyOf(cwd) }, record.ref, signal, parsed.files)
       } catch (error) {
         const message = messageOf(error)
         appendEvent(session, SESSION_EVENTS.REWIND, {

@@ -207,6 +207,26 @@ describe('parseRewindInput（/rewind 寻址语法）', () => {
     assert.deepEqual(parseRewindInput('preview').kind, 'invalid')
     assert.match(parseRewindInput('preview').message, /preview <id-prefix/)
   })
+
+  it('--files 选择性恢复过滤器：挂到目标形态（去重、保序）', () => {
+    assert.deepEqual(parseRewindInput('workspace a1b2 --files a.txt,b.txt'), {
+      kind: 'target', target: 'workspace', input: 'a1b2', files: ['a.txt', 'b.txt'],
+    })
+    assert.deepEqual(parseRewindInput('abc123 --files=a.txt, b.txt ,a.txt'), {
+      kind: 'id', input: 'abc123', files: ['a.txt', 'b.txt'],
+    })
+    assert.deepEqual(parseRewindInput('latest --files x.txt'), {
+      kind: 'latest', files: ['x.txt'],
+    })
+  })
+
+  it('--files 只对恢复目标有效；空/裸 --files 非法', () => {
+    assert.equal(parseRewindInput('list --files a.txt').kind, 'invalid')
+    assert.equal(parseRewindInput('diff a b --files a.txt').kind, 'invalid')
+    assert.equal(parseRewindInput('preview abc --files a.txt').kind, 'invalid')
+    assert.equal(parseRewindInput('abc123 --files').kind, 'invalid')
+    assert.equal(parseRewindInput('abc123 --files , ,').kind, 'invalid')
+  })
 })
 
 describe('parseCheckpointInput（/checkpoint 语法）', () => {

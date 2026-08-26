@@ -4,6 +4,18 @@ All notable changes to dsh-checkpoint-rewind are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project versions with [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Per-file side-by-side diff renderer seam. The Settings-page pairwise diff is extracted into a pluggable renderer contract (`lib/render.mjs`: diff data → render input, zero-dependency pure functions) with two built-in renderers — `pairwise` (the existing line-level text view, default) and `side-by-side` (per-file two-column rows + config add/remove line pairing). The client resolves the renderer from the new `diffRenderer` config (`pairwise` default; `side-by-side` opt-in) and falls back to `pairwise` for unknown ids, so the existing view can never regress.
+- Selective file restore. `/rewind workspace <id> --files <a,b,…>` (and the bare `<id> --files …` form) restores only the selected files through the existing approval-gated restore transaction — never a new approval-bypass path. Unknown paths fail closed; the filter is incompatible with `workspaceRestore: reset-hard` and is gated by the new `selectiveRestore` config (default on).
+- Per-file preview with byte sizes. The git/copy providers' `preview` now returns `entries` (`{path, bytes}` per overwritten file) and their `diffFiles` returns `entries` (`{path, status}`); the panel gains a read-only `restorePreview(id)` remote that feeds the client's per-file checkbox + size total (select/deselect all, then copy `/rewind workspace <id> --files …`).
+
+### Changed
+
+- `lib/wire.mjs` gains the `restorePreview` descriptor and per-file `entries` on the diff result; `lib/panel.mjs` exposes `diffRenderer`/`selectiveRestore` on the timeline snapshot. `lib/providers/definition.mjs` documents the extended `restore(…, files?)` signature and the new `entries` fields.
+
 ## [0.5.5] — 2026-08-23
 
 ### Changed
