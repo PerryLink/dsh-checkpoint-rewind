@@ -204,15 +204,16 @@ capture ── fs/write-intent · fs/edit-intent · tools/pre-execute (prepend, 
 
 **这会不会取代 git？** 不会——在可用时会*使用* git。在 git 仓库中，你得到字节级精确、去重、不触碰历史的快照对象；在任何其他目录中，copy provider 用普通文件实现同样的效果。常规提交仍是你长期的历史。
 
-**为什么默认不用 `git reset --hard`？** 因为破坏状态不是安全网该干的事。默认情况下，插件只创建未引用对象并执行仅工作树、路径显式的恢复，因此糟糕的回滚永远不会丢失历史、索引或检查点之后创建的文件。`reset-hard` 在 `workspaceRestore: 'reset-hard'` 之后可用，供明确想要 CC 对齐的用户使用。
+**为什么默认不使用 `git reset --hard`？** 因为破坏状态不是安全网的工作。默认情况下，插件仅创建无引用的对象并执行仅针对工作区、明确指定路径的恢复，因此错误的后退永远不会丢失提交历史、暂存区或在检查点之后创建的文件。对于明确希望与 CC 保持一致的用户，可以在 `workspaceRestore: 'reset-hard'` 选项后使用 `reset-hard`。
 
-**能回退到某一轮中间的某一步吗？** 文件恢复是步骤级精确的（`/rewind step <N>` = ≤ N 的最近快照）。但会话重放遵循 harness 的重放粒度：子会话被种子填充到检查点的轮次边界。
+**快照的可恢复窗口是多久？** git-provider 快照不持有任何 ref。它们在设计上是未引用的 `stash create`/`commit-tree` 对象，`discard` 仅删除元数据记录，将底层对象留给 `git gc`。两个独立的机制决定快照实际可恢复的时长：插件自身的配额修剪（`maxSnapshots` 默认每会话保留 50 个；`maxSnapshotBytes` 默认 512 MiB 全局软配额，每次捕获时通过 `pruneAll()` 执行并在轮次结束时扫描清理），以及宿主仓库的 git gc。使用 git 默认配置时，未引用对象会存活至 auto-gc 触发，且仅删除早于 `gc.pruneExpire`（默认 2 周）的对象。手动的 `git gc --prune=now`、激进的 repack、`filter-repo` 或重新克隆会立即删除它们。目前在元数据层检测已修剪的对象；虽然 `reset-hard` 在对象丢失时会显式报错，但默认 restore 的显式失败 doctor pass 正在 discussion #13 中跟进。
+
+**我可以回滚到回合中间的某一步吗？** 文件恢复是精确到单步的（`/rewind step <N>` = ≤ N 的最近快照）。但是，会话重放遵循 Harness 的重放粒度：子会话将从检查点所在的回合边界开始重放。
 
 **如果没人能回答确认会怎样？** 不触碰任何内容——插件失败关闭（`unavailable`/`rejected`），保留检查点，并返回解释性错误。在 rc.2 上使用 `confirmVia: approval` 时，消息会提示挂载 userQuestions，因为 approval 需要开放的轮次，而命令在轮次之间运行。
 
 **能撤销一次回滚吗？** 能——每次经批准的回滚都会先捕获回滚前状态的守护检查点；结果会打印 `rewind guard: <id>`，`/rewind <guard-id>` 会恢复该状态。
 
-**如何定位检查点？** 唯一 id 前缀（列表中的 8 位短 id 即可）、`/rewind step <N>`、`/rewind latest`，或 `/rewind clear` 删除本会话的检查点（文件不受影响）。`/rewind preview <target>` 用相同的定位方式显示影响，不做任何更改。
 
 **`preview` 做什么——又不做什么？** 它解析检查点，然后运行只读比较：哪些文件会被覆盖（或重建）、哪些已经一致、以及检查点之后创建的哪些文件会原样保留。它从不提示、从不写入、从不 fork，也不记录 `checkpoint/rewind` 事件——批准门只在真正的 `/rewind <id>` 上运行。
 
