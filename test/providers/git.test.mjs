@@ -172,6 +172,7 @@ describe('git provider（scripted runner）', () => {
 
   it('restore：显式路径恢复 + 遗留报告（未跟踪 ∪ 已暂存新文件，绝不删除）', async () => {
     const { run, calls } = scriptedGit({
+      [`cat-file -e ${SHA}`]: { code: 0, stdout: '', stderr: '' },
       [`ls-tree -r --name-only ${SHA}`]: { code: 0, stdout: 'a.txt\nb.txt\n', stderr: '' },
       [`diff --name-only ${SHA} --`]: { code: 0, stdout: 'a.txt\nstaged.txt\n', stderr: '' },
       [`restore --source=${SHA} --worktree -- a.txt b.txt`]: { code: 0, stdout: '', stderr: '' },
@@ -183,13 +184,14 @@ describe('git provider（scripted runner）', () => {
     assert.equal(result.restored, 1, '只计 ref 中存在且工作树不同的文件（staged.txt 不在 ref）')
     assert.deepEqual(result.leftovers, ['new.txt', 'staged.txt'])
     assert.match(result.notes[0], /left in place/)
-    assert.deepEqual(calls[2], ['restore', `--source=${SHA}`, '--worktree', '--', 'a.txt', 'b.txt'])
+    assert.deepEqual(calls[3], ['restore', `--source=${SHA}`, '--worktree', '--', 'a.txt', 'b.txt'])
   })
 
   it('restore：显式路径按批分块（超过批量上限拆多次 restore）', async () => {
     const count = 201
     const names = Array.from({ length: count }, (_, index) => `f${index}.txt`)
     const script = {
+      [`cat-file -e ${SHA}`]: { code: 0, stdout: '', stderr: '' },
       [`ls-tree -r --name-only ${SHA}`]: { code: 0, stdout: `${names.join('\n')}\n`, stderr: '' },
       [`diff --name-only ${SHA} --`]: { code: 0, stdout: 'f0.txt\n', stderr: '' },
       'ls-files --others --exclude-standard': { code: 0, stdout: '', stderr: '' },
@@ -206,6 +208,7 @@ describe('git provider（scripted runner）', () => {
 
   it('restore：files 选择性恢复只恢复指定路径；未知路径失败关闭', async () => {
     const { run, calls } = scriptedGit({
+      [`cat-file -e ${SHA}`]: { code: 0, stdout: '', stderr: '' },
       [`ls-tree -r --name-only ${SHA}`]: { code: 0, stdout: 'a.txt\nb.txt\n', stderr: '' },
       [`diff --name-only ${SHA} --`]: { code: 0, stdout: 'a.txt\n', stderr: '' },
       [`restore --source=${SHA} --worktree -- a.txt`]: { code: 0, stdout: '', stderr: '' },
@@ -215,7 +218,7 @@ describe('git provider（scripted runner）', () => {
     const provider = makeGitProvider({ gitBin: 'git', run })
     const result = await provider.restore(workspace, SHA, undefined, ['a.txt'])
     assert.equal(result.restored, 1)
-    assert.deepEqual(calls[2], ['restore', `--source=${SHA}`, '--worktree', '--', 'a.txt'], '只恢复勾选路径')
+    assert.deepEqual(calls[3], ['restore', `--source=${SHA}`, '--worktree', '--', 'a.txt'], '只恢复勾选路径')
     await assert.rejects(
       () => provider.restore(workspace, SHA, undefined, ['nope.txt']),
       /unknown file\(s\) not present in the checkpoint tree: nope\.txt/,
@@ -224,12 +227,24 @@ describe('git provider（scripted runner）', () => {
 
   it('restore：git 报错 → providerFailed（响亮失败）', async () => {
     const { run } = scriptedGit({
+      [`cat-file -e ${SHA}`]: { code: 0, stdout: '', stderr: '' },
       [`ls-tree -r --name-only ${SHA}`]: { code: 0, stdout: 'a.txt\n', stderr: '' },
       [`diff --name-only ${SHA} --`]: { code: 0, stdout: 'a.txt\n', stderr: '' },
       [`restore --source=${SHA} --worktree -- a.txt`]: { code: 128, stdout: '', stderr: 'bad object\n' },
     })
     const provider = makeGitProvider({ gitBin: 'git', run })
     await assert.rejects(() => provider.restore(workspace, SHA), /restore failed: bad object/)
+  })
+
+  it('restore：快照对象被 gc/prune 删除（cat-file 失败）→ 响亮失败（关闭静默 restored:0 盲区）', async () => {
+    const { run } = scriptedGit({
+      [`cat-file -e ${SHA}`]: { code: 1, stdout: '', stderr: 'fatal: Not a valid object name\n' },
+    })
+    const provider = makeGitProvider({ gitBin: 'git', run })
+    await assert.rejects(
+      () => provider.restore(workspace, SHA),
+      /restore failed: checkpoint commit object .* is missing or garbage-collected/,
+    )
   })
 
   it('restore：ref 非 sha 形态（注入 git 选项）→ 拒绝且不 spawn 任何命令', async () => {
@@ -524,5 +539,15 @@ describe('git provider（真实 git，能力检测）', () => {
     assert.equal(diff.added, 1)
     assert.equal(diff.removed, 0)
     await fs.rm(repo, { recursive: true, force: true })
+  })
+
+  it('verifyObjectExists：对象存在返回 true，对象缺失返回 false', async () => {
+    const { run } = scriptedGit({
+      [`cat-file -e ${SHA}`]: { code: 0, stdout: '', stderr: '' },
+      'cat-file -e 1111111111111111111111111111111111111111': { code: 1, stdout: '', stderr: 'fatal: Not a valid object name\n' },
+    })
+    const provider = makeGitProvider({ gitBin: 'git', run })
+    assert.equal(await provider.verifyObjectExists(workspace, SHA), true)
+    assert.equal(await provider.verifyObjectExists(workspace, '1111111111111111111111111111111111111111'), false)
   })
 })

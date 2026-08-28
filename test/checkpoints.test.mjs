@@ -3,6 +3,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import {
+  doctorPass,
   formatBytes,
   formatCheckpointList,
   formatPreviewResult,
@@ -382,5 +383,32 @@ describe('formatRelativeAge', () => {
     assert.equal(formatRelativeAge(3 * 60000), ' (3 min ago)')
     assert.equal(formatRelativeAge(60 * 60000), '')
     assert.equal(formatRelativeAge(-1000), '')
+  })
+})
+
+describe('doctorPass / unrestorable 标记', () => {
+  it('doctorPass：探测底层快照对象，对象丢失标记 unrestorable 并保留记录', async () => {
+    const records = [
+      record({ id: 'cp-alive', ref: 'sha-alive' }),
+      record({ id: 'cp-dead', ref: 'sha-dead' }),
+    ]
+    const mockProvider = {
+      async verifyObjectExists(_ws, ref) {
+        return ref === 'sha-alive'
+      },
+    }
+    const { records: updated, markedCount } = await doctorPass(records, mockProvider, { cwd: '/work', key: '/work' })
+    assert.equal(markedCount, 1)
+    assert.equal(updated[0].unrestorable, undefined)
+    assert.equal(updated[1].unrestorable, true)
+    assert.equal(updated[1].unrestorableReason, 'object_missing')
+  })
+
+  it('formatCheckpointList：不可恢复记录带 [UNRESTORABLE] 状态徽标', () => {
+    const records = [
+      record({ id: 'cp-dead', unrestorable: true, unrestorableReason: 'object_missing' }),
+    ]
+    const text = formatCheckpointList(records, { timeFormatter: () => 'T' })
+    assert.match(text, /\[UNRESTORABLE: object missing\]/)
   })
 })
