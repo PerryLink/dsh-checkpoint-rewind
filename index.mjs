@@ -319,16 +319,19 @@ export async function apply(ctx, config = {}) {
 
   // --- provider seam：两个 provider 经 registry 注册（注册即 effect，卸载撤销）。
   const registry = new SnapshotProviderRegistry()
-  const unregGit = registry.register(makeGitProvider({ gitBin: resolved.gitBin }))
+  const unregGit = registry.register(makeGitProvider({ gitBin: () => liveConfig.gitBin }))
   let snapshotDirCache
   const getSnapshotDir = () => {
-    if (snapshotDirCache === undefined) snapshotDirCache = resolveSnapshotDir(resolved.snapshotDir)
+    if (snapshotDirCache === undefined) snapshotDirCache = resolveSnapshotDir(liveConfig.snapshotDir)
     return snapshotDirCache
   }
+  onLiveChange(() => {
+    snapshotDirCache = undefined
+  })
   const unregCopy = registry.register(makeCopyProvider({
     snapshotDir: getSnapshotDir,
-    excludeGlobs: resolved.excludeGlobs,
-    verifyByHash: resolved.verifyByHash,
+    excludeGlobs: () => liveConfig.excludeGlobs,
+    verifyByHash: () => liveConfig.verifyByHash,
   }))
   ctx.effect(() => () => {
     unregGit()
