@@ -764,7 +764,21 @@ export async function apply(ctx, config = {}) {
     return schedule(async () => {
       const table = await getTablePromise()
       const entries = [...table.entries()].map(([key, value]) => ({ key, value }))
-      const plan = prunePlan(entries, { maxSnapshots: liveConfig.maxSnapshots, maxSnapshotBytes: liveConfig.maxSnapshotBytes })
+      let liveSessionIds
+      try {
+        if (typeof ctx.sessions?.entries === 'function') {
+          liveSessionIds = new Set([...ctx.sessions.entries()].map(([id]) => id))
+        } else if (typeof ctx.sessions?.list === 'function') {
+          liveSessionIds = new Set(ctx.sessions.list().map(s => s.id))
+        }
+      } catch {
+        // fallback
+      }
+      const plan = prunePlan(entries, {
+        maxSnapshots: liveConfig.maxSnapshots,
+        maxSnapshotBytes: liveConfig.maxSnapshotBytes,
+        ...(liveSessionIds !== undefined ? { liveSessionIds } : {}),
+      })
       if (plan.ids.length === 0) return
       await removeRecords(entries, plan.ids)
       const eventReason = reason ?? (plan.byRule.maxSnapshots.length > 0 ? PRUNE_REASONS.MAX_SNAPSHOTS : PRUNE_REASONS.MAX_SNAPSHOT_BYTES)
@@ -1234,7 +1248,7 @@ export async function apply(ctx, config = {}) {
       return { kind: 'success', text: formatCheckpointList(newest, { now: Date.now(), total: mine.length, command: 'rewind' }) }
     }
     if (parsed.kind === 'clear') {
-      return handleClear(mine, session, agent, signal)
+      return handleClear(mine, session, agent, signal, parsed.all)
     }
     if (parsed.kind === 'preview') {
       return handlePreview(mine, session, cwd, parsed.target)
@@ -1521,15 +1535,21 @@ export async function apply(ctx, config = {}) {
    * @param {AbortSignal} signal - 取消信号。
    * @returns {Promise<import('@deepseek-ai/dsh-commands').CommandResult>} 命令结果。
    */
-  async function handleClear(mine, session, agent, signal) {
-    if (mine.length === 0) {
-      return { kind: 'success', text: 'rewind: no checkpoints to clear' }
+  async function handleClear(mine, session, agent, signal, all = false) {
+    let targets = mine
+    if (all) {
+      const table = await getTablePromise()
+      targets = [...table.entries()].map(([, record]) => record)
     }
+    if (targets.length === 0) {
+      return { kind: 'success', text: `rewind: no checkpoints to clear${all ? ' across all sessions' : ''}` }
+    }
+    const scopeDesc = all ? 'across ALL sessions and workspaces' : 'for this session and workspace'
     const verdict = await confirmRewind({
       ctx,
       confirmVia: liveConfig.confirmVia,
-      summary: `${mine.length} checkpoint(s) for this session and workspace will be deleted (snapshot storage discarded; workspace files are NOT touched).`,
-      question: 'Delete all checkpoints for this session?',
+      summary: `${targets.length} checkpoint(s) ${scopeDesc} will be deleted (snapshot storage discarded; workspace files are NOT touched).`,
+      question: `Delete all checkpoints ${all ? 'across ALL sessions' : 'for this session'}?`,
       approveLabel: 'Delete',
       approveDescription: 'Remove every checkpoint record and discard their snapshot storage.',
     }, agent, signal)
@@ -1540,11 +1560,11 @@ export async function apply(ctx, config = {}) {
       logger.info(`rewind clear denied (${verdict.channel}: ${verdict.reason})`)
       return { kind: 'error', text: `rewind: clear cancelled: ${verdict.reason}` }
     }
-    const entries = mine.map(record => ({ key: record.id, value: record }))
-    await removeRecords(entries, mine.map(record => record.id))
-    appendEvent(session, SESSION_EVENTS.PRUNE, { ids: mine.map(record => record.id), reason: PRUNE_REASONS.CLEAR })
-    logger.info(`rewind clear: removed ${mine.length} checkpoint(s)`)
-    return { kind: 'success', text: `rewind: cleared ${mine.length} checkpoint(s) (snapshot storage discarded)` }
+    const entries = targets.map(record => ({ key: record.id, value: record }))
+    await removeRecords(entries, targets.map(record => record.id))
+    appendEvent(session, SESSION_EVENTS.PRUNE, { ids: targets.map(record => record.id), reason: PRUNE_REASONS.CLEAR })
+    logger.info(`rewind clear: removed ${targets.length} checkpoint(s)`)
+    return { kind: 'success', text: `rewind: cleared ${targets.length} checkpoint(s) (snapshot storage discarded)` }
   }
 }
 
