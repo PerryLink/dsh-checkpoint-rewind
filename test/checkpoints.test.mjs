@@ -173,6 +173,20 @@ describe('prunePlan（配额清理计划）', () => {
     // dead-subagent is pruned because its session is not in liveSessionIds; live-main is preserved
     assert.deepEqual(plan.ids, ['dead-subagent'])
   })
+
+  it('dangling/missing 物理快照无条件进入删除计划（即便属于唯一最新条目）', () => {
+    const entries = [
+      { key: 'live-1', value: record({ id: 'live-1', sessionId: 'live', time: 100, bytes: 500 }) },
+      { key: 'dangling-dead', value: record({ id: 'dangling-dead', sessionId: 'dead', time: 200, bytes: 500 }) },
+    ]
+    const plan = prunePlan(entries, {
+      maxSnapshots: 10,
+      maxSnapshotBytes: 1024 * 1024,
+      isMissing: (r) => r.id === 'dangling-dead',
+    })
+    assert.deepEqual(plan.ids, ['dangling-dead'])
+    assert.deepEqual(plan.byRule.missing, ['dangling-dead'])
+  })
 })
 
 describe('parseRewindInput（/rewind 寻址语法）', () => {
