@@ -416,4 +416,33 @@ describe('copy provider', () => {
     const { provider } = await makeProvider()
     await assert.rejects(() => provider.preview({ cwd, key: cwd }, '../evil'), /not a safe snapshot id/)
   })
+
+  it('dynamic getter: excludeGlobs and snapshotDir update without provider reconstruction', async () => {
+    const cwd = await makeWorkspace({ 'keep.txt': 'K', 'ignore1.log': 'L1', 'ignore2.tmp': 'T2' })
+    let currentExclude = ['*.log']
+    let currentSnapDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-snap-dyn1-'))
+    const provider = makeCopyProvider({
+      snapshotDir: () => currentSnapDir,
+      excludeGlobs: () => currentExclude,
+    })
+    const ws = { cwd, key: cwd }
+
+    // First snapshot with currentExclude = ['*.log']
+    const snap1 = await provider.snapshot(ws, { triggerTool: 'bash' })
+    const manifest1 = JSON.parse(await fs.readFile(path.join(snapshotBaseDir(currentSnapDir, cwd), snap1.ref, 'manifest.json'), 'utf8'))
+    assert.deepEqual(manifest1.files.map((e) => e.rel).sort(), ['ignore2.tmp', 'keep.txt'])
+
+    // Update exclude dynamically to ['*.tmp']
+    currentExclude = ['*.tmp']
+    const snap2 = await provider.snapshot(ws, { triggerTool: 'bash' })
+    const manifest2 = JSON.parse(await fs.readFile(path.join(snapshotBaseDir(currentSnapDir, cwd), snap2.ref, 'manifest.json'), 'utf8'))
+    assert.deepEqual(manifest2.files.map((e) => e.rel).sort(), ['ignore1.log', 'keep.txt'])
+
+    // Update snapshotDir dynamically
+    const nextSnapDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-snap-dyn2-'))
+    currentSnapDir = nextSnapDir
+    const snap3 = await provider.snapshot(ws, { triggerTool: 'bash' })
+    const manifest3 = JSON.parse(await fs.readFile(path.join(snapshotBaseDir(nextSnapDir, cwd), snap3.ref, 'manifest.json'), 'utf8'))
+    assert.ok(manifest3.id, 'snapshot written to dynamic snapshot directory')
+  })
 })
