@@ -159,16 +159,33 @@ describe('prunePlan（配额清理计划）', () => {
     assert.deepEqual(plan.byRule.maxSnapshotBytes, [])
     assert.deepEqual(plan.ids, ['a1', 'b1'])
   })
+
+  it('liveSessionIds: dead session newest records are pruned under byte quota, while live session newest records stay exempt', () => {
+    const entries = [
+      { key: 'dead-subagent', value: record({ id: 'dead-subagent', sessionId: 'dead-session-1', time: 100, bytes: 500 }) },
+      { key: 'live-main', value: record({ id: 'live-main', sessionId: 'live-session-1', time: 200, bytes: 500 }) },
+    ]
+    const plan = prunePlan(entries, {
+      maxSnapshots: 10,
+      maxSnapshotBytes: 400,
+      liveSessionIds: new Set(['live-session-1']),
+    })
+    // dead-subagent is pruned because its session is not in liveSessionIds; live-main is preserved
+    assert.deepEqual(plan.ids, ['dead-subagent'])
+  })
 })
 
 describe('parseRewindInput（/rewind 寻址语法）', () => {
-  it('空输入 → list；list/latest/last → 对应形态；clear → clear', () => {
+  it('空输入 → list；list/latest/last → 对应形态；clear / clear --all → clear', () => {
     assert.deepEqual(parseRewindInput(''), { kind: 'list' })
     assert.deepEqual(parseRewindInput('  '), { kind: 'list' })
     assert.deepEqual(parseRewindInput('list'), { kind: 'list' })
     assert.deepEqual(parseRewindInput('latest'), { kind: 'latest' })
     assert.deepEqual(parseRewindInput('LAST'), { kind: 'latest' })
-    assert.deepEqual(parseRewindInput('clear'), { kind: 'clear' })
+    assert.deepEqual(parseRewindInput('clear'), { kind: 'clear', all: false })
+    assert.deepEqual(parseRewindInput('clear --all'), { kind: 'clear', all: true })
+    assert.deepEqual(parseRewindInput('  CLEAR -A  '), { kind: 'clear', all: true })
+    assert.deepEqual(parseRewindInput('clear all'), { kind: 'clear', all: true })
   })
 
   it('step <N> → step；非法 step 语法 → invalid', () => {
