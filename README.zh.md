@@ -1,6 +1,7 @@
 <div align="center">
 
 # ⏪ dsh-checkpoint-rewind
+- **1024 商店渠道**：先 `npm i -g dsh1024`，再 `dsh1024 plugin --profile web add dsh-checkpoint-rewind`（计入 [deepseek1024.com](https://deepseek1024.com) 安装排行）。
 
 **统一的 DeepSeek Harness 检查点 —— 会话 + 工作区 + 配置三态快照，一键回滚。**
 

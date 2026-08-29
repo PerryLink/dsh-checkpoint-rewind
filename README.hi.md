@@ -1,6 +1,7 @@
 <div align="center">
 
 # ⏪ dsh-checkpoint-rewind
+- **1024 स्टोर चैनल**: एक बार `npm i -g dsh1024`, फिर `dsh1024 plugin --profile web add dsh-checkpoint-rewind` ([deepseek1024.com](https://deepseek1024.com) इंस्टॉल रैंकिंग में गिना जाता है)।
 
 **एकीकृत DeepSeek Harness चेकपॉइंट — सत्र + वर्कस्पेस + कॉन्फ़िग तीन-अवस्था स्नैपशॉट, एक-चरण रोलबैक के साथ।**
 

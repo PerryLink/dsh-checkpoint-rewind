@@ -1,6 +1,7 @@
 <div align="center">
 
 # ⏪ dsh-checkpoint-rewind
+- **Canal 1024 store**: `npm i -g dsh1024` una vez, luego `dsh1024 plugin --profile web add dsh-checkpoint-rewind` (cuenta para el ranking de instalaciones de [deepseek1024.com](https://deepseek1024.com)).
 
 **Checkpoints unificados de DeepSeek Harness: instantáneas de tres estados — sesión + workspace + configuración — con reversión de un solo paso.**
 
