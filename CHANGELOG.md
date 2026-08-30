@@ -4,6 +4,14 @@ All notable changes to dsh-checkpoint-rewind are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project versions with [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Merged (from origin, previously unreleased in the changelog)
+
+- fix(prune): scope newest-record exemption to live sessions and support `/rewind clear --all` (#11)
+- fix(providers): consume liveConfig for snapshotDir, excludeGlobs, and verifyByHash (#12)
+- feat(doctor): probe object existence and mark unrestorable checkpoints (#15; the doctor pass is defined and tested but not yet wired into the restore path)
+
 ## [0.6.1] - 2026-08-27
 
 ### Fixed
