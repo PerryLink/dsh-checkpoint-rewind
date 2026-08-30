@@ -37,7 +37,7 @@
 1. **Registro de tres estados** — cada checkpoint guarda el estado del workspace (SHA del árbol git, o un manifiesto de copia), el cursor de eventos de la sesión (`seq` + límite de turno) y una instantánea de configuración, etiquetado por origen (`manual` / `auto` / `guard` / `mutation`).
 2. **Cuatro disparadores de captura** — antes de cada herramienta de mutación (`fs/write-intent`, `fs/edit-intent`, `tools/pre-execute`), en el intervalo automático (`autoCheckpoint`, por defecto cada paso), manualmente (`/checkpoint` y la herramienta `checkpoint`), y como guardia antes de cada reversión.
 3. **Proveedor git primero** — `git stash create` / `commit-tree` producen objetos de instantánea no referenciados que nunca tocan tu worktree, índice o historial; la restauración es solo-worktree y por rutas explícitas. Los directorios no git (y los repos con HEAD no nacido) degradan a un proveedor `copy` incremental con reutilización de hardlinks.
-4. **Reversión de un solo paso** — `/rewind workspace|session|config|all <target>` restaura los estados seleccionados; `preview` es un informe de impacto de solo lectura, `diff <a> <b>` compara dos checkpoints, `clear` los elimina.
+4. **Reversión de un solo paso** — `/rewind workspace|session|config|all <target>` restaura los estados seleccionados; `preview` es un informe de impacto de solo lectura, `diff <a> <b>` compara dos checkpoints, `clear` los elimina (esta sesión; `clear --all` abarca todas las sesiones y workspaces).
 5. **Reversión de sesión por reproducción de semilla** — la reversión de sesión reproduce eventos hasta el límite del checkpoint mediante la API oficial `sessions.create` con semilla, creando una nueva sesión hija; la sesión original conserva su historial completo.
 6. **Línea de tiempo en Ajustes** — la pestaña `Plugins → Checkpoints` muestra los checkpoints de la sesión con diffs línea a línea entre pares.
 
@@ -99,6 +99,7 @@ Dirígete a un checkpoint por su prefijo de id único, por número de paso o por
 /rewind latest
 /rewind preview b2c3d4e5   # solo lectura: muestra qué archivos cambiarían, no toca nada
 /rewind clear              # eliminación confirmada de los checkpoints de esta sesión (archivos intactos)
+/rewind clear --all        # eliminación confirmada en TODAS las sesiones y workspaces (archivos intactos)
 ```
 
 `preview` se resuelve con el mismo direccionamiento e imprime el impacto sin pedir confirmación ni escribir nada.
@@ -113,7 +114,7 @@ Dirígete a un checkpoint por su prefijo de id único, por número de paso o por
 
 ## Configuración
 
-Todas las opciones son campos Schemastery `Config` (modificables desde cordis.yml). Nada está hardcodeado.
+Todas las opciones son campos Schemastery `Config` (modificables desde cordis.yml). Nada está hardcodeado. Las opciones de proveedor (`gitBin`, `snapshotDir`, `excludeGlobs`, `verifyByHash`) se leen de la configuración viva en el momento de uso, de modo que los cambios en cordis.yml se aplican sin reiniciar.
 
 | Clave | Por defecto | Significado |
 |---|---|---|
@@ -122,7 +123,7 @@ Todas las opciones son campos Schemastery `Config` (modificables desde cordis.ym
 | `gitBin` | `git` | Ruta del ejecutable de git |
 | `snapshotDir` | `$DSH_HOME/dsh-checkpoint-rewind` (repliegue `~/.dsh/dsh-checkpoint-rewind` si `$DSH_HOME` no está definido) | Raíz de las instantáneas del proveedor copy |
 | `maxSnapshots` | `50` | Checkpoints conservados por sesión (los más antiguos se podan primero) |
-| `maxSnapshotBytes` | `536870912` (512 MiB) | Cuota blanda global de bytes incrementales (siempre se conserva el más nuevo por sesión) |
+| `maxSnapshotBytes` | `536870912` (512 MiB) | Cuota blanda global de bytes incrementales (siempre se conserva el más nuevo por sesión viva) |
 | `pruneOnTurnEnd` | `true` | Ejecuta la poda de cuota al terminar un turno |
 | `mutationTools` | `['bash','write','edit','str_replace_editor','pwsh','terminal_send']` | Herramientas tratadas como mutantes en `tools/pre-execute` |
 | `excludeGlobs` | `['node_modules','.git','.dsh','dist','build']` | Patrones glob omitidos por el proveedor copy |
@@ -155,7 +156,7 @@ Todas las opciones son campos Schemastery `Config` (modificables desde cordis.ym
 
 | Superficie | Tipo | Notas |
 |---|---|---|
-| `/rewind` | comando | `[workspace\|session\|config\|all] <id-prefix\|step <N>\|latest>` · `diff <a> <b>` · `preview <target>` · `clear` |
+| `/rewind` | comando | `[workspace\|session\|config\|all] <id-prefix\|step <N>\|latest>` · `diff <a> <b>` · `preview <target>` · `clear [--all]` |
 | `/checkpoint` | comando | `[note <text>\|list\|diff <a> <b>]` — captura un checkpoint manual |
 | `checkpoint` | herramienta | Captura un checkpoint manual con nota opcional |
 | `fs/write-intent` · `fs/edit-intent` · `tools/pre-execute` | listeners | Captura pre-mutación (prepend pass-through; nunca roba el hueco de política) |
@@ -165,7 +166,7 @@ Todas las opciones son campos Schemastery `Config` (modificables desde cordis.ym
 
 ## Modelo de seguridad
 
-- **El historial de git es intocable.** El proveedor git solo ejecuta primitivas sin efectos secundarios de la lista blanca — `stash create`, `commit-tree`, `restore --worktree`, `ls-tree`, `diff-tree`, `ls-files`, `status`, `rev-parse` — impuestas por una aserción en tiempo de ejecución, y las referencias de objetos se validan como ids hexadecimales antes de pasarlas a git (un registro manipulado no puede inyectar opciones de git). **Nunca `reset --hard` por defecto, nunca `clean`, nunca mutación de índice/historial** (ver `workspaceRestore` abajo).
+- **El historial de git es intocable.** El proveedor git solo ejecuta primitivas sin efectos secundarios de la lista blanca — `stash create`, `commit-tree`, `restore --worktree`, `ls-tree`, `diff-tree`, `ls-files`, `status`, `rev-parse`, `cat-file -e` — impuestas por una aserción en tiempo de ejecución, y las referencias de objetos se validan como ids hexadecimales antes de pasarlas a git (un registro manipulado no puede inyectar opciones de git). **Nunca `reset --hard` por defecto, nunca `clean`, nunca mutación de índice/historial** (ver `workspaceRestore` abajo).
 - **Reversión por sobrescritura, nunca borrado.** La restauración solo sobrescribe archivos capturados, y el proveedor git restaura **rutas explícitas** (`git restore … -- .` borraría archivos añadidos con `git add` después del checkpoint). Los archivos creados después del checkpoint (no rastreados **o** staged) se *informan* y se dejan en su sitio.
 - **Sin escrituras a través de enlaces, sin path traversal.** El proveedor copy valida las referencias de checkpoint antes de unirlas a las rutas del directorio de instantáneas, y se niega a restaurar a través de un destino (o ancestro) que se haya convertido en un enlace simbólico — así una restauración nunca puede seguir un enlace fuera del workspace.
 - **La restauración requiere aprobación.** Sobrescribir archivos del usuario siempre pasa por la costura de confirmación con semántica `ask`; un answerer ausente, que lanza error o que responde “no” **cierra en fallo**. `/rewind preview` es la forma de solo lectura de inspeccionar el impacto primero.
@@ -207,7 +208,7 @@ El plugin devuelve el id de la nueva sesión en el resultado del comando (`sessi
 
 **¿Por qué no usar `git reset --hard` por defecto?** Porque destruir estado no es el trabajo de una red de seguridad. El plugin solo crea objetos no referenciados y realiza restauraciones exclusivas del árbol de trabajo y explícitas por ruta por defecto, de modo que un retroceso defectuoso nunca pueda perder el historial, el índice o los archivos creados después del checkpoint. `reset-hard` está disponible detrás de `workspaceRestore: 'reset-hard'` para usuarios que desean explícitamente paridad con CC.
 
-**¿Cuánto tiempo es restaurable un checkpoint?** No se mantiene ninguna referencia para los snapshots de git-provider. Son objetos no referenciados de `stash create`/`commit-tree` por diseño, y `discard` solo elimina el registro de metadatos, dejando el objeto para `git gc`. Dos límites independientes definen la ventana de restauración real: la cuota del plugin (`maxSnapshots` por defecto 50 por sesión; `maxSnapshotBytes` 512 MiB de cuota blanda global aplicada mediante `pruneAll()` en cada captura y limpiada al final de turnos) y el git gc del repositorio host (`gc.pruneExpire` por defecto 2 semanas). Un `git gc --prune=now` manual, repack agresivo o clon fresco los elimina inmediatamente. Los objetos purgados se detectan en los metadatos; `reset-hard` falla explícitamente si falta el objeto, y el paso doctor para restore por defecto se sigue en discussion #13.
+**¿Cuánto tiempo es restaurable un checkpoint?** No se mantiene ninguna referencia para los snapshots de git-provider. Son objetos no referenciados de `stash create`/`commit-tree` por diseño, y `discard` solo elimina el registro de metadatos, dejando el objeto para `git gc`. Dos límites independientes definen la ventana de restauración real: la cuota del plugin (`maxSnapshots` por defecto 50 por sesión; `maxSnapshotBytes` 512 MiB de cuota blanda global aplicada mediante `pruneAll()` en cada captura y limpiada al final de turnos) y el git gc del repositorio host (`gc.pruneExpire` por defecto 2 semanas). Un `git gc --prune=now` manual, repack agresivo o clon fresco los elimina inmediatamente. Los objetos purgados ahora se detectan por adelantado: el proveedor git sondea el objeto de instantánea antes de restaurar (`git cat-file -e`) y falla en voz alta si falta, en lugar de no restaurar nada, y un paso doctor recorre cada registro de checkpoint para sondear la existencia del objeto y marcar los no restaurables (`[UNRESTORABLE: object missing]` en la lista). El paso doctor está implementado y probado, pero aún no está conectado a la ruta de restauración (restore aún no consulta la marca `unrestorable`; seguimiento en discussion #13).
 
 **¿Puedo retroceder a un paso en medio de un turno?** La restauración de archivos es precisa por pasos (`/rewind step <N>` = snapshot más cercano ≤ N). La reproducción de la sesión, sin embargo, respeta la granularidad de reproducción del harness: la sesión hija se inicializa hasta el límite del turno del checkpoint.
 

@@ -39,7 +39,7 @@
 1. **三态记录** —— 每个检查点保存工作区状态（git 树 SHA，或副本清单）、会话事件游标（`seq` + 轮次边界）与配置快照，并按来源标记（`manual` / `auto` / `guard` / `mutation`）。
 2. **四种捕获触发** —— 在每次变更工具执行前（`fs/write-intent`、`fs/edit-intent`、`tools/pre-execute`）、自动间隔（`autoCheckpoint`，默认每步）、手动（`/checkpoint` 与 `checkpoint` 工具）、以及每次回退前的守护检查点。
 3. **git 优先的 provider** —— `git stash create` / `commit-tree` 生成未引用快照对象，绝不触碰工作树、索引或历史；恢复仅限工作树且路径显式。非 git 目录（以及尚无 HEAD 的仓库）降级为带硬链接复用的增量 `copy` provider。
-4. **一键回滚** —— `/rewind workspace|session|config|all <target>` 恢复所选状态；`preview` 是只读影响报告，`diff <a> <b>` 比较两个检查点，`clear` 删除它们。
+4. **一键回滚** —— `/rewind workspace|session|config|all <target>` 恢复所选状态；`preview` 是只读影响报告，`diff <a> <b>` 比较两个检查点，`clear` 删除它们（本会话；`clear --all` 覆盖所有会话与工作区）。
 5. **种子重放式会话回退** —— 会话回退通过官方 `sessions.create` 种子 API 将事件重放到检查点边界，生成新的子会话；原会话保留其完整历史。
 6. **设置页时间线** —— `Plugins → Checkpoints` 标签页渲染会话的检查点，并附带两两之间的逐行 diff。
 
@@ -101,6 +101,7 @@ run "/rewind <id>" to restore files and fork the session from that checkpoint
 /rewind latest
 /rewind preview b2c3d4e5   # 只读：显示哪些文件会变化，不触碰任何内容
 /rewind clear              # 确认删除本会话的检查点（文件不受影响）
+/rewind clear --all        # 确认删除所有会话与工作区的检查点（文件不受影响）
 ```
 
 `preview` 使用相同的定位方式解析并打印影响，不请求确认，也不写入任何内容。
@@ -115,7 +116,7 @@ run "/rewind <id>" to restore files and fork the session from that checkpoint
 
 ## 配置
 
-所有可调项都是 Schemastery `Config` 字段（可在 cordis.yml 中修改）。没有任何硬编码。
+所有可调项都是 Schemastery `Config` 字段（可在 cordis.yml 中修改）。没有任何硬编码。provider 选项（`gitBin`、`snapshotDir`、`excludeGlobs`、`verifyByHash`）在使用时从实时配置读取，cordis.yml 的改动无需重启即生效。
 
 | 键 | 默认值 | 含义 |
 |---|---|---|
@@ -124,7 +125,7 @@ run "/rewind <id>" to restore files and fork the session from that checkpoint
 | `gitBin` | `git` | Git 可执行文件路径 |
 | `snapshotDir` | `$DSH_HOME/dsh-checkpoint-rewind`（`$DSH_HOME` 未设置时回退 `~/.dsh/dsh-checkpoint-rewind`） | copy provider 快照根目录 |
 | `maxSnapshots` | `50` | 每个会话保留的检查点数（最旧优先清理） |
-| `maxSnapshotBytes` | `536870912`（512 MiB） | 全局增量字节软配额（每会话最新一条总是保留） |
+| `maxSnapshotBytes` | `536870912`（512 MiB） | 全局增量字节软配额（每个存活会话的最新一条总是保留） |
 | `pruneOnTurnEnd` | `true` | 轮次结束时执行配额清理 |
 | `mutationTools` | `['bash','write','edit','str_replace_editor','pwsh','terminal_send']` | 在 `tools/pre-execute` 上视为变更型的工具 |
 | `excludeGlobs` | `['node_modules','.git','.dsh','dist','build']` | copy provider 跳过的 glob 模式 |
@@ -157,7 +158,7 @@ run "/rewind <id>" to restore files and fork the session from that checkpoint
 
 | 界面 | 类型 | 说明 |
 |---|---|---|
-| `/rewind` | 命令 | `[workspace\|session\|config\|all] <id-prefix\|step <N>\|latest>` · `diff <a> <b>` · `preview <target>` · `clear` |
+| `/rewind` | 命令 | `[workspace\|session\|config\|all] <id-prefix\|step <N>\|latest>` · `diff <a> <b>` · `preview <target>` · `clear [--all]` |
 | `/checkpoint` | 命令 | `[note <text>\|list\|diff <a> <b>]` —— 捕获手动检查点 |
 | `checkpoint` | 工具 | 捕获带可选备注的手动检查点 |
 | `fs/write-intent` · `fs/edit-intent` · `tools/pre-execute` | 监听器 | 变更前捕获（prepend 直通；绝不抢占策略槽） |
@@ -167,7 +168,7 @@ run "/rewind <id>" to restore files and fork the session from that checkpoint
 
 ## 安全模型
 
-- **Git 历史不可触碰。** git provider 只运行白名单内的无副作用原语——`stash create`、`commit-tree`、`restore --worktree`、`ls-tree`、`diff-tree`、`ls-files`、`status`、`rev-parse`——由运行时断言强制，且对象引用在传给 git 前被校验为十六进制 id（被篡改的记录无法注入 git 选项）。**默认绝不 `reset --hard`、绝不 `clean`、绝不改写索引或历史**（见下文 `workspaceRestore`）。
+- **Git 历史不可触碰。** git provider 只运行白名单内的无副作用原语——`stash create`、`commit-tree`、`restore --worktree`、`ls-tree`、`diff-tree`、`ls-files`、`status`、`rev-parse`、`cat-file -e`——由运行时断言强制，且对象引用在传给 git 前被校验为十六进制 id（被篡改的记录无法注入 git 选项）。**默认绝不 `reset --hard`、绝不 `clean`、绝不改写索引或历史**（见下文 `workspaceRestore`）。
 - **覆盖式回滚，绝不删除。** 恢复只覆盖已捕获的文件，且 git provider 恢复**显式路径**（`git restore … -- .` 会删除检查点之后 `git add` 过的文件）。检查点之后新建的文件（未跟踪**或**已暂存）会被*报告*并原样保留。
 - **不写穿链接、不路径穿越。** copy provider 在将检查点引用拼入快照目录路径前会校验它们，并拒绝通过已变为符号链接的目标（或其祖先）恢复——因此恢复永远不会跟随链接跑出工作区。
 - **恢复必须经批准。** 覆盖用户文件始终经过带 `ask` 语义的确认接缝；缺失、抛错或回答“否”的 answerer **失败关闭**。`/rewind preview` 是先行查看影响的只读方式。
@@ -209,7 +210,7 @@ capture ── fs/write-intent · fs/edit-intent · tools/pre-execute (prepend, 
 
 **为什么默认不使用 `git reset --hard`？** 因为破坏状态不是安全网的工作。默认情况下，插件仅创建无引用的对象并执行仅针对工作区、明确指定路径的恢复，因此错误的后退永远不会丢失提交历史、暂存区或在检查点之后创建的文件。对于明确希望与 CC 保持一致的用户，可以在 `workspaceRestore: 'reset-hard'` 选项后使用 `reset-hard`。
 
-**快照的可恢复窗口是多久？** git-provider 快照不持有任何 ref。它们在设计上是未引用的 `stash create`/`commit-tree` 对象，`discard` 仅删除元数据记录，将底层对象留给 `git gc`。两个独立的机制决定快照实际可恢复的时长：插件自身的配额修剪（`maxSnapshots` 默认每会话保留 50 个；`maxSnapshotBytes` 默认 512 MiB 全局软配额，每次捕获时通过 `pruneAll()` 执行并在轮次结束时扫描清理），以及宿主仓库的 git gc。使用 git 默认配置时，未引用对象会存活至 auto-gc 触发，且仅删除早于 `gc.pruneExpire`（默认 2 周）的对象。手动的 `git gc --prune=now`、激进的 repack、`filter-repo` 或重新克隆会立即删除它们。目前在元数据层检测已修剪的对象；虽然 `reset-hard` 在对象丢失时会显式报错，但默认 restore 的显式失败 doctor pass 正在 discussion #13 中跟进。
+**快照的可恢复窗口是多久？** git-provider 快照不持有任何 ref。它们在设计上是未引用的 `stash create`/`commit-tree` 对象，`discard` 仅删除元数据记录，将底层对象留给 `git gc`。两个独立的机制决定快照实际可恢复的时长：插件自身的配额修剪（`maxSnapshots` 默认每会话保留 50 个；`maxSnapshotBytes` 默认 512 MiB 全局软配额，每次捕获时通过 `pruneAll()` 执行并在轮次结束时扫描清理），以及宿主仓库的 git gc。使用 git 默认配置时，未引用对象会存活至 auto-gc 触发，且仅删除早于 `gc.pruneExpire`（默认 2 周）的对象。手动的 `git gc --prune=now`、激进的 repack、`filter-repo` 或重新克隆会立即删除它们。现在会预先检测已修剪的对象：git provider 在恢复前先用 `git cat-file -e` 探测快照对象，对象缺失时显式失败而不是静默恢复为空；doctor pass 会遍历每条检查点记录探测对象存在性，并把不可恢复的条目标记出来（列表中显示 `[UNRESTORABLE: object missing]`）。doctor pass 已实现并有测试，但尚未接线到恢复路径（restore 尚不读取 `unrestorable` 标记；仍在 discussion #13 跟进）。
 
 **我可以回滚到回合中间的某一步吗？** 文件恢复是精确到单步的（`/rewind step <N>` = ≤ N 的最近快照）。但是，会话重放遵循 Harness 的重放粒度：子会话将从检查点所在的回合边界开始重放。
 
