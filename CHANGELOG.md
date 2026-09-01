@@ -4,7 +4,7 @@ All notable changes to dsh-checkpoint-rewind are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project versions with [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.6.2] - 2026-09-01
 
 - Drop the removed @deepseek-ai/dsh-client-runtime peer/inject entries and align devDeps pins to the published 0.1.2-alpha.2 line; no behavior change.
 - Align devDeps pins to the published 0.1.2-alpha.3 line, widen the `dsh-commands`/`dsh-settings`/`dsh-system-prompt` peers to `>=0.1.0-rc.8 <0.2.0`, and align `cordis`/`schemastery` to `^4.0.2`/`^3.18.2`. The `test:integration` answerer now rides the `user-questions/request` waterfall (the rc-line `registerProvider` API is gone on the alpha line); the adaptive checkpoint gate stays closed on `0.1.2-alpha.3` (`Session.append` still cannot stamp the `ignorable` marker).
