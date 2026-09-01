@@ -39,7 +39,7 @@ dev/                 ❌ 本地工程面：冒烟脚本、夹具、演示——�
 ## 命令
 
 ```sh
-npm install          # 安装 peer 依赖（@deepseek-ai/dsh-session@0.1.1-rc.2、schemastery、zod 等）
+npm install          # 安装 peer 依赖（@deepseek-ai/dsh-session@0.1.2-alpha.3、schemastery、zod 等）
 npm test             # node --test 跑 test/**/*.test.mjs（含 test/providers/ 单测套件；集成验证单独跑）
 npm run test:integration   # 组装式 headless 集成验证（test/integration/，不进发布包）
 ```
@@ -64,9 +64,9 @@ npm run test:integration   # 组装式 headless 集成验证（test/integration/
 - **失败要大声**：非法配置加载期抛错；领域打开失败/恢复失败/fork 失败返回结构化错误文本；绝不静默吞、绝不静默截断。
 - **本地优先**：零网络、零凭据；文件快照只写 `snapshotDir`（默认 `$DSH_HOME/dsh-checkpoint-rewind/`）。
 
-## 会话事件的 rc.2 约束（必读）
+## 会话事件的 alpha.3 约束（必读）
 
-本插件在 `types.d.ts` 声明了 `checkpoint/snapshot|bound|prune|rewind` 的 SessionEventMap 合并，但**运行时经自适应门决定是否 append**：rc.2 无插件事件注册面（`KNOWN_SESSION_EVENT_TYPES` 不含 checkpoint/*，`Session.append` 第三参为 surface intent、无法盖章 `ignorable`），append 未注册类型会让该会话下次加载被持久化层拒绝。门 = 类型被宿主收录 **或** 运行时探测证明宿主 append 盖章 `ignorable` 信封（探测在独立 detached store 上做，绝不接入宿主持久化）。审计链由宿主已知事件（`command/run` + `command/done`、`approval/*`）+ `checkpoints` 存储领域承担。**不要"顺手"取消这个自适应门，也不要让探测会话进宿主持久化。**
+本插件在 `types.d.ts` 声明了 `checkpoint/snapshot|bound|prune|rewind` 的 SessionEventMap 合并，但**运行时经自适应门决定是否 append**：0.1.2-alpha.3 无插件事件注册面（`KNOWN_SESSION_EVENT_TYPES` 不含 checkpoint/*，`Session.append` 第三参为 surface intent、无法盖章 `ignorable`），append 未注册类型会让该会话下次加载被持久化层拒绝。门 = 类型被宿主收录 **或** 运行时探测证明宿主 append 盖章 `ignorable` 信封（探测在独立 detached store 上做，绝不接入宿主持久化）。审计链由宿主已知事件（`command/run` + `command/done`、`approval/*`）+ `checkpoints` 存储领域承担。**不要"顺手"取消这个自适应门，也不要让探测会话进宿主持久化。**
 
 ## 质量约定
 

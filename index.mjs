@@ -103,7 +103,7 @@ export const inject = ['sessions', 'commands']
  * 宿主 append 是否盖章 ignorable 信封（运行时能力探测）。
  * 在全新 detached Context 上构造 SessionStore（绝不接入宿主持久化，探测
  * 会话不落盘）：追加一条带 { ignorable: true } 的探测事件并回读信封标记。
- * rc.2 的 append 不盖章 ignorable 信封（第三参为 SurfaceIntent，无 ignorable
+ * alpha.3 的 append 不盖章 ignorable 信封（第三参为 SurfaceIntent，无 ignorable
  * 键）→ 标记缺失 → false（门保持关闭）；支持 ignorable 信封的宿主 → true
  * （checkpoint/* 以 ignorable 落盘）。
  * 探测留下的空壳 Context/SessionStore 不持有宿主句柄、定时器或监听器，
