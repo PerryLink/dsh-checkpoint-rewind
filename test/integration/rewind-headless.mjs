@@ -22,6 +22,7 @@ import { Storage } from '@deepseek-ai/dsh-storage'
 import * as storageJson from '@deepseek-ai/dsh-storage-json'
 import * as storageDomain from '@deepseek-ai/dsh-storage-domain'
 import UserQuestionService from '@deepseek-ai/dsh-user-questions'
+import { createScope } from '@deepseek-ai/dsh-scope'
 import * as checkpointRewind from '../../index.mjs'
 
 const log = (...parts) => console.log('[rewind-integration]', ...parts)
@@ -68,9 +69,10 @@ async function mount(opts) {
   root.provide('agents', { get: (id) => (id === agent.id ? agent : undefined), roots: () => [agent] })
   const state = { asks: 0 }
   // 假 agents 注册表：真 user-questions 校验调用方是 live runtime root。
-  // alpha 线的 user-questions 是 waterfall 服务（registerProvider 已删除）：
-  // 挂 'user-questions/request' 回答者，返回答案即认领请求。
-  root.on('user-questions/request', async (request) => {
+  // alpha 线的 user-questions 是 agent 作用域 waterfall 服务（registerProvider
+  // 已删除）：在 agent 作用域上挂回答者，返回答案即认领请求。
+  const scope = createScope(root, agent)
+  scope.ctx.on('user-questions/request', async (request) => {
     state.asks += 1
     log('  [user-questions] asked:', request.questions[0].question)
     return { answers: request.questions.map((question) => ({ id: question.id, selected: ['Restore'] })) }
@@ -94,6 +96,7 @@ async function mount(opts) {
   const plugin = { name: checkpointRewind.name, inject: checkpointRewind.inject, apply: (ctx) => checkpointRewind.apply(ctx, config) }
   await mount(plugin)
   const dispose = async () => {
+    await scope.dispose()
     for (const fiber of fibers.reverse()) await fiber.dispose()
   }
   return { root, session, agent, dispose, asks: () => state.asks }
