@@ -4,6 +4,12 @@ All notable changes to dsh-checkpoint-rewind are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project versions with [SemVer](https://semver.org/).
 
+## [0.6.3] - 2026-09-02
+
+### Changed
+
+- Align the devDependency pins to the published dsh 0.1.2-alpha.5 line and re-verify the adaptation claims; no behavior change.
+
 ## [0.6.2] - 2026-09-01
 
 - Drop the removed @deepseek-ai/dsh-client-runtime peer/inject entries and align devDeps pins to the published 0.1.2-alpha.2 line; no behavior change.
