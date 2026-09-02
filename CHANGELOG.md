@@ -4,6 +4,12 @@ All notable changes to dsh-checkpoint-rewind are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project versions with [SemVer](https://semver.org/).
 
+## [0.6.4] - 2026-09-02
+
+### Docs
+
+- Sync the five-language READMEs to the 0.1.2-alpha.5 facts; no behavior change.
+
 ## [0.6.3] - 2026-09-02
 
 ### Changed

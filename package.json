@@ -1,7 +1,7 @@
 {
   "name": "dsh-checkpoint-rewind",
   "description": "Unified DSH checkpoints: session + workspace + config three-state snapshots with one-shot rollback 鈥?/checkpoint and /rewind commands, a checkpoint tool, automatic interval snapshots, a Settings page timeline with pairwise diffs, and seed-replay session rollback via the official sessions.create API",
-  "version": "0.6.3",
+  "version": "0.6.4",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/PerryLink/dsh-checkpoint-rewind.git"
