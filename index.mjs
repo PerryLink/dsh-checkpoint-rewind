@@ -100,6 +100,18 @@ export const name = PLUGIN_NAME
 export const inject = ['sessions', 'commands']
 
 /**
+ * 会话事件快照（跨宿主行兼容）：0.1.2-alpha.5 起 Session.events getter 更名为
+ * snapshotEvents()；peer 下限（>=0.1.0-rc.8）的老宿主仍只有 .events。
+ * @param {{ snapshotEvents?: () => unknown[], events?: unknown[] } | null | undefined} session - 宿主 Session。
+ * @returns {unknown[]} 事件快照（缺失会话/老宿主无 events 时为空数组）。
+ */
+function sessionEvents(session) {
+  if (session === undefined || session === null) return []
+  if (typeof session.snapshotEvents === 'function') return session.snapshotEvents()
+  return session.events ?? []
+}
+
+/**
  * 宿主 append 是否盖章 ignorable 信封（运行时能力探测）。
  * 在全新 detached Context 上构造 SessionStore（绝不接入宿主持久化，探测
  * 会话不落盘）：追加一条带 { ignorable: true } 的探测事件并回读信封标记。
@@ -460,7 +472,7 @@ export async function apply(ctx, config = {}) {
     let step
     let turnEnded = false
     let stepEnded = true
-    for (const event of session.events) {
+    for (const event of sessionEvents(session)) {
       if (event.type === 'turn/start') {
         turn = event.data.turn
         step = undefined
@@ -488,7 +500,7 @@ export async function apply(ctx, config = {}) {
   function latestStepOf(session) {
     let turn
     let step
-    for (const event of session.events) {
+    for (const event of sessionEvents(session)) {
       if (event.type === 'turn/start') {
         turn = event.data.turn
         step = undefined
@@ -539,7 +551,7 @@ export async function apply(ctx, config = {}) {
     }
     try {
       const cursor = session.seq
-      const boundary = sessionBoundaryAt(session.events, cursor)
+      const boundary = sessionBoundaryAt(sessionEvents(session), cursor)
       const table = await getTablePromise()
       const provider = await registry.resolve(liveConfig.provider, { cwd, key: workspaceKeyOf(cwd) })
       const previous = latestRecordFor(table, session.id, cwd)
@@ -940,7 +952,7 @@ export async function apply(ctx, config = {}) {
       return { record }
     }
     if (parsed.kind === 'step') {
-      const seq = stepEndSeqOf(session.events, parsed.step)
+      const seq = stepEndSeqOf(sessionEvents(session), parsed.step)
       if (seq === undefined) {
         return {
           error: `rewind: step ${parsed.step} has not ended or does not exist (steps restart per turn; run /rewind to list checkpoints)`,
@@ -1174,7 +1186,7 @@ export async function apply(ctx, config = {}) {
    */
   function replaySession(source, record) {
     const boundary = typeof record.sessionBoundary === 'number' ? record.sessionBoundary : undefined
-    const seed = replaySeedOf(source.events, boundary)
+    const seed = replaySeedOf(sessionEvents(source), boundary)
     const meta = {
       ...(typeof source.header?.cwd === 'string' && source.header.cwd.length > 0 ? { cwd: source.header.cwd } : {}),
       parentSession: source.id,
@@ -1416,7 +1428,7 @@ export async function apply(ctx, config = {}) {
     if (targets.session) {
       try {
         const child = replaySession(session, record)
-        segments.session = { childSessionId: child.id, seedLength: child.header?.seedLength ?? 0 }
+        segments.session = { childSessionId: child.id, seedLength: child.header?.inheritedEventCount ?? 0 }
         injectReplayNotice(child, record, segments, guard)
         logger.info(`rewind phase 3 ok: replayed session ${child.id} from checkpoint ${record.id} (boundary ${record.sessionBoundary ?? 'none'})`)
       } catch (error) {

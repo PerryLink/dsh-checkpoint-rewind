@@ -449,7 +449,7 @@ describe('/rewind 命令', () => {
     await waitForRecords(app.records, 1)
     await fs.writeFile(path.join(cwd, 'a.txt'), 'A2!')
     closeStep(app.session, 1, 1, true)
-    const turn1End = app.session.events.at(-1).seq
+    const turn1End = app.session.snapshotEvents().at(-1).seq
     // turn 2：改 b.txt；本轮快照的边界 = turn 1 的 turn/end。
     openStep(app.session, 2, 1)
     await dispatchWriteIntent(app.root, app.agent, 'bash')
@@ -474,17 +474,17 @@ describe('/rewind 命令', () => {
     assert.equal(child.header.parentSession, app.session.id)
     assert.equal(child.header.cwd, cwd)
     assert.equal(child.firstLiveSeq, turn1End + 1)
-    assert.equal(child.events.length, turn1End + 3) // 种子 + session/end-seed + 回退通知
-    assert.equal(child.events.at(-1).type, 'user/message', '子会话收到回退通知')
-    const notice = child.events.at(-1).data
+    assert.equal(child.snapshotEvents().length, turn1End + 3) // 种子 + session/end-seed + 回退通知
+    assert.equal(child.snapshotEvents().at(-1).type, 'user/message', '子会话收到回退通知')
+    const notice = child.snapshotEvents().at(-1).data
     assert.equal(notice.source?.kind, 'plugin')
     assert.equal(notice.source?.plugin, 'checkpoint-rewind')
     assert.match(notice.content[0].text, /replayed from checkpoint/)
     for (let seq = 0; seq <= turn1End; seq += 1) {
-      assert.deepEqual(child.events[seq], app.session.events[seq])
+      assert.deepEqual(child.snapshotEvents()[seq], app.session.snapshotEvents()[seq])
     }
     // 源会话未被改写（仍含两轮全部事件）。
-    assert.ok(app.session.events.length > turn1End)
+    assert.ok(app.session.snapshotEvents().length > turn1End)
     await app.dispose()
   })
 
@@ -497,7 +497,7 @@ describe('/rewind 命令', () => {
     await waitForRecords(app.records, 1)
     closeStep(app.session, 1, 1, true)
     await command(app, '/rewind')
-    const lifecycle = app.session.events.filter((event) => event.type === 'command/run' || event.type === 'command/done')
+    const lifecycle = app.session.snapshotEvents().filter((event) => event.type === 'command/run' || event.type === 'command/done')
     assert.equal(lifecycle.length, 2)
     assert.equal(lifecycle[0].type, 'command/run')
     assert.equal(lifecycle[1].type, 'command/done')
@@ -514,7 +514,7 @@ describe('/rewind 命令', () => {
     openStep(app.session, 1, 1)
     await dispatchWriteIntent(app.root, app.agent, 'bash')
     await waitForRecords(app.records, 1)
-    const custom = app.session.events.filter((event) => event.type.startsWith('checkpoint/'))
+    const custom = app.session.snapshotEvents().filter((event) => event.type.startsWith('checkpoint/'))
     assert.equal(custom.length, 0)
     await app.dispose()
   })

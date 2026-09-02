@@ -154,7 +154,8 @@ export async function settle() {
  * @param {number} step - step 号。
  */
 export function openStep(session, turn, step) {
-  if (session.events.length === 0 || session.events.at(-1).type !== 'turn/start') {
+  const events = session.snapshotEvents()
+  if (events.length === 0 || events.at(-1).type !== 'turn/start') {
     session.append('turn/start', { turn })
   }
   session.append('step/start', { turn, step })

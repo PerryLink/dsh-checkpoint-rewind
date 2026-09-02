@@ -104,7 +104,7 @@ async function mount(opts) {
 
 /** 模拟一个"agent 修改文件"的轮次：开放步骤 → 变更意图 → 写文件 → 关闭。 */
 async function agentMutates(root, agent, turn, step, file, content, tool = 'bash') {
-  if (agent.session.events.at(-1)?.type !== 'turn/start') agent.session.append('turn/start', { turn })
+  if (agent.session.snapshotEvents().at(-1)?.type !== 'turn/start') agent.session.append('turn/start', { turn })
   agent.session.append('step/start', { turn, step })
   const exec = { agent, name: tool, callId: `call-${turn}-${step}`, signal: new AbortController().signal, arguments: {} }
   await root.waterfall('fs/write-intent', { key: file }, exec, () => undefined)
@@ -112,7 +112,7 @@ async function agentMutates(root, agent, turn, step, file, content, tool = 'bash
   await fs.writeFile(file, content)
   agent.session.append('step/end', { turn, step })
   agent.session.append('turn/end', { turn, reason: { kind: 'completed' } })
-  return agent.session.events.at(-1).seq
+  return agent.session.snapshotEvents().at(-1).seq
 }
 
 async function executeCommand(root, agent, line) {
@@ -134,7 +134,7 @@ async function mainCopyFlow() {
   log('copy flow: mounted; workspace', workspace)
 
   await agentMutates(root, agent, 1, 1, fileA, 'A-v2!\n') // turn 1: 改 a.txt（尺寸变化，去重不依赖 mtime）
-  const forkSeq1 = session.events.at(-1).seq
+  const forkSeq1 = session.snapshotEvents().at(-1).seq
   await agentMutates(root, agent, 2, 1, fileB, 'B-v2!\n') // turn 2: 改 b.txt
   const fileC = path.join(workspace, 'c.txt')
   await fs.writeFile(fileC, 'C-new\n') // 检查点之后新建的文件：preview 报告、restore 保留
@@ -180,13 +180,13 @@ async function mainCopyFlow() {
   assert.ok(child, 'fork 子会话存活')
   assert.equal(child.header.parentSession, session.id)
   assert.equal(child.header.cwd, workspace)
-  assert.equal(child.events.length, forkSeq1 + 3, '种子 = 边界前缀 + session/end-seed + 回退通知')
-  assert.equal(child.events.at(-1).type, 'user/message', '子会话收到回退通知')
-  assert.match(child.events.at(-1).data.content[0].text, /replayed from checkpoint/)
+  assert.equal(child.snapshotEvents().length, forkSeq1 + 3, '种子 = 边界前缀 + session/end-seed + 回退通知')
+  assert.equal(child.snapshotEvents().at(-1).type, 'user/message', '子会话收到回退通知')
+  assert.match(child.snapshotEvents().at(-1).data.content[0].text, /replayed from checkpoint/)
   for (let seq = 0; seq <= forkSeq1; seq += 1) {
-    assert.deepEqual(child.events[seq], session.events[seq], `child seed seq ${seq} 与源一致`)
+    assert.deepEqual(child.snapshotEvents()[seq], session.snapshotEvents()[seq], `child seed seq ${seq} 与源一致`)
   }
-  log('  fork ok: child', childId, 'seedLength', child.events.length - 2, 'parent', child.header.parentSession)
+  log('  fork ok: child', childId, 'seedLength', child.snapshotEvents().length - 2, 'parent', child.header.parentSession)
 
   await dispose()
   log('copy flow: PASS')
