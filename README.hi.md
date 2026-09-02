@@ -25,7 +25,7 @@
 
 | सतह | स्थिति |
 |---|---|
-| Harness | DeepSeek Harness `0.1.1-rc.2` (peers `>=0.1.0-rc.8 <0.2.0`) 0.1.2-alpha.5 (2026-09-02 को अनुकूलित): सत्र लिफ़ाफ़ा अपना ignorable फ़ील्ड केवल संग्रहीत-लॉग पठन संगतता के लिए रखता है - Session.append अभी भी इसे स्टैम्प नहीं कर सकता, इसलिए गेट व्यवहार अपरिवर्तित है। |
+| Harness | DeepSeek Harness `0.1.2-alpha.5` (peers `>=0.1.0-rc.8 <0.2.0`) (2026-09-02 को अनुकूलित): सत्र लिफ़ाफ़ा अपना ignorable फ़ील्ड केवल संग्रहीत-लॉग पठन संगतता के लिए रखता है - Session.append अभी भी इसे स्टैम्प नहीं कर सकता, इसलिए गेट व्यवहार अपरिवर्तित है। |
 | Node | `^22.19.0 \|\| >=24.0.0` |
 | प्लेटफ़ॉर्म | सभी (होस्ट कमांड + श्रोता; settings क्षमता के ज़रिए वैकल्पिक सेटिंग्स-पृष्ठ टाइमलाइन) |
 | मॉडल | कोई भी (कोई मॉडल कॉल नहीं — स्नैपशॉट और बहाली नियतात्मक हैं) |
@@ -263,7 +263,7 @@ capture ── fs/write-intent · fs/edit-intent · tools/pre-execute (prepend, 
 ## विकास
 
 ```sh
-npm install               # peer deps: @deepseek-ai/dsh-session@0.1.1-rc.2, schemastery, zod
+npm install               # peer deps: @deepseek-ai/dsh-session@0.1.2-alpha.5, schemastery, zod
 npm test                  # node --test test/**/*.test.mjs (प्रदाता सुइट सहित)
 npm run test:integration  # असेंबल्ड-हेडलेस सत्यापन (test/integration/)
 ```

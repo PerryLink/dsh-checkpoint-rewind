@@ -25,7 +25,7 @@
 
 | Superficie | Estado |
 |---|---|
-| Harness | DeepSeek Harness `0.1.1-rc.2` (peers `>=0.1.0-rc.8 <0.2.0`) 0.1.2-alpha.5 (adaptado el 2026-09-02): el sobre de sesión conserva su campo ignorable solo para compatibilidad de lectura de logs almacenados - Session.append aún no puede estamparlo, por lo que el comportamiento de la puerta no cambia. |
+| Harness | DeepSeek Harness `0.1.2-alpha.5` (peers `>=0.1.0-rc.8 <0.2.0`) (adaptado el 2026-09-02): el sobre de sesión conserva su campo ignorable solo para compatibilidad de lectura de logs almacenados - Session.append aún no puede estamparlo, por lo que el comportamiento de la puerta no cambia. |
 | Node | `^22.19.0 \|\| >=24.0.0` |
 | Plataformas | Todas (comandos + listeners de host; línea de tiempo de Ajustes opcional mediante la capacidad settings) |
 | Modelo | Cualquiera (sin llamadas al modelo — las instantáneas y restauraciones son deterministas) |
@@ -262,7 +262,7 @@ Una ejecución real de integración headless ensamblada (`npm run test:integrati
 ## Desarrollo
 
 ```sh
-npm install               # peer deps: @deepseek-ai/dsh-session@0.1.1-rc.2, schemastery, zod
+npm install               # peer deps: @deepseek-ai/dsh-session@0.1.2-alpha.5, schemastery, zod
 npm test                  # node --test test/**/*.test.mjs (incl. suites de proveedores)
 npm run test:integration  # verificación headless ensamblada (test/integration/)
 ```
