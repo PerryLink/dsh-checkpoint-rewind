@@ -434,8 +434,8 @@ describe('/rewind 命令', () => {
     const child = app.root.sessions.get(childId)
     assert.ok(child, '重放子会话在 store 中存活')
     assert.equal(child.header.parentSession, app.session.id)
-    assert.equal(child.events.length, 2, '空种子：session/end-seed + 回退通知')
-    assert.equal(child.events.at(-1).type, 'user/message', '子会话收到回退通知')
+    assert.equal(child.snapshotEvents().length, 2, '空种子：session/end-seed + 回退通知')
+    assert.equal(child.snapshotEvents().at(-1).type, 'user/message', '子会话收到回退通知')
     await app.dispose()
   })
 
