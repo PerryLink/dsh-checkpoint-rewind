@@ -150,7 +150,7 @@ export function probeIgnorableAppend() {
 
 /**
  * 插件配置（Schemastery，全部可 cordis.yml 覆盖；无硬编码 tunable）。
- * 同构的 zod schema 见 lib/settings-schema.mjs（settings 命名空间，设置页可改）。
+ * 同构的 settings schema 见 lib/settings-schema.mjs（settings 命名空间，设置页可改）。
  * @typedef {object} Config
  * @property {boolean} [enabled] 整体开关；false 时不注册任何东西。
  * @property {'auto'|'git'|'copy'} [provider] 快照 provider 解析模式。
@@ -1184,21 +1184,28 @@ export async function apply(ctx, config = {}) {
   }
 
   /**
-   * 会话回退：官方重放 —— 以检查点边界为界 seed 出全新子会话
-   * （sessions.create(id,{seed})）。原会话完整保留（非破坏，CC 差异化）。
+   * 会话回退：官方重放 —— 以检查点边界为界 seed 出全新子会话。0.1.2-alpha.5 起
+   * SessionStore 提供 fork(source, boundary)（边界 seq 含本事件，与 replaySeedOf
+   * 语义一致，另校验边界存在且不在未闭合 turn 内）；无边界记录（空 seed 全新
+   * 开始）与 rc 时代旧宿主走 create 路径（头部世代按宿主能力适配：alpha.5 用
+   * isSeeded + inheritedEventCount，旧宿主用 seedLength）。原会话完整保留
+   * （非破坏，CC 差异化）。
    * @param {import('@deepseek-ai/dsh-session').Session} source - 源会话。
    * @param {object} record - 目标检查点。
    * @returns {import('@deepseek-ai/dsh-session').Session} 子会话。
    */
   function replaySession(source, record) {
     const boundary = typeof record.sessionBoundary === 'number' ? record.sessionBoundary : undefined
+    const store = ctx.sessions
+    const supportsFork = typeof store.fork === 'function'
+    if (supportsFork && boundary !== undefined) return store.fork(source, boundary)
     const seed = replaySeedOf(sessionEvents(source), boundary)
     const meta = {
       ...(typeof source.header?.cwd === 'string' && source.header.cwd.length > 0 ? { cwd: source.header.cwd } : {}),
       parentSession: source.id,
-      seedLength: seed.length,
+      ...(supportsFork ? { isSeeded: true } : { seedLength: seed.length }),
     }
-    return ctx.sessions.create(undefined, { seed, meta })
+    return store.create(undefined, supportsFork ? { seed, meta, inheritedEventCount: seed.length } : { seed, meta })
   }
 
   /**
