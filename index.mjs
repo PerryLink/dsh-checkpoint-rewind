@@ -887,8 +887,15 @@ export async function apply(ctx, config = {}) {
 
   // --- checkpoint 模型工具（可选能力：tools 服务装配时注册；配置可关）。
   ctx.inject(['tools'], (toolsCtx) => {
+    let toolActive = false
     const update = () => {
-      if (liveConfig.checkpointTool === true) {
+      // Register only on a false→true transition: update() refires on every
+      // settings live-change, and every toolsCtx.effect(register) would collide
+      // with the live registration ("tool checkpoint is already registered").
+      const want = liveConfig.checkpointTool === true
+      if (want === toolActive) return
+      toolActive = want
+      if (want) {
         toolsCtx.effect(() => toolsCtx.tools.register(defineTool({
           name: CHECKPOINT_TOOL,
           description: 'Capture a manual unified checkpoint of the current session: workspace files (git snapshot), session event cursor, and plugin configuration, with an optional note. Use /rewind later to restore any of the three states. Checkpoints are additive and need no approval.',
