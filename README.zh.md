@@ -27,7 +27,7 @@
 
 | 方面 | 状态 |
 |---|---|
-| Harness | DeepSeek Harness `0.1.2-alpha.5`（peer 依赖范围 `>=0.1.0-rc.8 <0.2.0`）（2026-09-02 已适配）：会话信封保留 ignorable 字段但仅用于存量日志读取兼容——Session.append 仍无法盖章，门控行为不变。 |
+| Harness | DeepSeek Harness `0.1.2-rc.1`（peer 依赖范围 `>=0.1.0-rc.8 <0.2.0`）（2026-09-02 已适配）：会话信封保留 ignorable 字段但仅用于存量日志读取兼容——Session.append 仍无法盖章，门控行为不变。 |
 | Node | `^22.19.0 \|\| >=24.0.0` |
 | 平台 | 全部（宿主命令 + 监听器；通过 settings 能力提供可选设置页时间线） |
 | 模型 | 任意（不调用模型 —— 快照与恢复是确定性的） |
@@ -264,7 +264,7 @@ capture ── fs/write-intent · fs/edit-intent · tools/pre-execute (prepend, 
 ## 开发
 
 ```sh
-npm install               # peer 依赖：@deepseek-ai/dsh-session@0.1.2-alpha.5、schemastery、zod
+npm install               # peer 依赖：@deepseek-ai/dsh-session@0.1.2-rc.1、schemastery、zod
 npm test                  # node --test test/**/*.test.mjs（含 provider 套件）
 npm run test:integration  # 组装式 headless 验证（test/integration/）
 ```

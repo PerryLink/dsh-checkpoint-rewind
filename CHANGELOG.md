@@ -4,6 +4,12 @@ All notable changes to dsh-checkpoint-rewind are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project versions with [SemVer](https://semver.org/).
 
+## [0.6.5] - 2026-09-04
+
+### Changed
+
+- Align the devDependency pins to the published dsh `0.1.2-rc.1` line, bump the `dshWorkshop` compatibility list and the compat CI harness probes, and re-verify the adaptation claims; no behavior change.
+
 ## [0.6.4] - 2026-09-02
 
 ### Docs
