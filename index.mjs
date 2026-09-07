@@ -96,6 +96,8 @@ import { CheckpointPanelService } from './lib/panel.mjs'
 
 export const name = PLUGIN_NAME
 
+// Consumer — 只消费公开服务：sessions / commands（inject 硬依赖）；storageDomain /
+// userQuestions / approval / settings / tools / systemPrompt / sessionProjections 可选查找。
 /** 必需服务：缺失即加载失败（响亮）。storageDomain 是可选能力，见 apply 内的降级路径。 */
 export const inject = ['sessions', 'commands']
 
@@ -173,6 +175,8 @@ export function probeIgnorableAppend() {
  * @property {boolean} [promptSection] 注入一句角色陈述式短提示词段落（默认 true）。
  * @property {boolean} [checkpointTool] 注册 checkpoint 模型工具（默认 true）。
  */
+// Service Definition — 插件公共契约：下方 Schemastery Config schema 声明全部可配置面
+// （cordis.yml 与 settings 命名空间同构），即本插件对外公开的服务/配置契约。
 export const Config = Schema.object({
   enabled: Schema.boolean().default(DEFAULTS.ENABLED),
   provider: Schema.union(Object.values(PROVIDER_MODES)).default(DEFAULTS.PROVIDER),
@@ -330,6 +334,8 @@ export async function apply(ctx, config = {}) {
   })
 
   // --- provider seam：两个 provider 经 registry 注册（注册即 effect，卸载撤销）。
+  // Service Provider — provider seam：git/copy 两个快照 provider 经
+  // SnapshotProviderRegistry 注册（registry.register 返回 disposer，卸载撤销）。
   const registry = new SnapshotProviderRegistry()
   const unregGit = registry.register(makeGitProvider({ gitBin: () => liveConfig.gitBin }))
   let snapshotDirCache
