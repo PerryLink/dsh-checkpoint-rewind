@@ -4,6 +4,13 @@ All notable changes to dsh-checkpoint-rewind are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project versions with [SemVer](https://semver.org/).
 
+## [0.6.8] - 2026-09-08
+
+### Docs
+
+- Repair GBK mojibake in the package.json description: the em dash was corrupted to the U+9225 U+003F marker pair; the description is restored to the clean pre-corruption text; no behavior change.
+
+
 ## [0.6.7] - 2026-09-07
 
 ### Docs
