@@ -22,7 +22,7 @@ lib/providers/       provider seam：definition（契约）/ registry / git / co
 cordis.patch.yml     bundle 声明（insert checkpoint-rewind）
 package.json         npm 元数据；files 白名单 = 发布内容
 README.md            英文主介绍（GitHub 默认页；五语源文）
-README.{zh,es,pt,hi}.md   中/西/葡/印地语介绍（顶部互链，与英文同 commit 更新）
+README-{zh,es,pt,hi}.md   中/西/葡/印地语介绍（顶部互链，与英文同 commit 更新）
 ARCHITECTURE.md      三角色 seam 架构图与全部设计决策
 CHANGELOG.md / SECURITY.md   变更记录 + 安全政策（含安全面矩阵）
 .github/workflows/ci.yml     单元测试 + 组装式集成验证（Windows/Linux × Node 22/24）
