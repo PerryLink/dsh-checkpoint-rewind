@@ -26,7 +26,7 @@
 
 | Superfície | Status |
 |---|---|
-| Harness | DeepSeek Harness `dsh-v0.1.5-alpha.1` (tag do GitHub, verificado em 2026-09-09; pin npm `0.1.5-alpha.1`, peers `>=0.1.2-rc.1 <0.2.0 || >=0.1.5-alpha.1 <0.2.0`) (adaptado em 2026-09-09): o envelope de sessão mantém seu campo ignorable apenas para compatibilidade de leitura de logs armazenados - o Session.append ainda não consegue estampá-lo, então o comportamento da porta não muda. Verificado em 2026-09-09 contra o checkout master do dsh-v0.1.5-alpha.1 (cadeia completa de portas + smoke de instalação do perfil). |
+| Harness | DeepSeek Harness `dsh-v0.1.5-rc.1` (tag do GitHub, verificado em 2026-09-10; pin npm `0.1.5-rc.1`, peers `>=0.1.2-rc.1 <0.2.0 || >=0.1.5-alpha.1 <0.2.0`) (adaptado em 2026-09-10): o envelope de sessão mantém seu campo ignorable apenas para compatibilidade de leitura de logs armazenados - o Session.append ainda não consegue estampá-lo, então o comportamento da porta não muda. Verificado em 2026-09-10 contra o checkout master do dsh-v0.1.5-rc.1 (cadeia completa de portas + smoke de instalação do perfil). |
 | Node | `^22.19.0 \|\| >=24.0.0` |
 | Plataformas | Todas (comandos + listeners de host; linha do tempo de Configurações opcional via capacidade settings) |
 | Modelo | Qualquer (sem chamadas ao modelo — instantâneos e restaurações são determinísticos) |
