@@ -39,7 +39,7 @@ dev/                 ❌ 本地工程面：冒烟脚本、夹具、演示——�
 ## 命令
 
 ```sh
-npm install          # 安装 peer 依赖（@deepseek-ai/dsh-session@0.1.5-rc.1、schemastery、zod 等）
+npm install          # 安装 peer 依赖（@deepseek-ai/dsh-session@0.1.5-rc.2、schemastery、zod 等）
 npm test             # node --test 跑 test/**/*.test.mjs（含 test/providers/ 单测套件；集成验证单独跑）
 npm run test:integration   # 组装式 headless 集成验证（test/integration/，不进发布包）
 ```
