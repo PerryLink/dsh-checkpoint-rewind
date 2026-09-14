@@ -6,6 +6,12 @@ this project versions with [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- The copy provider now honors the workspace's `.gitignore` (root and nested files; deeper rules and `!` re-includes win), in addition to the static `excludeGlobs`. Intended-huge ignored trees — deck caches, build outputs — are pruned before the first `stat`, so they no longer make a whole-workspace snapshot take hours. Controlled by the new `respectGitignore` config (default `true`).
+- Walk budget guardrails: `maxSnapshotFiles` (default `100000`) and `snapshotTimeoutMs` (default `180000`). A workspace that exceeds either budget skips that snapshot with a loud warning (`SNAPSHOT_BUDGET_EXCEEDED`) instead of stalling the guarded tool call — a snapshot is a safety net and must never cost more than the operation it protects.
+- In-flight capture abort: cancelling a turn (`turn/end` with reason `cancelled`/`interrupted`) or disposing the agent aborts the session's in-flight walk (`SNAPSHOT_ABORTED`). Until now a runaway snapshot could not be cancelled at all.
+
 ## [0.6.18] - 2026-09-25
 
 ### Changed
