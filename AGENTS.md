@@ -14,6 +14,7 @@ lib/errors.mjs       结构化领域错误（code + details，零依赖）
 lib/workspace.mjs    工作区键规范化 + 快照目录解析（零依赖）
 lib/checkpoints.mjs  检查点纯函数：≤N 映射、清理计划、列表/预览渲染（零依赖）
 lib/glob.mjs         轻量 glob → 相对路径匹配器（copy provider 排除项用，零依赖）
+lib/ignore-files.mjs 工作区 .gitignore 读取与匹配（copy provider 用；唯一允许 `ignore` 依赖的 lib 模块）
 lib/gate.mjs         回退确认门 + 会话事件自适应门（零依赖）
 lib/lock.mjs         按键串行化互斥（零依赖）
 lib/domain.mjs       'checkpoints' 存储领域 spec（唯一允许 zod/DSH 包的 lib 模块）
@@ -71,7 +72,7 @@ npm run test:integration   # 组装式 headless 集成验证（test/integration/
 ## 质量约定
 
 - 文件以恰好一个换行结尾；空 `catch` 说明吞掉什么且 `try` 只包一条语句；不注释显而易见的事实。
-- `lib/` 不依赖 DSH 包；**例外** `lib/domain.mjs`（领域 spec 必须用宿主 `defineDomain`/`domainTable` 保持同一实例），`zod` 仅允许出现在 `lib/domain.mjs` 与 `lib/projection.mjs`（持久边界校验器）。
+- `lib/` 不依赖 DSH 包；**例外** `lib/domain.mjs`（领域 spec 必须用宿主 `defineDomain`/`domainTable` 保持同一实例），`zod` 仅允许出现在 `lib/domain.mjs` 与 `lib/projection.mjs`（持久边界校验器），`ignore`（gitignore 匹配标准库，零传递依赖）仅允许出现在 `lib/ignore-files.mjs`（手写 gitignore 解析器的取反/嵌套语义极易出错，故引依赖而非手搓）。
 - 测试描述行为而非背书正确性；fixtures 用合成数据，永不掺真实用户工作区；git provider 用 scripted runner 测试命令序列，真实 git 测试检测环境能力后运行/跳过（跳过要说明原因）。
 - 复用他人代码处标注 license 与出处（THIRD_PARTY_NOTICES.md + 文件头注释）。
 

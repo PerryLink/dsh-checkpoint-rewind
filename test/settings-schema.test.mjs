@@ -76,6 +76,8 @@ describe('validateCheckpointSettings（跨字段与边界语义校验）', () =>
       { maxSnapshots: 0 },
       { maxSnapshots: 1.5 },
       { maxSnapshotBytes: 100 },
+      { maxSnapshotFiles: 0 },
+      { snapshotTimeoutMs: 0 },
       { listLimit: 0 },
       { listLimit: 99999 },
       { gitBin: '' },

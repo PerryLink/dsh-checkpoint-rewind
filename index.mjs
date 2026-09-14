@@ -165,6 +165,10 @@ export function probeIgnorableAppend() {
  * @property {number} [listLimit] /rewind 无参列出的最近检查点数（默认 10）。
  * @property {'warn'|'require'|'off'} [preRewindCheckpoint] 回退前的保护检查点策略（默认 warn）。
  * @property {boolean} [verifyByHash] copy provider 内容哈希校验（默认 false）。
+ * @property {boolean} [respectGitignore] copy provider 读取工作区 .gitignore（默认 true；
+ *   巨型被忽略目录（缓存/产物）不进入快照遍历）。
+ * @property {number} [maxSnapshotFiles] 单次快照遍历的文件数预算（默认 100000；超限跳过快照并告警）。
+ * @property {number} [snapshotTimeoutMs] 单次快照遍历的墙钟预算毫秒（默认 180000；超限跳过快照并告警）。
  * @property {{enabled: boolean, intervalMinutes: number}} [autoCheckpoint]
  *   自动间隔快照：step/start 时检查；intervalMinutes=0 每步；enabled=false 关闭（默认开、每步）。
  * @property {'restore'|'reset-hard'} [workspaceRestore] 工作区回滚实现（默认 restore 安全覆盖；
@@ -191,6 +195,9 @@ export const Config = Schema.object({
   listLimit: Schema.number().default(DEFAULTS.LIST_LIMIT),
   preRewindCheckpoint: Schema.union(Object.values(PRE_REWIND_MODES)).default(DEFAULTS.PRE_REWIND_CHECKPOINT),
   verifyByHash: Schema.boolean().default(DEFAULTS.VERIFY_BY_HASH),
+  respectGitignore: Schema.boolean().default(DEFAULTS.RESPECT_GITIGNORE),
+  maxSnapshotFiles: Schema.number().default(DEFAULTS.MAX_SNAPSHOT_FILES),
+  snapshotTimeoutMs: Schema.number().default(DEFAULTS.SNAPSHOT_TIMEOUT_MS),
   autoCheckpoint: Schema.object({
     enabled: Schema.boolean().default(DEFAULTS.AUTO_CHECKPOINT_ENABLED),
     intervalMinutes: Schema.number().default(DEFAULTS.AUTO_CHECKPOINT_INTERVAL_MINUTES),
@@ -225,6 +232,9 @@ export function resolveConfig(config = {}) {
     listLimit: config.listLimit ?? DEFAULTS.LIST_LIMIT,
     preRewindCheckpoint: config.preRewindCheckpoint ?? DEFAULTS.PRE_REWIND_CHECKPOINT,
     verifyByHash: config.verifyByHash ?? DEFAULTS.VERIFY_BY_HASH,
+    respectGitignore: config.respectGitignore ?? DEFAULTS.RESPECT_GITIGNORE,
+    maxSnapshotFiles: config.maxSnapshotFiles ?? DEFAULTS.MAX_SNAPSHOT_FILES,
+    snapshotTimeoutMs: config.snapshotTimeoutMs ?? DEFAULTS.SNAPSHOT_TIMEOUT_MS,
     autoCheckpoint: {
       enabled: config.autoCheckpoint?.enabled ?? DEFAULTS.AUTO_CHECKPOINT_ENABLED,
       intervalMinutes: config.autoCheckpoint?.intervalMinutes ?? DEFAULTS.AUTO_CHECKPOINT_INTERVAL_MINUTES,
@@ -268,6 +278,15 @@ export function resolveConfig(config = {}) {
   }
   if (typeof resolved.verifyByHash !== 'boolean') {
     throw badConfig('verifyByHash must be a boolean')
+  }
+  if (typeof resolved.respectGitignore !== 'boolean') {
+    throw badConfig('respectGitignore must be a boolean')
+  }
+  if (!Number.isInteger(resolved.maxSnapshotFiles) || resolved.maxSnapshotFiles < LIMITS.MIN_MAX_SNAPSHOT_FILES) {
+    throw badConfig(`maxSnapshotFiles must be an integer ≥ ${LIMITS.MIN_MAX_SNAPSHOT_FILES}`)
+  }
+  if (!Number.isInteger(resolved.snapshotTimeoutMs) || resolved.snapshotTimeoutMs < LIMITS.MIN_SNAPSHOT_TIMEOUT_MS) {
+    throw badConfig(`snapshotTimeoutMs must be an integer ≥ ${LIMITS.MIN_SNAPSHOT_TIMEOUT_MS}`)
   }
   if (typeof resolved.autoCheckpoint.enabled !== 'boolean') {
     throw badConfig('autoCheckpoint.enabled must be a boolean')
@@ -350,6 +369,9 @@ export async function apply(ctx, config = {}) {
     snapshotDir: getSnapshotDir,
     excludeGlobs: () => liveConfig.excludeGlobs,
     verifyByHash: () => liveConfig.verifyByHash,
+    respectGitignore: () => liveConfig.respectGitignore,
+    maxSnapshotFiles: () => liveConfig.maxSnapshotFiles,
+    snapshotTimeoutMs: () => liveConfig.snapshotTimeoutMs,
   }))
   ctx.effect(() => () => {
     unregGit()
@@ -429,6 +451,29 @@ export async function apply(ctx, config = {}) {
     return state
   }
 
+  // --- 在飞捕获的中止注册表：会话回合取消/中断（turn/end cancelled|interrupted）
+  // 或宿主卸载（agent/disposed）时中止其快照遍历——快照遍历可能远比一次工具
+  // 调用贵（大工作区全量拷贝的事故），agent.cancel 必须能解脱在飞瀑布。
+  const captureAborts = new Map()
+  const abortCapturesFor = (sessionId, reason) => {
+    const controller = captureAborts.get(sessionId)
+    if (controller === undefined) return
+    captureAborts.delete(sessionId)
+    controller.abort(reason)
+  }
+  const registerCaptureAbort = (sessionId) => {
+    // 同会话串行捕获：同一时刻至多一个在飞控制器；后到的快照共享窗口去重。
+    const controller = new AbortController()
+    captureAborts.set(sessionId, controller)
+    return controller
+  }
+  const releaseCaptureAbort = (sessionId, controller) => {
+    if (captureAborts.get(sessionId) === controller) captureAborts.delete(sessionId)
+  }
+  ctx.on('agent/disposed', ({ agent }) => {
+    abortCapturesFor(agent?.session?.id, 'agent disposed')
+  })
+
   // --- 会话事件：turn/step 跟踪 + 自动间隔快照 + 边界补记 + turn 结束清理。
   ctx.on('session/event', (session, event) => {
     switch (event.type) {
@@ -455,6 +500,10 @@ export async function apply(ctx, config = {}) {
         const state = ensureState(session)
         state.turn = undefined
         state.step = undefined
+        const reasonKind = event.data?.reason?.kind
+        if (reasonKind === 'cancelled' || reasonKind === 'interrupted') {
+          abortCapturesFor(session.id, `turn ${reasonKind}`)
+        }
         if (liveConfig.pruneOnTurnEnd) pruneAll(session, PRUNE_REASONS.TURN_END)
         break
       }
@@ -562,18 +611,24 @@ export async function apply(ctx, config = {}) {
       const provider = await registry.resolve(liveConfig.provider, { cwd, key: workspaceKeyOf(cwd) })
       const previous = latestRecordFor(table, session.id, cwd)
       const previousRef = previous !== undefined && previous.provider === provider.name ? previous.ref : undefined
+      const abortController = registerCaptureAbort(session.id)
       let result
       try {
         result = await provider.snapshot(
           { cwd, key: workspaceKeyOf(cwd) },
-          { triggerTool: opts.triggerTool, previousRef },
+          { triggerTool: opts.triggerTool, previousRef, signal: abortController.signal },
         )
       } catch (error) {
+        // 中止与预算超限不重试：这是明确的快速失败语义（中止来源是用户/宿主，
+        // 超限说明工作区超出预算，重捕无基线也只会再次超限）。
+        if (error?.code === 'SNAPSHOT_ABORTED' || error?.code === 'SNAPSHOT_BUDGET_EXCEEDED') throw error
         // 保护检查点不能依赖上一检查点的存储完整性（去重基线不可读时整条
         // 捕获会失败）：退化为无基线重捕，保证回退仍可撤回。
         if (opts.retryWithoutBaseline !== true || previousRef === undefined) throw error
         logger.warn(`checkpoint dedup baseline unreadable (${messageOf(error)}), capturing without dedup`)
-        result = await provider.snapshot({ cwd, key: workspaceKeyOf(cwd) }, { triggerTool: opts.triggerTool })
+        result = await provider.snapshot({ cwd, key: workspaceKeyOf(cwd) }, { triggerTool: opts.triggerTool, signal: abortController.signal })
+      } finally {
+        releaseCaptureAbort(session.id, abortController)
       }
       if (result === null) {
         logger.debug(`checkpoint deduped: workspace unchanged (trigger ${opts.triggerTool})`)
@@ -611,6 +666,14 @@ export async function apply(ctx, config = {}) {
       await pruneAll(session)
       return { record }
     } catch (error) {
+      if (error?.code === 'SNAPSHOT_ABORTED') {
+        warn(`checkpoint capture aborted (trigger ${opts.triggerTool}): ${messageOf(error)}`)
+        return { failed: messageOf(error), aborted: true }
+      }
+      if (error?.code === 'SNAPSHOT_BUDGET_EXCEEDED') {
+        warn(`checkpoint skipped: snapshot budget exceeded (trigger ${opts.triggerTool}): ${messageOf(error)} — shrink the walk via .gitignore/excludeGlobs, or raise maxSnapshotFiles/snapshotTimeoutMs in the checkpoint-rewind settings`)
+        return { failed: messageOf(error), budgetExceeded: true }
+      }
       warn(`checkpoint capture failed (trigger ${opts.triggerTool}): ${messageOf(error)}`)
       return { failed: messageOf(error) }
     }

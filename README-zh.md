@@ -120,6 +120,8 @@ run "/rewind <id>" to restore files and fork the session from that checkpoint
 
 所有可调项都是 Schemastery `Config` 字段（可在 cordis.yml 中修改）。没有任何硬编码。provider 选项（`gitBin`、`snapshotDir`、`excludeGlobs`、`verifyByHash`）在使用时从实时配置读取，cordis.yml 的改动无需重启即生效。
 
+copy provider 遍历工作区时**尊重 `.gitignore`**（根与嵌套文件，深层规则与 `!` 取反胜出），并与 `excludeGlobs` 叠加——有意庞大的被忽略目录（卡组缓存、构建产物）成本归零。每次遍历同时受 `maxSnapshotFiles` / `snapshotTimeoutMs` 预算护栏约束：超限即跳过该次快照并响亮告警——被保护的工具调用必定继续；`agent.cancel`（或取消/中断的回合）会中止在飞遍历。
+
 | 键 | 默认值 | 含义 |
 |---|---|---|
 | `enabled` | `true` | 总开关；为 `false` 时完全移除命令、监听器与 provider |
@@ -135,6 +137,9 @@ run "/rewind <id>" to restore files and fork the session from that checkpoint
 | `listLimit` | `10` | 无参 `/rewind` 显示的检查点数 |
 | `preRewindCheckpoint` | `warn` | 恢复前的守护检查点：`warn` · `require` · `off` |
 | `verifyByHash` | `false` | copy provider 的内容哈希比对与恢复校验 |
+| `respectGitignore` | `true` | copy provider 尊重工作区 `.gitignore`（根+嵌套，深层规则与 `!` 取反胜出）——被忽略的缓存/产物子树不进入遍历 |
+| `maxSnapshotFiles` | `100000` | 单次快照遍历的文件数预算；超限跳过该次快照并响亮告警，不再卡住工具调用 |
+| `snapshotTimeoutMs` | `180000` | 单次快照遍历的墙钟预算（毫秒）；同样的跳过并告警语义 |
 | `autoCheckpoint.enabled` | `true` | `step/start` 上的自动间隔快照 |
 | `autoCheckpoint.intervalMinutes` | `0` | 间隔；`0` = 每步 |
 | `workspaceRestore` | `restore` | 工作区回滚：`restore`（安全覆盖）· `reset-hard`（CC 风格，需显式开启） |

@@ -1,4 +1,4 @@
-﻿<div align="center">
+<div align="center">
 
 # ⏪ dsh-checkpoint-rewind
 - **Canal 1024 store**: `npm i -g dsh1024` uma vez, depois `dsh1024 plugin --profile web add dsh-checkpoint-rewind` (conta para o ranking de instalações do [deepseek1024.com](https://deepseek1024.com)).
@@ -118,6 +118,8 @@ Enderece um checkpoint pelo prefixo de id único, pelo número do passo ou por `
 
 Todos os ajustes são campos Schemastery `Config` (alteráveis no cordis.yml). Nada é hardcoded. As opções de provedor (`gitBin`, `snapshotDir`, `excludeGlobs`, `verifyByHash`) são lidas da configuração viva no momento do uso, então mudanças no cordis.yml valem sem reiniciar.
 
+O provedor de cópia percorre o workspace **respeitando `.gitignore`** (arquivos raiz e aninhados, regras mais profundas e re-inclusões com `!` vencem) além de `excludeGlobs`, então diretórios ignorados intencionalmente grandes (caches de deck, saídas de build) não custam nada. Cada percurso também é delimitado pelos orçamentos `maxSnapshotFiles` / `snapshotTimeoutMs`: um workspace que os exceda pula esse snapshot com um aviso alto — a chamada de ferramenta protegida sempre prossegue, e `agent.cancel` (ou um turno cancelado/interrompido) aborta um percurso em andamento.
+
 | Chave | Padrão | Significado |
 |---|---|---|
 | `enabled` | `true` | Interruptor mestre; em `false`, remove comandos, listeners e provedores por completo |
@@ -133,6 +135,9 @@ Todos os ajustes são campos Schemastery `Config` (alteráveis no cordis.yml). N
 | `listLimit` | `10` | Checkpoints mostrados pelo `/rewind` sem argumentos |
 | `preRewindCheckpoint` | `warn` | Checkpoint de guarda antes de restaurar: `warn` · `require` · `off` |
 | `verifyByHash` | `false` | Comparação por hash de conteúdo e verificação de restauração do provedor copy |
+| `respectGitignore` | `true` | O provedor de cópia respeita o `.gitignore` do workspace (raiz + aninhados, regras mais profundas e re-inclusões com `!` vencem) — árvores de cache/artefatos ignoradas nunca são percorridas |
+| `maxSnapshotFiles` | `100000` | Orçamento de percurso por snapshot em arquivos; excedê-lo pula o snapshot com um aviso alto em vez de travar a chamada da ferramenta |
+| `snapshotTimeoutMs` | `180000` | Orçamento de tempo real (wall-clock) por snapshot em milissegundos; mesmas semânticas de pular com aviso |
 | `autoCheckpoint.enabled` | `true` | Instantâneos automáticos por intervalo em `step/start` |
 | `autoCheckpoint.intervalMinutes` | `0` | Intervalo; `0` = a cada passo |
 | `workspaceRestore` | `restore` | Reversão do workspace: `restore` (sobrescrita segura) · `reset-hard` (estilo CC, opt-in) |
