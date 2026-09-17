@@ -121,6 +121,8 @@ Address a checkpoint by its unique id prefix, by step number, or by `latest`:
 
 All tunables are Schemastery `Config` fields (changeable from cordis.yml). Nothing is hardcoded. Provider options (`gitBin`, `snapshotDir`, `excludeGlobs`, `verifyByHash`) are read from the live config at use time, so cordis.yml changes apply without a restart.
 
+The copy provider walks the workspace **honoring `.gitignore`** (root and nested files, deeper rules and `!` re-includes win) in addition to `excludeGlobs`, so intended-huge ignored directories (deck caches, build outputs) cost nothing. Every walk is also fenced by the `maxSnapshotFiles` / `snapshotTimeoutMs` budgets: a workspace that exceeds them skips that snapshot with a loud warning — the guarded tool call always proceeds, and `agent.cancel` (or a cancelled/interrupted turn) aborts an in-flight walk.
+
 | Key | Default | Meaning |
 |---|---|---|
 | `enabled` | `true` | Master switch; `false` removes the commands, listeners, and providers entirely |
@@ -136,6 +138,9 @@ All tunables are Schemastery `Config` fields (changeable from cordis.yml). Nothi
 | `listLimit` | `10` | Checkpoints shown by bare `/rewind` |
 | `preRewindCheckpoint` | `warn` | Guard checkpoint before restore: `warn` · `require` · `off` |
 | `verifyByHash` | `false` | Copy-provider content-hash comparison and restore verification |
+| `respectGitignore` | `true` | Copy provider honors the workspace's `.gitignore` (root + nested, deeper rules and `!` re-includes win) — ignored cache/artifact trees are never walked |
+| `maxSnapshotFiles` | `100000` | Per-snapshot walk budget in files; exceeding it skips the snapshot with a loud warning instead of stalling the tool call |
+| `snapshotTimeoutMs` | `180000` | Per-snapshot walk wall-clock budget in milliseconds; same skip-with-warning semantics |
 | `autoCheckpoint.enabled` | `true` | Automatic interval snapshots on `step/start` |
 | `autoCheckpoint.intervalMinutes` | `0` | Interval; `0` = every step |
 | `workspaceRestore` | `restore` | Workspace rollback: `restore` (safe overwrite) · `reset-hard` (CC-style, opt-in) |

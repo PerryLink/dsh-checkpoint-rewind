@@ -118,6 +118,8 @@ Dirígete a un checkpoint por su prefijo de id único, por número de paso o por
 
 Todas las opciones son campos Schemastery `Config` (modificables desde cordis.yml). Nada está hardcodeado. Las opciones de proveedor (`gitBin`, `snapshotDir`, `excludeGlobs`, `verifyByHash`) se leen de la configuración viva en el momento de uso, de modo que los cambios en cordis.yml se aplican sin reiniciar.
 
+El proveedor de copia recorre el espacio de trabajo **respetando `.gitignore`** (archivos raíz y anidados, reglas más profundas y reinclusiones con `!` ganan) además de `excludeGlobs`, por lo que los directorios ignorados intencionalmente enormes (cachés de mazos, salidas de compilación) no cuestan nada. Cada recorrido está además acotado por los presupuestos `maxSnapshotFiles` / `snapshotTimeoutMs`: un espacio de trabajo que los exceda omite esa instantánea con una advertencia contundente — la llamada a herramienta protegida siempre continúa, y `agent.cancel` (o un turno cancelado/interrumpido) aborta un recorrido en curso.
+
 | Clave | Por defecto | Significado |
 |---|---|---|
 | `enabled` | `true` | Interruptor maestro; en `false`, elimina comandos, listeners y proveedores por completo |
@@ -133,6 +135,9 @@ Todas las opciones son campos Schemastery `Config` (modificables desde cordis.ym
 | `listLimit` | `10` | Checkpoints mostrados por `/rewind` sin argumentos |
 | `preRewindCheckpoint` | `warn` | Checkpoint de guardia antes de restaurar: `warn` · `require` · `off` |
 | `verifyByHash` | `false` | Comparación por hash de contenido y verificación de restauración del proveedor copy |
+| `respectGitignore` | `true` | El proveedor de copia respeta el `.gitignore` del espacio de trabajo (raíz + anidados, reglas más profundas y reinclusiones con `!` ganan) — los árboles de caché/artefactos ignorados nunca se recorren |
+| `maxSnapshotFiles` | `100000` | Presupuesto de recorrido por instantánea en archivos; excederlo omite la instantánea con una advertencia contundente en lugar de bloquear la llamada a herramienta |
+| `snapshotTimeoutMs` | `180000` | Presupuesto de tiempo de reloj de recorrido por instantánea en milisegundos; misma semántica de omisión con advertencia |
 | `autoCheckpoint.enabled` | `true` | Instantáneas automáticas por intervalo en `step/start` |
 | `autoCheckpoint.intervalMinutes` | `0` | Intervalo; `0` = cada paso |
 | `workspaceRestore` | `restore` | Reversión del workspace: `restore` (sobrescritura segura) · `reset-hard` (estilo CC, opt-in) |

@@ -4,6 +4,19 @@ All notable changes to dsh-checkpoint-rewind are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project versions with [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- The copy provider now honors the workspace's `.gitignore` (root and nested files; deeper rules and `!` re-includes win), in addition to the static `excludeGlobs`. Intended-huge ignored trees — deck caches, build outputs — are pruned before the first `stat`, so they no longer make a whole-workspace snapshot take hours. Controlled by the new `respectGitignore` config (default `true`).
+- Walk budget guardrails: `maxSnapshotFiles` (default `100000`) and `snapshotTimeoutMs` (default `180000`). A workspace that exceeds either budget skips that snapshot with a loud warning (`SNAPSHOT_BUDGET_EXCEEDED`) instead of stalling the guarded tool call — a snapshot is a safety net and must never cost more than the operation it protects.
+- In-flight capture abort: cancelling a turn (`agent.cancel`, `turn/end` with reason `cancelled`/`interrupted`) or disposing the agent aborts the session's in-flight walk (`SNAPSHOT_ABORTED`). Until now a runaway snapshot could not be cancelled at all.
+
+### Fixed
+
+- Settings namespace schema ported from zod to Schemastery. Host `settings.register` (dsh `0.1.2-alpha.5` and later) invokes the schema as a function, and a zod instance is not callable — the plugin failed to load with `TypeError: schema is not a function`. Boundary validation moved into `validateCheckpointSettings`; the settings page now opens and accepts edits again.
+- Session replay on dsh `0.1.2-alpha.5+`: the `Session.events` getter was removed in favor of `snapshotEvents()`, and the header's `seedLength` field was split into `isSeeded` + `inheritedEventCount`. `replaySession` now uses `ctx.sessions.fork()` when the host provides it (same boundary semantics, plus open-turn validation) and otherwise falls back to generation-appropriate `create()` options — fork lineage is preserved instead of being silently dropped.
+
 ## [0.6.11] - 2026-09-12
 
 ### Changed

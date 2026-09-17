@@ -446,3 +446,126 @@ describe('copy provider', () => {
     assert.ok(manifest3.id, 'snapshot written to dynamic snapshot directory')
   })
 })
+
+// ── .gitignore 尊重（根/嵌套/取反/开关）+ 遍历预算护栏 + 中止 ────────────
+
+describe('copy provider: .gitignore 尊重', () => {
+  it('根 .gitignore 的目录规则剪掉整棵子树', async () => {
+    const cwd = await makeWorkspace({
+      '.gitignore': 'decks/\n',
+      'src/app.js': 'A',
+      'decks/001.ydk': 'D1',
+      'decks/sub/002.ydk': 'D2',
+    })
+    const { provider, snapshotDir } = await makeProvider()
+    const result = await provider.snapshot({ cwd, key: cwd }, { triggerTool: 'bash' })
+    assert.equal(result.files, 2, '只有 .gitignore 与 src/app.js 被捕获')
+    const manifest = JSON.parse(await fs.readFile(path.join(snapshotBaseDir(snapshotDir, cwd), result.ref, 'manifest.json'), 'utf8'))
+    assert.deepEqual(manifest.files.map((entry) => entry.rel).sort(), ['.gitignore', 'src/app.js'])
+  })
+
+  it('嵌套 .gitignore 只作用于其子树', async () => {
+    const cwd = await makeWorkspace({
+      '.gitignore': '',
+      'src/.gitignore': '*.log\n',
+      'src/app.js': 'A',
+      'src/debug.log': 'L',
+      'other/debug.log': 'L2',
+    })
+    const { provider, snapshotDir } = await makeProvider()
+    const result = await provider.snapshot({ cwd, key: cwd }, { triggerTool: 'bash' })
+    const manifest = JSON.parse(await fs.readFile(path.join(snapshotBaseDir(snapshotDir, cwd), result.ref, 'manifest.json'), 'utf8'))
+    assert.deepEqual(manifest.files.map((entry) => entry.rel).sort(), ['.gitignore', 'other/debug.log', 'src/.gitignore', 'src/app.js'])
+  })
+
+  it('! 取反规则重新纳入被排除的文件', async () => {
+    const cwd = await makeWorkspace({
+      '.gitignore': '*.log\n!keep.log\n',
+      'a.log': 'X',
+      'keep.log': 'Y',
+    })
+    const { provider, snapshotDir } = await makeProvider()
+    const result = await provider.snapshot({ cwd, key: cwd }, { triggerTool: 'bash' })
+    const manifest = JSON.parse(await fs.readFile(path.join(snapshotBaseDir(snapshotDir, cwd), result.ref, 'manifest.json'), 'utf8'))
+    assert.deepEqual(manifest.files.map((entry) => entry.rel).sort(), ['.gitignore', 'keep.log'])
+  })
+
+  it('respectGitignore: false 时 .gitignore 不生效', async () => {
+    const cwd = await makeWorkspace({
+      '.gitignore': 'decks/\n',
+      'decks/001.ydk': 'D1',
+    })
+    const snapshotDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-rewind-copy-snap-'))
+    const provider = makeCopyProvider({ snapshotDir, excludeGlobs: [], respectGitignore: false })
+    const result = await provider.snapshot({ cwd, key: cwd }, { triggerTool: 'bash' })
+    assert.equal(result.files, 2, '关闭尊重后 decks 与 .gitignore 都被捕获')
+  })
+
+  it('工作区没有 .gitignore 时行为不变（全部捕获）', async () => {
+    const cwd = await makeWorkspace({ 'a.txt': 'A', 'dir/b.txt': 'B' })
+    const { provider } = await makeProvider()
+    const result = await provider.snapshot({ cwd, key: cwd }, { triggerTool: 'bash' })
+    assert.equal(result.files, 2)
+  })
+})
+
+describe('copy provider: 遍历预算护栏', () => {
+  it('文件数超限 → SNAPSHOT_BUDGET_EXCEEDED(files)，不产出快照', async () => {
+    const files = {}
+    for (let index = 0; index < 5; index += 1) files[`f${index}.txt`] = 'x'
+    const cwd = await makeWorkspace(files)
+    const snapshotDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-rewind-copy-snap-'))
+    const provider = makeCopyProvider({ snapshotDir, excludeGlobs: [], maxSnapshotFiles: 2 })
+    await assert.rejects(
+      provider.snapshot({ cwd, key: cwd }, { triggerTool: 'bash' }),
+      (error) => error?.code === 'SNAPSHOT_BUDGET_EXCEEDED' && error.details?.kind === 'files',
+    )
+    const orphans = await fs.readdir(snapshotDir).catch(() => [])
+    const keyDir = orphans[0]
+    const completed = keyDir === undefined
+      ? []
+      : (await fs.readdir(path.join(snapshotDir, keyDir)).catch(() => [])).filter(name => !name.endsWith('.tmp'))
+    assert.deepEqual(completed, [], '预算中止不留下完成的快照目录')
+  })
+
+  it('墙钟超限 → SNAPSHOT_BUDGET_EXCEEDED(timeout)', async () => {
+    const files = {}
+    for (let index = 0; index < 50; index += 1) files[`f${String(index).padStart(3, '0')}.txt`] = 'x'.repeat(1024)
+    const cwd = await makeWorkspace(files)
+    const snapshotDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-rewind-copy-snap-'))
+    const provider = makeCopyProvider({ snapshotDir, excludeGlobs: [], snapshotTimeoutMs: 1 })
+    await assert.rejects(
+      provider.snapshot({ cwd, key: cwd }, { triggerTool: 'bash' }),
+      (error) => error?.code === 'SNAPSHOT_BUDGET_EXCEEDED' && error.details?.kind === 'timeout',
+    )
+  })
+
+  it('预算内正常完成（护栏不误伤）', async () => {
+    const cwd = await makeWorkspace({ 'a.txt': 'A', 'b.txt': 'B' })
+    const snapshotDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-rewind-copy-snap-'))
+    const provider = makeCopyProvider({
+      snapshotDir,
+      excludeGlobs: [],
+      maxSnapshotFiles: 100,
+      snapshotTimeoutMs: 60_000,
+      maxSnapshotBytes: 10 * 1024 * 1024,
+    })
+    const result = await provider.snapshot({ cwd, key: cwd }, { triggerTool: 'bash' })
+    assert.equal(result.files, 2)
+  })
+})
+
+describe('copy provider: 捕获中止（signal）', () => {
+  it('提前中止的 signal 让遍历立即以 SNAPSHOT_ABORTED 失败', async () => {
+    const files = {}
+    for (let index = 0; index < 100; index += 1) files[`f${String(index).padStart(3, '0')}.txt`] = 'x'.repeat(1024)
+    const cwd = await makeWorkspace(files)
+    const { provider } = await makeProvider()
+    const controller = new AbortController()
+    controller.abort('test abort')
+    await assert.rejects(
+      provider.snapshot({ cwd, key: cwd }, { triggerTool: 'bash', signal: controller.signal }),
+      (error) => error?.code === 'SNAPSHOT_ABORTED',
+    )
+  })
+})

@@ -87,7 +87,10 @@
       "network:none"
     ],
     "compatibility": {
-      "dshVersions": ["0.1.2-rc.1","0.1.5-rc.2"]
+      "dshVersions": [
+        "0.1.2-rc.1",
+        "0.1.5-rc.2"
+      ]
     },
     "capability": {
       "id": "checkpoint-rewind",
@@ -129,7 +132,8 @@
     }
   },
   "dependencies": {
-    "zod": "^4.4.3"
+    "zod": "^4.4.3",
+    "ignore": "^7.0.5"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "^4.0.2",
