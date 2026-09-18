@@ -25,8 +25,10 @@ import UserQuestionService from '@deepseek-ai/dsh-user-questions'
 import { createScope } from '@deepseek-ai/dsh-scope'
 import * as checkpointRewind from '../../index.mjs'
 
+/** @param {...any} parts */
 const log = (...parts) => console.log('[rewind-integration]', ...parts)
 
+/** @param {string} repo @param {string[]} args */
 async function runGit(repo, args) {
   return new Promise((resolve, reject) => {
     const child = spawn('git', args, { cwd: repo, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
@@ -46,11 +48,13 @@ async function gitAvailable() {
 
 /**
  * 组装完整上下文并挂载插件。
- * @param {object} opts - {cwd, snapshotDir, config, storageRoot}。
+ * @param {{cwd: string, snapshotDir: string, config?: object, storageRoot?: string}} opts - 组装选项。
  */
 async function mount(opts) {
   const root = new Context()
+  /** @type {Awaited<ReturnType<typeof root.plugin>>[]} */
   const fibers = []
+  /** @param {any} plugin @param {unknown} [config] */
   const mount = async (plugin, config) => {
     fibers.push(await root.plugin(plugin, config))
   }
@@ -66,7 +70,7 @@ async function mount(opts) {
   const session = root.sessions.create(SessionId('integration-session'), { meta: { cwd: opts.cwd } })
   const agent = { id: session.id, session }
   // 假 agents 注册表：真 user-questions 校验调用方是 live runtime root。
-  root.provide('agents', { get: (id) => (id === agent.id ? agent : undefined), roots: () => [agent] })
+  root.provide('agents', { get: (/** @type {string} */ id) => (id === agent.id ? agent : undefined), roots: () => [agent] })
   const state = { asks: 0 }
   // 假 agents 注册表：真 user-questions 校验调用方是 live runtime root。
   // alpha 线的 user-questions 是 agent 作用域 waterfall 服务（registerProvider
@@ -78,6 +82,7 @@ async function mount(opts) {
     return { answers: request.questions.map((question) => ({ id: question.id, selected: ['Restore'] })) }
   })
 
+  /** @type {Record<string, unknown>} */
   const config = {
     enabled: true,
     provider: 'copy',
@@ -93,7 +98,7 @@ async function mount(opts) {
     verifyByHash: false,
     ...opts.config,
   }
-  const plugin = { name: checkpointRewind.name, inject: checkpointRewind.inject, apply: (ctx) => checkpointRewind.apply(ctx, config) }
+  const plugin = { name: checkpointRewind.name, inject: checkpointRewind.inject, apply: (/** @type {import('@deepseek-ai/cordis').Context} */ ctx) => checkpointRewind.apply(ctx, /** @type {any} */ (config)) }
   await mount(plugin)
   const dispose = async () => {
     await scope.dispose()
@@ -103,6 +108,7 @@ async function mount(opts) {
 }
 
 /** 模拟一个"agent 修改文件"的轮次：开放步骤 → 变更意图 → 写文件 → 关闭。 */
+/** @param {any} root @param {{session: any}} agent @param {number} turn @param {number} step @param {string} file @param {string} content @param {string} [tool] */
 async function agentMutates(root, agent, turn, step, file, content, tool = 'bash') {
   if (agent.session.snapshotEvents().at(-1)?.type !== 'turn/start') agent.session.append('turn/start', { turn })
   agent.session.append('step/start', { turn, step })
@@ -112,13 +118,14 @@ async function agentMutates(root, agent, turn, step, file, content, tool = 'bash
   await fs.writeFile(file, content)
   agent.session.append('step/end', { turn, step })
   agent.session.append('turn/end', { turn, reason: { kind: 'completed' } })
-  return agent.session.snapshotEvents().at(-1).seq
+  return agent.session.snapshotEvents().at(-1)?.seq
 }
 
+/** @param {any} root @param {any} agent @param {string} line */
 async function executeCommand(root, agent, line) {
   const execution = await root.commands.execute(agent, line, [], new AbortController().signal)
   assert.ok(execution, `command ${line} executed`)
-  return execution.result
+  return /** @type {{kind: string, text: string}} */ (execution.result)
 }
 
 /** 主流程：copy provider（非 git 目录）。 */
@@ -134,7 +141,8 @@ async function mainCopyFlow() {
   log('copy flow: mounted; workspace', workspace)
 
   await agentMutates(root, agent, 1, 1, fileA, 'A-v2!\n') // turn 1: 改 a.txt（尺寸变化，去重不依赖 mtime）
-  const forkSeq1 = session.snapshotEvents().at(-1).seq
+  const forkSeq1 = session.snapshotEvents().at(-1)?.seq
+  if (typeof forkSeq1 !== 'number') throw new Error('turn/end seq missing')
   await agentMutates(root, agent, 2, 1, fileB, 'B-v2!\n') // turn 2: 改 b.txt
   const fileC = path.join(workspace, 'c.txt')
   await fs.writeFile(fileC, 'C-new\n') // 检查点之后新建的文件：preview 报告、restore 保留
@@ -176,13 +184,15 @@ async function mainCopyFlow() {
 
   const childId = /session: replayed as child session (session-[\w-]+)/.exec(rewind.text)?.[1]
   assert.ok(childId, '结果携带新 sessionId')
-  const child = root.sessions.get(childId)
+  const child = root.sessions.get(SessionId(childId))
   assert.ok(child, 'fork 子会话存活')
   assert.equal(child.header.parentSession, session.id)
   assert.equal(child.header.cwd, workspace)
   assert.equal(child.snapshotEvents().length, forkSeq1 + 3, '种子 = 边界前缀 + session/end-seed + 回退通知')
-  assert.equal(child.snapshotEvents().at(-1).type, 'user/message', '子会话收到回退通知')
-  assert.match(child.snapshotEvents().at(-1).data.content[0].text, /replayed from checkpoint/)
+  const lastEvent = child.snapshotEvents().at(-1)
+  assert.ok(lastEvent !== undefined, '回退通知已 append')
+  assert.equal(lastEvent.type, 'user/message', '子会话收到回退通知')
+  assert.match(/** @type {{content: Array<{text: string}>}} */ (lastEvent.data).content[0].text, /replayed from checkpoint/)
   for (let seq = 0; seq <= forkSeq1; seq += 1) {
     assert.deepEqual(child.snapshotEvents()[seq], session.snapshotEvents()[seq], `child seed seq ${seq} 与源一致`)
   }

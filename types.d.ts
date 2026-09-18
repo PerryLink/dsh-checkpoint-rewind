@@ -32,6 +32,20 @@ export interface CheckpointRecord {
   stepEndSeq?: number
   /** 会话重放边界：游标之前最近一条 turn/end 的 seq（首轮检查点缺失）。 */
   sessionBoundary?: number
+  /** doctor pass 标记：底层快照对象（如 gc 后的提交/树对象）已消亡、无法恢复。 */
+  unrestorable?: boolean
+  unrestorableReason?: string
+}
+
+declare module '@deepseek-ai/cordis' {
+  interface Events {
+    /**
+     * fs 写入/编辑意图（宿主审批缝；本插件为旁路观察者——监听必须 next()
+     * 直通，决策槽仍归策略插件）。返回值为决策槽（策略插件决定形状）。
+     */
+    'fs/write-intent'(target: { path?: string, key?: string }, actor: object | null, next: () => any): any
+    'fs/edit-intent'(target: { path?: string, key?: string }, actor: object | null, next: () => any): any
+  }
 }
 
 declare module '@deepseek-ai/dsh-session' {
@@ -77,6 +91,29 @@ declare module '@deepseek-ai/dsh-session' {
   }
 }
 
+/**
+ * 一条检查点的客户端 wire 记录（投影单元 view 输出；SessionProjectionMap
+ * 与 SessionProjectionStateMap 共用同一形状——后者按 id 索引）。
+ */
+export interface CheckpointWireRecord {
+  id: string
+  turn: number
+  step: number
+  time: number
+  provider: 'git' | 'copy'
+  kind: 'manual' | 'auto' | 'guard' | 'mutation'
+  triggerTool: string
+  files: number
+  bytes: number
+  tree?: string | null
+  note?: string
+  seq: number
+  stepEndSeq?: number
+  sessionBoundary?: number
+  rewindOutcome?: 'denied' | 'failed' | 'partial' | 'restored'
+  preCheckpointId?: string
+}
+
 declare module '@deepseek-ai/dsh-session-projection' {
   interface SessionProjectionMap {
     /**
@@ -84,24 +121,11 @@ declare module '@deepseek-ai/dsh-session-projection' {
      * 折叠 checkpoint/snapshot|bound|prune|rewind 事件得到；alpha.3 宿主
      * 未收录该词汇时恒为空列表（见 README「会话事件」）。
      */
-    checkpoints: Array<{
-      id: string
-      turn: number
-      step: number
-      time: number
-      provider: 'git' | 'copy'
-      kind: 'manual' | 'auto' | 'guard' | 'mutation'
-      triggerTool: string
-      files: number
-      bytes: number
-      tree?: string | null
-      note?: string
-      seq: number
-      stepEndSeq?: number
-      sessionBoundary?: number
-      rewindOutcome?: 'denied' | 'failed' | 'partial' | 'restored'
-      preCheckpointId?: string
-    }>
+    checkpoints: Array<CheckpointWireRecord>
+  }
+  interface SessionProjectionStateMap {
+    /** 检查点折叠状态：id → wire 记录（持久缓存前置条件 = 普通 JSON）。 */
+    checkpoints: Record<string, CheckpointWireRecord>
   }
 }
 

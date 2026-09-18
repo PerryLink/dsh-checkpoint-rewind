@@ -6,6 +6,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { mountPlugin, openStep, closeStep, settle } from './helpers/ctx-harness.mjs'
 
+/** @param {any} app @param {string} line */
 function command(app, line) {
   return app.root.commands.execute(app.agent, line, [], new AbortController().signal)
 }

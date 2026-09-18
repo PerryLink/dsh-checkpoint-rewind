@@ -29,7 +29,7 @@
 
 | Surface | Status |
 |---|---|
-| Harness | DeepSeek Harness `dsh-v0.1.5-rc.2` (GitHub tag, verified 2026-09-11; npm pin `0.1.5-rc.2`, peers `>=0.1.2-rc.1 <0.2.0 || >=0.1.5-alpha.1 <0.2.0`) (adapted 2026-09-10): the session envelope keeps its ignorable field for stored-log read compatibility only - Session.append still cannot stamp it, so audit-gate behavior is unchanged. Verified 2026-09-11 against the dsh-v0.1.5-rc.2 master checkout (full gate chain + profile install smoke). |
+| Harness | DeepSeek Harness `dsh-v0.1.6-alpha.2` (GitHub tag, verified 2026-09-18; npm pin `0.1.6-alpha.2`, peers `>=0.1.2-rc.1 <0.2.0 || >=0.1.5-alpha.1 <0.2.0 || >=0.1.6-0 <0.2.0`) (adapted 2026-09-18): the settings namespace now registers a callable Schemastery schema (the alpha.2 host invokes schemas as functions, so the previous zod instance crashed the Settings page); session replay goes through the official `SessionStore.fork` when the checkpoint carries a turn boundary. Verified 2026-09-18 against the `dsh-v0.1.6-alpha.2` checkout (typecheck against the alpha.2 type surface + full unit suite + assembled-headless integration). |
 | Node | `^22.19.0 \|\| >=24.0.0` |
 | Platforms | All (host commands + listeners; optional Settings page timeline via the settings capability) |
 | Model | Any (no model calls — snapshots and restores are deterministic) |
@@ -42,7 +42,7 @@
 2. **Four capture triggers** — before every mutating tool (`fs/write-intent`, `fs/edit-intent`, `tools/pre-execute`), on automatic interval (`autoCheckpoint`, default every step), manually (`/checkpoint` and the `checkpoint` tool), and as a guard before every rewind.
 3. **git-first provider** — `git stash create` / `commit-tree` produce unreferenced snapshot objects that never touch your worktree, index, or history; restore is worktree-only and path-explicit. Non-git directories (and unborn-HEAD repos) degrade to an incremental `copy` provider with hardlink reuse.
 4. **One-shot rollback** — `/rewind workspace|session|config|all <target>` restores the selected states; `preview` is a read-only impact report, `diff <a> <b>` compares two checkpoints, `clear` deletes them (this session; `clear --all` spans all sessions and workspaces).
-5. **Seed-replay session rollback** — session rollback replays events up to the checkpoint boundary through the official `sessions.create` seed API into a new child session; the original session keeps its full history.
+5. **Fork-based session rollback** — session rollback replays events up to the checkpoint boundary through the official `SessionStore.fork` primitive into a new child session (falling back to the seeded `sessions.create` path when the host has no fork or the checkpoint has no boundary); the original session keeps its full history.
 6. **Settings page timeline** — the `Plugins → Checkpoints` tab renders the session's checkpoints with pairwise line-level diffs.
 
 ## Why another rewind plugin?
@@ -194,7 +194,7 @@ capture ── fs/write-intent · fs/edit-intent · tools/pre-execute (prepend, 
 /rewind <target> ── confirm (userQuestions / approval, fail-closed) ──▶ guard checkpoint
              ├─ workspace: provider.restore(ref)  (restore | reset-hard)
              ├─ config:   settings namespace write-back (persisted)
-             └─ session:  sessions.create(seed replay) → new child session (original untouched)
+             └─ session:  SessionStore.fork(source, boundary) → new child session (original untouched)
 ```
 
 Full decision record, event vocabulary, and the provider seam contract: [ARCHITECTURE.md](ARCHITECTURE.md).
@@ -247,7 +247,7 @@ A real assembled-headless integration run (`npm run test:integration`) drives th
 
 - On rc.2, `checkpoint/*` session events are suppressed by the adaptive gate; the audit chain rides `command/run` + `command/done` plus the storage domain until a host ships the vocabulary or the `ignorable` envelope.
 - `confirmVia: approval` needs an open turn, and commands run between turns — mount userQuestions (or set `confirmVia: userQuestions`) on rc.2.
-- Session rollback creates a **new child session** seeded from the checkpoint boundary; it never rewrites or truncates the original session.
+- Session rollback **forks a new child session** at the checkpoint boundary; it never rewrites or truncates the original session.
 - `workspaceRestore: 'reset-hard'` moves the branch head to the snapshot commit; it is off by default.
 - A checkpoint captured before any closed turn has no replay boundary — session rollback then creates a fresh child session with empty context.
 

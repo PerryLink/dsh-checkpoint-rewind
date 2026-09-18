@@ -29,7 +29,7 @@
 
 | 方面 | 状态 |
 |---|---|
-| Harness | DeepSeek Harness `dsh-v0.1.5-rc.2`（GitHub tag，2026-09-11 已核验；npm 钉号 `0.1.5-rc.2`，peer 依赖范围 `>=0.1.2-rc.1 <0.2.0 || >=0.1.5-alpha.1 <0.2.0`）（2026-09-10 已适配）：会话信封保留 ignorable 字段但仅用于存量日志读取兼容——Session.append 仍无法盖章，门控行为不变。2026-09-11 已针对 dsh-v0.1.5-rc.2 master 检出版核验（完整门控链 + profile 安装冒烟）。 |
+| Harness | DeepSeek Harness `dsh-v0.1.6-alpha.2`（GitHub tag，2026-09-18 已核验；npm 钉号 `0.1.6-alpha.2`，peer 依赖范围 `>=0.1.2-rc.1 <0.2.0 || >=0.1.5-alpha.1 <0.2.0 || >=0.1.6-0 <0.2.0`）（2026-09-18 已适配）：settings 命名空间现注册可调用的 Schemastery schema（alpha.2 宿主把 schema 当函数调用，此前的 zod 实例会让设置页崩溃）；检查点携带回合边界时会话重放改走官方 `SessionStore.fork`。2026-09-18 已针对 `dsh-v0.1.6-alpha.2` 检出版核验（alpha.2 类型面 typecheck + 全量单测 + 组装式 headless 集成）。 |
 | Node | `^22.19.0 \|\| >=24.0.0` |
 | 平台 | 全部（宿主命令 + 监听器；通过 settings 能力提供可选设置页时间线） |
 | 模型 | 任意（不调用模型 —— 快照与恢复是确定性的） |
@@ -42,7 +42,7 @@
 2. **四种捕获触发** —— 在每次变更工具执行前（`fs/write-intent`、`fs/edit-intent`、`tools/pre-execute`）、自动间隔（`autoCheckpoint`，默认每步）、手动（`/checkpoint` 与 `checkpoint` 工具）、以及每次回退前的守护检查点。
 3. **git 优先的 provider** —— `git stash create` / `commit-tree` 生成未引用快照对象，绝不触碰工作树、索引或历史；恢复仅限工作树且路径显式。非 git 目录（以及尚无 HEAD 的仓库）降级为带硬链接复用的增量 `copy` provider。
 4. **一键回滚** —— `/rewind workspace|session|config|all <target>` 恢复所选状态；`preview` 是只读影响报告，`diff <a> <b>` 比较两个检查点，`clear` 删除它们（本会话；`clear --all` 覆盖所有会话与工作区）。
-5. **种子重放式会话回退** —— 会话回退通过官方 `sessions.create` 种子 API 将事件重放到检查点边界，生成新的子会话；原会话保留其完整历史。
+5. **fork 化会话回退** —— 会话回退通过官方 `SessionStore.fork` 原语把事件重放到检查点边界，生成新的子会话（宿主无 fork 或检查点无边界时回落到 `sessions.create` 种子路径）；原会话保留其完整历史。
 6. **设置页时间线** —— `Plugins → Checkpoints` 标签页渲染会话的检查点，并附带两两之间的逐行 diff。
 
 ## 为什么还需要另一个 rewind 插件？
@@ -193,7 +193,7 @@ capture ── fs/write-intent · fs/edit-intent · tools/pre-execute (prepend, 
 /rewind <target> ── confirm (userQuestions / approval, fail-closed) ──▶ guard checkpoint
              ├─ workspace: provider.restore(ref)  (restore | reset-hard)
              ├─ config:   settings namespace write-back (persisted)
-             └─ session:  sessions.create(seed replay) → new child session (original untouched)
+             └─ session:  SessionStore.fork(source, boundary) → new child session (original untouched)
 ```
 
 完整决策记录、事件词汇表与 provider 接缝契约：[ARCHITECTURE.md](ARCHITECTURE.md)。
@@ -245,7 +245,7 @@ capture ── fs/write-intent · fs/edit-intent · tools/pre-execute (prepend, 
 
 - 在 rc.2 上，`checkpoint/*` 会话事件被自适应门抑制；在宿主随附该词汇表或 `ignorable` 信封之前，审计链由 `command/run` + `command/done` 加存储领域承担。
 - `confirmVia: approval` 需要开放的轮次，而命令在轮次之间运行——在 rc.2 上请挂载 userQuestions（或设 `confirmVia: userQuestions`）。
-- 会话回退会从检查点边界创建一个**新的子会话**；它绝不改写或截断原会话。
+- 会话回退会在检查点边界 **fork 出一个新的子会话**；它绝不改写或截断原会话。
 - `workspaceRestore: 'reset-hard'` 会把分支头移动到快照提交；默认关闭。
 - 在任何已关闭轮次之前捕获的检查点没有重放边界——此时会话回退会创建一个上下文为空的崭新子会话。
 

@@ -28,7 +28,13 @@ jobs:
         run: npm run test:integration
 
       - name: Publish to npm
-        run: npm publish --provenance
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if npm view "dsh-checkpoint-rewind@${version}" version >/dev/null 2>&1; then
+            echo "dsh-checkpoint-rewind@${version} is already published; skipping npm publish"
+            exit 0
+          fi
+          npm publish --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 

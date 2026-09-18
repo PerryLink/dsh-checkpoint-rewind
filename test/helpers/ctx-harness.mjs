@@ -21,22 +21,28 @@ import { checkpointsDomainSpec } from '../../lib/domain.mjs'
 /**
  * 构造 mock 存储领域 facility（'checkpoints' 单表内存实现）。
  * 返回的 `records` 是权威记录 Map（测试直接断言）。
- * @param {object} [opts] - {mediumVersion}。
- * @returns {{facility: object, records: Map<string, object>, opened: object[], specVersions: number[]}}
+ * @param {{mediumVersion?: number}} [opts] - 介质版本注入。
+ * @returns {{facility: {open: (spec: {name: string, version: number}) => Promise<object>}, records: Map<string, object>, opened: object[], specVersions: number[]}}
  */
-export function makeDomainFacility({ mediumVersion } = {}) {
+export function makeDomainFacility(opts = {}) {
+  const { mediumVersion } = opts
+  /** @type {Map<string, Map<string, object>>} */
   const store = new Map()
+  /** @type {Map<string, object>} */
   const records = new Map()
   store.set(checkpointsDomainSpec.name, records)
+  /** @type {object[]} */
   const opened = []
+  /** @type {number[]} */
   const specVersions = []
   // 已存在介质的版本；undefined = 新介质（首个 spec 创建并盖章）。
   let sealedVersion = mediumVersion
+  /** @param {Map<string, object>} map */
   const makeTable = (map) => ({
-    get: (key) => map.get(key),
-    put: async (key, value) => { map.set(key, value) },
-    delete: async (key) => map.delete(key),
-    update: async (key, fn) => {
+    get: (/** @type {string} */ key) => map.get(key),
+    put: async (/** @type {string} */ key, /** @type {object} */ value) => { map.set(key, value) },
+    delete: async (/** @type {string} */ key) => map.delete(key),
+    update: async (/** @type {string} */ key, /** @type {(current: object) => object} */ fn) => {
       const current = map.get(key)
       if (current === undefined) throw new Error('missing-key')
       map.set(key, fn(current))
@@ -46,6 +52,7 @@ export function makeDomainFacility({ mediumVersion } = {}) {
     size: () => map.size,
   })
   const facility = {
+    /** @param {{name: string, version: number}} spec */
     async open(spec) {
       if (spec.name !== checkpointsDomainSpec.name) throw new Error(`unexpected domain ${spec.name}`)
       if (sealedVersion !== undefined && spec.version !== sealedVersion) {
@@ -59,7 +66,7 @@ export function makeDomainFacility({ mediumVersion } = {}) {
       store.set(spec.name, map)
       const domain = {
         name: spec.name,
-        table: (name) => makeTable(map),
+        table: (/** @type {string} */ name) => makeTable(map),
         close: async () => {},
       }
       opened.push(domain)
@@ -72,12 +79,14 @@ export function makeDomainFacility({ mediumVersion } = {}) {
 
 /**
  * 组装完整测试上下文。
- * @param {object} [opts] - {config, userQuestions, approval, cwd, sessionId, mediumVersion, seedRecords}。
- * @returns {Promise<{root: Context, dispose: () => Promise<void>, records: Map, opened: object[], specVersions: number[], agent: object, session: object, makeSession: (cwd?: string) => object}>}
+ * @param {{config?: object, userQuestions?: unknown, approval?: unknown, tools?: unknown, systemPrompt?: unknown, storageDomain?: boolean | 'late', cwd?: string, sessionId?: string, mediumVersion?: number, seedRecords?: Record<string, object>}} [opts] - 组装选项。
+ * @returns {Promise<{root: Context, dispose: () => Promise<void>, records: Map<string, object>, opened: object[], specVersions: number[], agent: any, session: import('@deepseek-ai/dsh-session').Session, makeSession: (cwd?: string) => {session: any, agent: any}}>}
  */
 export async function mountPlugin(opts = {}) {
   const root = new Context()
+  /** @type {Awaited<ReturnType<typeof root.plugin>>[]} */
   const fibers = []
+  /** @param {any} plugin @param {unknown} [config] */
   const mount = async (plugin, config) => {
     fibers.push(await root.plugin(plugin, config))
   }
@@ -90,11 +99,11 @@ export async function mountPlugin(opts = {}) {
   // 'late' 模拟挂载时序竞态：插件 apply 完成后再提供服务（dsh-storage-domain 的
   // apply 异步，rewind 行不 inject 时可能抢先完成——注册表必须经惰性 getter
   // 在首次使用时解析到服务，见 test/storage-lazy.test.mjs）。
-  if (opts.storageDomain !== false && opts.storageDomain !== 'late') root.provide('storageDomain', facility)
-  if (opts.userQuestions !== undefined) root.provide('userQuestions', opts.userQuestions)
-  if (opts.approval !== undefined) root.provide('approval', opts.approval)
-  if (opts.tools !== undefined) root.provide('tools', opts.tools)
-  if (opts.systemPrompt !== undefined) root.provide('systemPrompt', opts.systemPrompt)
+  if (opts.storageDomain !== false && opts.storageDomain !== 'late') root.provide(/** @type {any} */ ('storageDomain'), facility)
+  if (opts.userQuestions !== undefined) root.provide(/** @type {any} */ ('userQuestions'), opts.userQuestions)
+  if (opts.approval !== undefined) root.provide(/** @type {any} */ ('approval'), opts.approval)
+  if (opts.tools !== undefined) root.provide(/** @type {any} */ ('tools'), opts.tools)
+  if (opts.systemPrompt !== undefined) root.provide(/** @type {any} */ ('systemPrompt'), opts.systemPrompt)
   await mount(SessionStore)
   await mount(CommandRuntime)
   const plugin = await import('../../index.mjs')
@@ -107,10 +116,10 @@ export async function mountPlugin(opts = {}) {
   await mount(Object.assign({}, plugin, {
     // Config 走 cordis 的 config 注入：plugin 函数形式在 plugin() 下用第 0 号 config。
     // 直接用默认导出的 apply 手动挂载等价于 config 全默认；此处传入自定义 config。
-    apply: (ctx) => plugin.apply(ctx, config),
+    apply: (/** @type {import('@deepseek-ai/cordis').Context} */ ctx) => plugin.apply(ctx, /** @type {any} */ (config)),
   }))
   // 'late'：插件 apply 完成后才提供 storageDomain——竞态窗口已过，首次使用必须仍能解析。
-  if (opts.storageDomain === 'late') root.provide('storageDomain', facility)
+  if (opts.storageDomain === 'late') root.provide(/** @type {any} */ ('storageDomain'), facility)
 
   // 合成绝对路径（跨平台）：session 头校验要求绝对路径，Windows 风格 'C:/…'
   // 在 Linux 上只是相对路径。目录无需真实存在——快照 walk 读不到即得空快照。
@@ -147,33 +156,38 @@ export async function settle() {
   await new Promise((resolve) => setTimeout(resolve, 0))
 }
 
+/** 会话测试替身（真实 Session 的公开面足够 openStep/closeStep 使用）。 */
+/** @typedef {{snapshotEvents: () => readonly {type: string}[], append: (type: string, data: object) => {seq: number}}} SessionFacade */
+
 /**
  * 向会话追加一个完整步骤骨架（turn/start、step/start；不含消息内容）。
- * @param {object} session - 真实 Session。
+ * @param {unknown} session - 真实 Session。
  * @param {number} turn - turn 号。
  * @param {number} step - step 号。
  */
 export function openStep(session, turn, step) {
-  const events = session.snapshotEvents()
-  if (events.length === 0 || events.at(-1).type !== 'turn/start') {
-    session.append('turn/start', { turn })
+  const target = /** @type {SessionFacade} */ (session)
+  const events = target.snapshotEvents()
+  if (events.length === 0 || events.at(-1)?.type !== 'turn/start') {
+    target.append('turn/start', { turn })
   }
-  session.append('step/start', { turn, step })
+  target.append('step/start', { turn, step })
 }
 
 /**
  * 关闭当前步骤/轮次。
- * @param {object} session - 真实 Session。
+ * @param {unknown} session - 真实 Session。
  * @param {number} turn - turn 号。
  * @param {number} step - step 号。
  * @param {boolean} [endTurn] - 同时关闭轮次。
  * @returns {number} 最后一个事件的 seq。
  */
 export function closeStep(session, turn, step, endTurn = false) {
-  const stepEnd = session.append('step/end', { turn, step })
+  const target = /** @type {SessionFacade} */ (session)
+  const stepEnd = target.append('step/end', { turn, step })
   let seq = stepEnd.seq
   if (endTurn) {
-    const turnEnd = session.append('turn/end', { turn, reason: { kind: 'completed' } })
+    const turnEnd = target.append('turn/end', { turn, reason: { kind: 'completed' } })
     seq = turnEnd.seq
   }
   return seq
@@ -188,7 +202,7 @@ export function closeStep(session, turn, step, endTurn = false) {
  */
 export function dispatchWriteIntent(root, agent, toolName = 'write') {
   const exec = { agent, name: toolName, callId: `call-${Math.random().toString(36).slice(2)}`, signal: new AbortController().signal, arguments: {} }
-  return root.waterfall('fs/write-intent', { key: 'target', path: 'x' }, exec, () => undefined)
+  return /** @type {Promise<unknown>} */ (root.waterfall('fs/write-intent', /** @type {any} */ ({ key: 'target', path: 'x' }), exec, () => undefined))
 }
 
 /**
@@ -200,5 +214,5 @@ export function dispatchWriteIntent(root, agent, toolName = 'write') {
  */
 export function dispatchPreExecute(root, agent, toolName) {
   const exec = { agent, name: toolName, callId: `call-${Math.random().toString(36).slice(2)}`, signal: new AbortController().signal, arguments: {} }
-  return root.waterfall('tools/pre-execute', exec, () => 'allow')
+  return /** @type {Promise<unknown>} */ (root.waterfall('tools/pre-execute', /** @type {any} */ (exec), () => 'allow'))
 }

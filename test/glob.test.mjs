@@ -17,7 +17,7 @@ describe('makeGlobMatcher（copy provider 排除 glob）', () => {
     assert.equal(excluded('a.txt'), false)
   })
 
-  it('* 与 ?：单段内通配，不跨 '/'', () => {
+  it('* 与 ?：单段内通配，不跨 /', () => {
     const excluded = makeGlobMatcher(['*.log'])
     assert.equal(excluded('a.log'), true)
     assert.equal(excluded('dir/a.log'), true)

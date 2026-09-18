@@ -8,6 +8,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { makeCopyProvider, snapshotBaseDir } from '../../lib/providers/copy.mjs'
 
+/** @param {Record<string, string>} files */
 async function makeWorkspace(files) {
   const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-rewind-copy-ws-'))
   for (const [rel, content] of Object.entries(files)) {
@@ -18,6 +19,7 @@ async function makeWorkspace(files) {
   return cwd
 }
 
+/** @param {{excludeGlobs?: string[], verifyByHash?: boolean}} [opts] */
 async function makeProvider(opts = {}) {
   const snapshotDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-rewind-copy-snap-'))
   const provider = makeCopyProvider({
@@ -29,6 +31,7 @@ async function makeProvider(opts = {}) {
 }
 
 /** symlink 能力检测（Windows 无开发者模式/特权时 EPERM，跳过并说明原因）。 */
+/** @param {{skip: (reason: string) => void}} t */
 async function requireSymlink(t) {
   const probeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-rewind-linkprobe-'))
   const probeTarget = path.join(probeDir, 'target.txt')
@@ -38,11 +41,18 @@ async function requireSymlink(t) {
     await fs.symlink(probeTarget, probeLink)
     return true
   } catch (error) {
-    t.skip(`symlink creation unavailable on this platform/user (${error.code ?? error.message})`)
+    const details = /** @type {{code?: string, message?: string}} */ (error)
+    t.skip(`symlink creation unavailable on this platform/user (${details.code ?? details.message})`)
     return false
   } finally {
     await fs.rm(probeDir, { recursive: true, force: true })
   }
+}
+
+/** 快照结果非空断言（snapshot 返回 null = 去重，测试路径要求真捕获）。 */
+/** @template T @param {T | null} value @returns {asserts value is T} */
+function assertSnapshot(value) {
+  assert.ok(value !== null, 'snapshot expected but was deduped (null)')
 }
 
 describe('copy provider', () => {
@@ -53,7 +63,7 @@ describe('copy provider', () => {
     assert.ok(result, 'snapshot exists')
     assert.equal(result.files, 2)
     assert.ok(result.bytes > 0)
-    const manifest = JSON.parse(await fs.readFile(path.join(snapshotBaseDir(snapshotDir, cwd), result.ref, 'manifest.json'), 'utf8'))
+    const manifest = /** @type {{files: Array<{rel: string}>}} */ (JSON.parse(await fs.readFile(path.join(snapshotBaseDir(snapshotDir, cwd), result.ref, 'manifest.json'), 'utf8')))
     assert.deepEqual(manifest.files.map((entry) => entry.rel).sort(), ['a.txt', 'dir/b.txt'])
   })
 
@@ -65,6 +75,7 @@ describe('copy provider', () => {
     })
     const { provider } = await makeProvider()
     const result = await provider.snapshot({ cwd, key: cwd }, { triggerTool: 'bash' })
+    assert.ok(result, 'snapshot captured')
     assert.equal(result.files, 1)
   })
 
@@ -73,6 +84,7 @@ describe('copy provider', () => {
     const { provider } = await makeProvider()
     const ws = { cwd, key: cwd }
     const first = await provider.snapshot(ws, { triggerTool: 'bash' })
+    assertSnapshot(first)
     const second = await provider.snapshot(ws, { triggerTool: 'bash', previousRef: first.ref })
     assert.equal(second, null)
   })
@@ -82,6 +94,7 @@ describe('copy provider', () => {
     const { provider, snapshotDir } = await makeProvider()
     const ws = { cwd, key: cwd }
     const first = await provider.snapshot(ws, { triggerTool: 'bash' })
+    assertSnapshot(first)
     await fs.writeFile(path.join(cwd, 'b.txt'), 'B2!') // 尺寸变化：去重判据不依赖 mtime 精度
     const second = await provider.snapshot(ws, { triggerTool: 'bash', previousRef: first.ref })
     assert.ok(second, 'second snapshot exists')
@@ -106,6 +119,7 @@ describe('copy provider', () => {
     const { provider, snapshotDir } = await makeProvider()
     const ws = { cwd, key: cwd }
     const first = await provider.snapshot(ws, { triggerTool: 'bash' })
+    assertSnapshot(first)
     assert.equal(first.bytes, 4, '首次捕获全量实拷贝（A1 + B1）')
     await fs.writeFile(path.join(cwd, 'b.txt'), 'B2!')
     const second = await provider.snapshot(ws, { triggerTool: 'bash', previousRef: first.ref })
@@ -126,6 +140,7 @@ describe('copy provider', () => {
     const { provider } = await makeProvider({ verifyByHash: true })
     const ws = { cwd, key: cwd }
     const first = await provider.snapshot(ws, { triggerTool: 'bash' })
+    assertSnapshot(first)
     // 重写同内容（mtime 变化、size 相同）：哈希比对 → 去重 null。
     await fs.writeFile(path.join(cwd, 'a.txt'), 'A1')
     const second = await provider.snapshot(ws, { triggerTool: 'bash', previousRef: first.ref })
@@ -142,6 +157,7 @@ describe('copy provider', () => {
     const exactMs = Math.trunc(before.mtimeMs)
     await fs.utimes(file, before.atime, new Date(exactMs))
     const first = await provider.snapshot(ws, { triggerTool: 'bash' })
+    assertSnapshot(first)
     await fs.writeFile(file, 'BBBB')
     await fs.utimes(file, before.atime, new Date(exactMs)) // 快检字段全等
     const second = await provider.snapshot(ws, { triggerTool: 'bash', previousRef: first.ref })
@@ -160,6 +176,7 @@ describe('copy provider', () => {
     const exactMs = Math.trunc(before.mtimeMs)
     await fs.utimes(file, before.atime, new Date(exactMs))
     const first = await provider.snapshot(ws, { triggerTool: 'bash' })
+    assertSnapshot(first)
     await fs.writeFile(file, 'BBBB')
     await fs.utimes(file, before.atime, new Date(exactMs))
     const second = await provider.snapshot(ws, { triggerTool: 'bash', previousRef: first.ref })
@@ -171,6 +188,7 @@ describe('copy provider', () => {
     const { provider, snapshotDir } = await makeProvider({ verifyByHash: true })
     const ws = { cwd, key: cwd }
     const snapshot = await provider.snapshot(ws, { triggerTool: 'bash' })
+    assertSnapshot(snapshot)
     await fs.writeFile(path.join(snapshotBaseDir(snapshotDir, cwd), snapshot.ref, 'a.txt'), 'CORRUPT')
     await assert.rejects(() => provider.restore(ws, snapshot.ref), /content hash mismatch/)
   })
@@ -182,6 +200,7 @@ describe('copy provider', () => {
     const file = path.join(cwd, 'a.txt')
     await fs.chmod(file, 0o700)
     const snapshot = await provider.snapshot(ws, { triggerTool: 'bash' })
+    assertSnapshot(snapshot)
     await fs.chmod(file, 0o644)
     await provider.restore(ws, snapshot.ref)
     assert.equal((await fs.stat(file)).mode & 0o777, 0o700)
@@ -192,6 +211,7 @@ describe('copy provider', () => {
     const { provider } = await makeProvider()
     const ws = { cwd, key: cwd }
     const snapshot = await provider.snapshot(ws, { triggerTool: 'bash' })
+    assertSnapshot(snapshot)
     await fs.writeFile(path.join(cwd, 'a.txt'), 'A2')
     await fs.writeFile(path.join(cwd, 'later.txt'), 'later')
     const result = await provider.restore(ws, snapshot.ref)
@@ -206,6 +226,7 @@ describe('copy provider', () => {
     const { provider } = await makeProvider()
     const ws = { cwd, key: cwd }
     const snapshot = await provider.snapshot(ws, { triggerTool: 'bash' })
+    assertSnapshot(snapshot)
     await fs.writeFile(path.join(cwd, 'a.txt'), 'A2')
     await fs.writeFile(path.join(cwd, 'b.txt'), 'B2')
     const result = await provider.restore(ws, snapshot.ref, undefined, ['a.txt'])
@@ -223,6 +244,7 @@ describe('copy provider', () => {
     const { provider, snapshotDir } = await makeProvider()
     const ws = { cwd, key: cwd }
     const snapshot = await provider.snapshot(ws, { triggerTool: 'bash' })
+    assertSnapshot(snapshot)
     await fs.writeFile(path.join(snapshotBaseDir(snapshotDir, cwd), snapshot.ref, 'manifest.json'), '{broken', 'utf8')
     await assert.rejects(() => provider.restore(ws, snapshot.ref), /manifest/)
   })
@@ -232,6 +254,7 @@ describe('copy provider', () => {
     const { provider, snapshotDir } = await makeProvider()
     const ws = { cwd, key: cwd }
     const snapshot = await provider.snapshot(ws, { triggerTool: 'bash' })
+    assertSnapshot(snapshot)
     const manifestPath = path.join(snapshotBaseDir(snapshotDir, cwd), snapshot.ref, 'manifest.json')
     const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8'))
     manifest.files[0].rel = '../evil.txt'
@@ -246,6 +269,7 @@ describe('copy provider', () => {
     const base = snapshotBaseDir(snapshotDir, cwd)
     await fs.mkdir(path.join(base, 'orphan.tmp'), { recursive: true })
     const snapshot = await provider.snapshot(ws, { triggerTool: 'bash' })
+    assertSnapshot(snapshot)
     assert.equal((await fs.readdir(base)).includes('orphan.tmp'), false)
     await provider.discard(ws, snapshot.ref)
     assert.equal((await fs.readdir(base)).length, 0)
@@ -295,6 +319,7 @@ describe('copy provider', () => {
     const { provider } = await makeProvider()
     const ws = { cwd, key: cwd }
     const snapshot = await provider.snapshot(ws, { triggerTool: 'bash' })
+    assertSnapshot(snapshot)
     await fs.rm(path.join(cwd, 'a.txt'))
     await fs.symlink(target, path.join(cwd, 'a.txt'))
     await assert.rejects(() => provider.restore(ws, snapshot.ref), /symbolic links are refused/)
@@ -308,6 +333,7 @@ describe('copy provider', () => {
     const { provider } = await makeProvider()
     const ws = { cwd, key: cwd }
     const snapshot = await provider.snapshot(ws, { triggerTool: 'bash' })
+    assertSnapshot(snapshot)
     await fs.rm(path.join(cwd, 'dir'), { recursive: true, force: true })
     await fs.symlink(outside, path.join(cwd, 'dir'))
     await assert.rejects(() => provider.restore(ws, snapshot.ref), /symbolic links are refused/)
@@ -323,6 +349,7 @@ describe('copy provider', () => {
     const { provider, snapshotDir } = await makeProvider()
     const ws = { cwd, key: cwd }
     const snapshot = await provider.snapshot(ws, { triggerTool: 'bash' })
+    assertSnapshot(snapshot)
     const snapFile = path.join(snapshotBaseDir(snapshotDir, cwd), snapshot.ref, 'a.txt')
     await fs.rm(snapFile)
     await fs.symlink(secret, snapFile)
@@ -335,6 +362,7 @@ describe('copy provider', () => {
     const { provider } = await makeProvider()
     const ws = { cwd, key: cwd }
     const snapshot = await provider.snapshot(ws, { triggerTool: 'bash' })
+    assertSnapshot(snapshot)
     await fs.rm(path.join(cwd, 'dir'), { recursive: true, force: true })
     const result = await provider.restore(ws, snapshot.ref)
     assert.equal(result.restored, 1)
@@ -361,7 +389,7 @@ describe('copy provider', () => {
     const result = await provider.snapshot(ws, { triggerTool: 'bash' })
     assert.ok(result, '快照仍成功')
     assert.equal(result.files, 1, 'locked.txt 被跳过（不进清单）')
-    assert.ok(result.notes.some(note => note.includes('locked.txt')), '警告包含被跳过文件')
+    assert.ok((result.notes ?? []).some(note => note.includes('locked.txt')), '警告包含被跳过文件')
     const restore = await provider.restore(ws, result.ref)
     assert.equal(restore.restored, 1, '恢复只涉及清单内文件')
   })
@@ -375,6 +403,7 @@ describe('copy provider', () => {
     })
     const { provider } = await makeProvider({ excludeGlobs: ['**/*.tmp'] })
     const result = await provider.snapshot({ cwd, key: cwd }, { triggerTool: 'bash' })
+    assertSnapshot(result)
     assert.deepEqual(result.files, 2, '仅 a.txt 与 keep.log')
   })
 
@@ -383,6 +412,7 @@ describe('copy provider', () => {
     const { provider } = await makeProvider()
     const ws = { cwd, key: cwd }
     const snapshot = await provider.snapshot(ws, { triggerTool: 'bash' })
+    assertSnapshot(snapshot)
     // 尺寸变化：快检去重不依赖 mtime 精度，消除并行负载下的偶发误判。
     await fs.writeFile(path.join(cwd, 'a.txt'), 'A2!!')
     await fs.writeFile(path.join(cwd, 'new.txt'), 'new')
@@ -404,6 +434,7 @@ describe('copy provider', () => {
     const exactMs = Math.trunc(before.mtimeMs)
     await fs.utimes(file, before.atime, new Date(exactMs))
     const snapshot = await provider.snapshot(ws, { triggerTool: 'bash' })
+    assertSnapshot(snapshot)
     await fs.writeFile(file, 'BBBB')
     await fs.utimes(file, before.atime, new Date(exactMs))
     const preview = await provider.preview(ws, snapshot.ref)
@@ -429,20 +460,23 @@ describe('copy provider', () => {
 
     // First snapshot with currentExclude = ['*.log']
     const snap1 = await provider.snapshot(ws, { triggerTool: 'bash' })
-    const manifest1 = JSON.parse(await fs.readFile(path.join(snapshotBaseDir(currentSnapDir, cwd), snap1.ref, 'manifest.json'), 'utf8'))
+    assertSnapshot(snap1)
+    const manifest1 = /** @type {{files: Array<{rel: string}>}} */ (JSON.parse(await fs.readFile(path.join(snapshotBaseDir(currentSnapDir, cwd), snap1.ref, 'manifest.json'), 'utf8')))
     assert.deepEqual(manifest1.files.map((e) => e.rel).sort(), ['ignore2.tmp', 'keep.txt'])
 
     // Update exclude dynamically to ['*.tmp']
     currentExclude = ['*.tmp']
     const snap2 = await provider.snapshot(ws, { triggerTool: 'bash' })
-    const manifest2 = JSON.parse(await fs.readFile(path.join(snapshotBaseDir(currentSnapDir, cwd), snap2.ref, 'manifest.json'), 'utf8'))
+    assertSnapshot(snap2)
+    const manifest2 = /** @type {{files: Array<{rel: string}>}} */ (JSON.parse(await fs.readFile(path.join(snapshotBaseDir(currentSnapDir, cwd), snap2.ref, 'manifest.json'), 'utf8')))
     assert.deepEqual(manifest2.files.map((e) => e.rel).sort(), ['ignore1.log', 'keep.txt'])
 
     // Update snapshotDir dynamically
     const nextSnapDir = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-snap-dyn2-'))
     currentSnapDir = nextSnapDir
     const snap3 = await provider.snapshot(ws, { triggerTool: 'bash' })
-    const manifest3 = JSON.parse(await fs.readFile(path.join(snapshotBaseDir(nextSnapDir, cwd), snap3.ref, 'manifest.json'), 'utf8'))
+    assertSnapshot(snap3)
+    const manifest3 = /** @type {{id: string}} */ (JSON.parse(await fs.readFile(path.join(snapshotBaseDir(nextSnapDir, cwd), snap3.ref, 'manifest.json'), 'utf8')))
     assert.ok(manifest3.id, 'snapshot written to dynamic snapshot directory')
   })
 })

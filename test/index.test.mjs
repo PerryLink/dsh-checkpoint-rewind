@@ -8,9 +8,10 @@ import { spawn } from 'node:child_process'
 import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { KNOWN_SESSION_EVENT_TYPES } from '@deepseek-ai/dsh-session'
+import { KNOWN_SESSION_EVENT_TYPES, SessionId } from '@deepseek-ai/dsh-session'
 import { mountPlugin, openStep, closeStep, dispatchWriteIntent, dispatchPreExecute, settle } from './helpers/ctx-harness.mjs'
 
+/** @param {Record<string, string>} files */
 async function makeWorkspace(files) {
   const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-rewind-ws-'))
   for (const [rel, content] of Object.entries(files)) {
@@ -52,6 +53,7 @@ function rejectingQuestions() {
 }
 
 /** 轮询等待表内记录数（插件内部领域操作异步落盘）。 */
+/** @param {Map<string, any>} table @param {number} count @param {number} [timeoutMs] */
 async function waitForRecords(table, count, timeoutMs = 15000) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
@@ -64,20 +66,23 @@ async function waitForRecords(table, count, timeoutMs = 15000) {
 }
 
 /** 当前测试会话的检查点记录（[key, record] 元组，同 waitForRecords 形状）。 */
+/** @param {Map<string, any>} records */
 async function recordsOf(records) {
   return [...records.entries()].filter(([, record]) => record.sessionId === 'session-under-test')
 }
 
 /** 轮询直到谓词为真（清理异步收敛等场景）。 */
+/** @param {() => boolean | Promise<boolean>} predicate @param {number} [timeoutMs] */
 async function waitUntil(predicate, timeoutMs = 15000) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
-    if (predicate()) return
+    if (await predicate()) return
     await new Promise((resolve) => setTimeout(resolve, 10))
   }
   throw new Error('timed out waiting for condition')
 }
 
+/** @param {any} app @param {string} line */
 function command(app, line) {
   return app.root.commands.execute(app.agent, line, [], new AbortController().signal)
 }
@@ -235,7 +240,9 @@ describe('会话边界补记与映射', () => {
     const stepEndSeq = closeStep(app.session, 1, 1)
     const turnEndSeq = closeStep(app.session, 1, 1, true)
     await settle()
-    const first = (await recordsOf(app.records)).find(([, record]) => record.turn === 1)[1]
+    const firstHit = (await recordsOf(app.records)).find(([, record]) => record.turn === 1)
+    assert.ok(firstHit !== undefined, 'first checkpoint present')
+    const first = firstHit[1]
     assert.equal(first.stepEndSeq, stepEndSeq)
     assert.equal(first.sessionBoundary, undefined, '首轮检查点无重放边界')
     // turn 2 → 边界 = turn 1 的 turn/end seq。
@@ -243,7 +250,9 @@ describe('会话边界补记与映射', () => {
     openStep(app.session, 2, 1)
     await dispatchWriteIntent(app.root, app.agent, 'write')
     await waitForRecords(app.records, 2)
-    const second = (await recordsOf(app.records)).find(([, record]) => record.turn === 2)[1]
+    const secondHit = (await recordsOf(app.records)).find(([, record]) => record.turn === 2)
+    assert.ok(secondHit !== undefined, 'second checkpoint present')
+    const second = secondHit[1]
     assert.equal(second.sessionBoundary, turnEndSeq, '边界 = 游标之前最近一条 turn/end')
     const { nearestCheckpointAtOrBefore } = await import('../lib/checkpoints.mjs')
     assert.equal(nearestCheckpointAtOrBefore([first], stepEndSeq)?.id, first.id)
@@ -431,11 +440,12 @@ describe('/rewind 命令', () => {
     assert.match(result?.result.text, /session: replayed as child session session-\d+/)
     assert.equal(await fs.readFile(path.join(cwd, 'a.txt'), 'utf8'), 'A1', '文件已恢复')
     const childId = /session: replayed as child session (session-\d+)/.exec(result?.result.text)?.[1]
-    const child = app.root.sessions.get(childId)
+    assert.ok(childId, '命令结果携带新 sessionId')
+    const child = app.root.sessions.get(SessionId(childId))
     assert.ok(child, '重放子会话在 store 中存活')
     assert.equal(child.header.parentSession, app.session.id)
     assert.equal(child.snapshotEvents().length, 2, '空种子：session/end-seed + 回退通知')
-    assert.equal(child.snapshotEvents().at(-1).type, 'user/message', '子会话收到回退通知')
+    assert.equal(child.snapshotEvents().at(-1)?.type, 'user/message', '子会话收到回退通知')
     await app.dispose()
   })
 
@@ -449,7 +459,8 @@ describe('/rewind 命令', () => {
     await waitForRecords(app.records, 1)
     await fs.writeFile(path.join(cwd, 'a.txt'), 'A2!')
     closeStep(app.session, 1, 1, true)
-    const turn1End = app.session.snapshotEvents().at(-1).seq
+    const turn1End = app.session.snapshotEvents().at(-1)?.seq
+    if (typeof turn1End !== 'number') throw new Error('turn/end missing')
     // turn 2：改 b.txt；本轮快照的边界 = turn 1 的 turn/end。
     openStep(app.session, 2, 1)
     await dispatchWriteIntent(app.root, app.agent, 'bash')
@@ -457,7 +468,9 @@ describe('/rewind 命令', () => {
     await fs.writeFile(path.join(cwd, 'b.txt'), 'B2!')
     closeStep(app.session, 2, 1, true)
     // 回退到 turn 2 的检查点（a.txt=A2、b.txt=B1；上下文回到 turn 1 结束处）。
-    const second = (await recordsOf(app.records)).find(([, record]) => record.turn === 2)[1]
+    const secondHit = (await recordsOf(app.records)).find(([, record]) => record.turn === 2)
+    assert.ok(secondHit !== undefined, 'second checkpoint present')
+    const second = secondHit[1]
     assert.equal(second.sessionBoundary, turn1End)
     const result = await command(app, `/rewind ${second.id}`)
     assert.equal(result?.result.kind, 'success')
@@ -469,14 +482,16 @@ describe('/rewind 命令', () => {
     assert.ok(guard, 'pre-rewind 保护检查点已落盘（可撤销本次回退）')
     const childId = /session: replayed as child session (session-\d+)/.exec(result.result.text)?.[1]
     assert.ok(childId, '命令结果携带新 sessionId')
-    const child = app.root.sessions.get(childId)
+    const child = app.root.sessions.get(SessionId(childId))
     assert.ok(child, '重放子会话在 store 中存活')
     assert.equal(child.header.parentSession, app.session.id)
     assert.equal(child.header.cwd, cwd)
     assert.equal(child.firstLiveSeq, turn1End + 1)
     assert.equal(child.snapshotEvents().length, turn1End + 3) // 种子 + session/end-seed + 回退通知
-    assert.equal(child.snapshotEvents().at(-1).type, 'user/message', '子会话收到回退通知')
-    const notice = child.snapshotEvents().at(-1).data
+    assert.equal(child.snapshotEvents().at(-1)?.type, 'user/message', '子会话收到回退通知')
+    const lastEvent = child.snapshotEvents().at(-1)
+    assert.ok(lastEvent !== undefined, '回退通知已 append')
+    const notice = /** @type {{source?: {kind?: string, plugin?: string}, content: Array<{text: string}>}} */ (lastEvent.data)
     assert.equal(notice.source?.kind, 'plugin')
     assert.equal(notice.source?.plugin, 'checkpoint-rewind')
     assert.match(notice.content[0].text, /replayed from checkpoint/)
@@ -501,8 +516,8 @@ describe('/rewind 命令', () => {
     assert.equal(lifecycle.length, 2)
     assert.equal(lifecycle[0].type, 'command/run')
     assert.equal(lifecycle[1].type, 'command/done')
-    assert.match(lifecycle[0].data.name, /rewind/)
-    assert.match(lifecycle[1].data.text, /1 checkpoint/)
+    assert.match(/** @type {{name?: string}} */ (lifecycle[0].data).name ?? '', /rewind/)
+    assert.match(/** @type {{text?: string}} */ (lifecycle[1].data).text ?? '', /1 checkpoint/)
     await app.dispose()
   })
 
@@ -860,7 +875,9 @@ describe('/checkpoint 命令', () => {
     assert.match(result?.result.text, /session cursor: seq \d+/)
     assert.match(result?.result.text, /config snapshot: \d+ key\(s\)/)
     assert.match(result?.result.text, /\/rewind workspace\|session\|config/)
-    const manual = (await recordsOf(app.records)).find(([, record]) => record.kind === 'manual')[1]
+    const manualHit = (await recordsOf(app.records)).find(([, record]) => record.kind === 'manual')
+    assert.ok(manualHit !== undefined, 'manual checkpoint present')
+    const manual = manualHit[1]
     assert.equal(manual.note, '发布前检查')
     assert.equal(manual.triggerTool, 'checkpoint')
     assert.ok(Array.isArray(manual.config) === false && typeof manual.config === 'object', '记录携带配置快照')
@@ -885,6 +902,7 @@ describe('/checkpoint 命令', () => {
 
   it('去重且存在未跟踪文件（git provider）：消息提示 git add 纳管', async (t) => {
     const repo = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-rewind-cp-'))
+    /** @param {string[]} args */
     const runReal = async (args) => {
       const result = await new Promise((resolve, reject) => {
         const child = spawn('git', args, { cwd: repo, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
@@ -940,8 +958,11 @@ describe('/checkpoint 命令', () => {
     assert.equal(list?.result.kind, 'success')
     assert.match(list?.result.text, /checkpoint: 2 checkpoints/)
     const records = await recordsOf(app.records)
-    const from = records.find(([, record]) => record.turn === 1)[1]
-    const to = records.find(([, record]) => record.turn === 2)[1]
+    const fromHit = records.find(([, record]) => record.turn === 1)
+    const toHit = records.find(([, record]) => record.turn === 2)
+    assert.ok(fromHit !== undefined && toHit !== undefined, 'two checkpoints present')
+    const from = fromHit[1]
+    const to = toHit[1]
     const diff = await command(app, `/checkpoint diff ${from.id.slice(0, 8)} ${to.id.slice(0, 8)}`)
     assert.equal(diff?.result.kind, 'success')
     assert.match(diff?.result.text, /checkpoint diff: #/)
@@ -1077,7 +1098,7 @@ describe('checkpoint 模型工具与提示词段落', () => {
     const cwd = await makeWorkspace({ 'a.txt': 'A1' })
     const snapshotDir = await makeSnapDir()
     const tools = new Map()
-    const registry = { register: (def) => { tools.set(def.name, def); return () => tools.delete(def.name) } }
+    const registry = { register: (/** @type {any} */ def) => { tools.set(def.name, def); return () => tools.delete(def.name) } }
     const app = await mountPlugin({ cwd, tools: registry, config: { provider: 'copy', snapshotDir } })
     assert.ok(tools.has('checkpoint'), 'checkpoint 工具已注册')
     openStep(app.session, 1, 1)
@@ -1100,7 +1121,7 @@ describe('checkpoint 模型工具与提示词段落', () => {
 
   it('checkpointTool:false 不注册工具；无 tools 服务的组装不受影响', async () => {
     const tools = new Map()
-    const registry = { register: (def) => { tools.set(def.name, def); return () => tools.delete(def.name) } }
+    const registry = { register: (/** @type {any} */ def) => { tools.set(def.name, def); return () => tools.delete(def.name) } }
     const app = await mountPlugin({ tools: registry, config: { checkpointTool: false } })
     assert.equal(tools.has('checkpoint'), false)
     await app.dispose()
@@ -1111,8 +1132,9 @@ describe('checkpoint 模型工具与提示词段落', () => {
   })
 
   it('systemPrompt 存在且 promptSection 开启 → 注册短小的角色陈述段落', async () => {
+    /** @type {Array<{name: string, text: string}>} */
     const sections = []
-    const systemPrompt = { section: (section) => { sections.push(section); return () => {} } }
+    const systemPrompt = { section: (/** @type {{name: string, text: string}} */ section) => { sections.push(section); return () => {} } }
     const app = await mountPlugin({ systemPrompt })
     assert.equal(sections.length, 1)
     assert.equal(sections[0].name, 'checkpoint-rewind:role')
@@ -1122,8 +1144,9 @@ describe('checkpoint 模型工具与提示词段落', () => {
   })
 
   it('promptSection:false → 不注册段落', async () => {
+    /** @type {Array<{name: string, text: string}>} */
     const sections = []
-    const systemPrompt = { section: (section) => { sections.push(section); return () => {} } }
+    const systemPrompt = { section: (/** @type {{name: string, text: string}} */ section) => { sections.push(section); return () => {} } }
     const app = await mountPlugin({ systemPrompt, config: { promptSection: false } })
     assert.equal(sections.length, 0)
     await app.dispose()

@@ -8,6 +8,7 @@ import path from 'node:path'
 import { workspaceKeyOf, resolveSnapshotDir } from '../lib/workspace.mjs'
 
 /** 临时移除 process.env.DSH_HOME 后执行 fn（模拟未导出的干净环境）。 */
+/** @template T @param {() => T} fn @returns {T} */
 function withUnsetDshHome(fn) {
   const saved = process.env.DSH_HOME
   delete process.env.DSH_HOME

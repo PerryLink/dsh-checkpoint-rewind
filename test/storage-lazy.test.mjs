@@ -10,10 +10,12 @@ import os from 'node:os'
 import path from 'node:path'
 import { mountPlugin, openStep, dispatchWriteIntent } from './helpers/ctx-harness.mjs'
 
+/** @param {any} app @param {string} line */
 function command(app, line) {
   return app.root.commands.execute(app.agent, line, [], new AbortController().signal)
 }
 
+/** @param {Record<string, string>} files */
 async function makeWorkspace(files) {
   const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-rewind-lazy-'))
   for (const [rel, content] of Object.entries(files)) {
@@ -25,6 +27,7 @@ async function makeWorkspace(files) {
 }
 
 /** 轮询等待表内记录数（捕获经领域写链异步落盘）。 */
+/** @param {Map<string, any>} records @param {number} count @param {number} [timeoutMs] */
 async function waitForRecords(records, count, timeoutMs = 15000) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {

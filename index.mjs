@@ -32,7 +32,7 @@
 import { randomUUID } from 'node:crypto'
 import { Context } from '@deepseek-ai/cordis'
 import Schema from '@deepseek-ai/schemastery'
-import SessionStore, { KNOWN_SESSION_EVENT_TYPES } from '@deepseek-ai/dsh-session'
+import SessionStore, { KNOWN_SESSION_EVENT_TYPES, SessionLogOffset, SessionSeq } from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import {
@@ -104,13 +104,14 @@ export const inject = ['sessions', 'commands']
 /**
  * 会话事件快照（跨宿主行兼容）：0.1.2-alpha.5 起 Session.events getter 更名为
  * snapshotEvents()；peer 下限（>=0.1.0-rc.8）的老宿主仍只有 .events。
- * @param {{ snapshotEvents?: () => unknown[], events?: unknown[] } | null | undefined} session - 宿主 Session。
- * @returns {unknown[]} 事件快照（缺失会话/老宿主无 events 时为空数组）。
+ * @param {import('@deepseek-ai/dsh-session').Session | null | undefined} session - 宿主 Session。
+ * @returns {readonly import('@deepseek-ai/dsh-session').SessionEvent[]} 事件快照（缺失会话/老宿主无 events 时为空数组）。
  */
 function sessionEvents(session) {
   if (session === undefined || session === null) return []
   if (typeof session.snapshotEvents === 'function') return session.snapshotEvents()
-  return session.events ?? []
+  // 老宿主行：Session 上只有 .events getter（类型面已无该字段，运行时探测）。
+  return /** @type {{ events?: import('@deepseek-ai/dsh-session').SessionEvent[] }} */ (session).events ?? []
 }
 
 /**
@@ -128,13 +129,18 @@ export function probeIgnorableAppend() {
   try {
     const store = new SessionStore(new Context())
     const session = store.create()
-    const event = session.append(SESSION_EVENTS.SNAPSHOT, {
+    // append 的类型签名只有 (type, data) 两参；探测信封需要第三参（宿主若支持
+    // ignorable 信封会盖章）。运行时按实际宿主能力处理，类型上放开第三参。
+    /** @type {(type: string, data: object, envelope: { ignorable: boolean }) => unknown} */
+    const appendProbe = /** @type {any} */ (session.append).bind(session)
+    const event = appendProbe(SESSION_EVENTS.SNAPSHOT, {
       id: 'probe',
       sessionId: 'probe',
       cwd: '/',
       seq: 0,
       time: 0,
       provider: PROVIDERS.COPY,
+      kind: 'manual',
       triggerTool: 'probe',
       turn: 1,
       step: 1,
@@ -142,7 +148,7 @@ export function probeIgnorableAppend() {
       bytes: 0,
       ref: 'probe',
     }, { ignorable: true })
-    return event?.ignorable === true
+    return /** @type {{ ignorable?: boolean }} */ (event)?.ignorable === true
   } catch {
     return false
   }
@@ -299,24 +305,29 @@ export async function apply(ctx, config = {}) {
   if (resolved.enabled === false) return
 
   const logger = ctx.logger(PLUGIN_NAME)
+  /** @type {(message: string) => void} */
   const warn = (message) => logger.warn(message)
   const eventGate = makeEventGate(KNOWN_SESSION_EVENT_TYPES, probeIgnorableAppend())
+  /** @type {(session: import('@deepseek-ai/dsh-session').Session, type: string, data: object) => void} */
   const appendEvent = (session, type, data) => maybeAppendSessionEvent(session, type, data, eventGate, warn)
 
   // --- 有效配置：cordis.yml（resolved）为基，settings 命名空间存在时其解析值为活配置。
   // settings 写回（含 /rewind config）经 watch 即时生效；settings 卸载回落到 entry。
   let liveConfig = resolved
+  /** @type {any | undefined} */
   let settingsScope
   const liveListeners = new Set()
+  /** @type {(next: typeof resolved) => void} */
   const setLive = (next) => {
     liveConfig = next
     for (const listener of liveListeners) listener()
   }
+  /** @type {(listener: () => void) => () => boolean} */
   const onLiveChange = (listener) => {
     liveListeners.add(listener)
     return () => liveListeners.delete(listener)
   }
-  ctx.inject(['settings'], (sctx) => {
+  ctx.inject(['settings'], /** @param {any} sctx */ (sctx) => {
     const scope = sctx.settings.register(checkpointSettingsNamespace(), checkpointSettingsSchema, {
       base: resolved,
       expose: true,
@@ -325,7 +336,7 @@ export async function apply(ctx, config = {}) {
     })
     settingsScope = scope
     setLive(scope.get())
-    const unwatch = scope.watch((next) => setLive(next))
+    const unwatch = scope.watch(/** @param {typeof resolved} next */ (next) => setLive(next))
     sctx.effect(() => () => {
       unwatch()
       if (settingsScope === scope) settingsScope = undefined
@@ -338,6 +349,7 @@ export async function apply(ctx, config = {}) {
   // SnapshotProviderRegistry 注册（registry.register 返回 disposer，卸载撤销）。
   const registry = new SnapshotProviderRegistry()
   const unregGit = registry.register(makeGitProvider({ gitBin: () => liveConfig.gitBin }))
+  /** @type {string | undefined} */
   let snapshotDirCache
   const getSnapshotDir = () => {
     if (snapshotDirCache === undefined) snapshotDirCache = resolveSnapshotDir(liveConfig.snapshotDir)
@@ -369,6 +381,7 @@ export async function apply(ctx, config = {}) {
   // undefined 且永不重查——注册表从此永久不可用（一切捕获静默失败）。首次使用
   // 时再解析：届时组合必然已完成；storage 栈真缺失时首次使用即 reject 并给出
   // 组合指引（与 dsh-checkpoint-diff 对 sessionQuery 的惰性 getter 处理一致）。
+  /** @type {Promise<import('@deepseek-ai/dsh-storage-domain').KvTable<string, import('./lib/checkpoints.mjs').CheckpointRecord>> | undefined} */
   let tablePromise
   const getTablePromise = () => {
     if (tablePromise !== undefined) return tablePromise
@@ -388,12 +401,14 @@ export async function apply(ctx, config = {}) {
               if (spec === checkpointsDomainSpecV1) {
                 logger.warn('checkpoints medium is domain v1 (rewind 0.4.x era): opened in compatibility mode — existing records stay readable and new records use the v2 shape; the storage layer has no automatic migration, so the medium keeps its v1 header until it is recreated')
               }
-              return domain.table('checkpoints')
+              // v1 容错表的记录可能是 0.4.x 形状（缺 kind/config）：消费侧按
+              // CheckpointRecord 读取、对缺失字段做运行时防御（与双版本容错 spec 一致）。
+              return /** @type {import('@deepseek-ai/dsh-storage-domain').KvTable<string, import('./lib/checkpoints.mjs').CheckpointRecord>} */ (domain.table('checkpoints'))
             } catch (error) {
               lastError = error
               // version-mismatch / malformed-medium 是后端 StorageError（code 稳定）：
               // 介质属于另一版本 → 换 spec 重试；其余错误（already-open 等）直接失败。
-              if (error?.code === 'version-mismatch' || error?.code === 'malformed-medium') continue
+              if (/** @type {{ code?: string }} */ (error).code === 'version-mismatch' || /** @type {{ code?: string }} */ (error).code === 'malformed-medium') continue
               throw error
             }
           }
@@ -405,6 +420,7 @@ export async function apply(ctx, config = {}) {
 
   // 领域写操作链：快照落盘、边界补记、清理按序执行；命令执行前先 await 排空。
   let ops = Promise.resolve()
+  /** @template T @param {() => Promise<T>} fn @returns {Promise<T>} */
   const schedule = (fn) => {
     const run = ops.then(fn, fn)
     ops = run.then(() => undefined, () => undefined)
@@ -413,6 +429,7 @@ export async function apply(ctx, config = {}) {
 
   // --- 每会话运行时状态（turn/step 跟踪 + 每步去重窗 + 捕获互斥 + 自动间隔时钟）。
   const stateBySession = new WeakMap()
+  /** @param {import('@deepseek-ai/dsh-session').Session} session */
   const ensureState = (session) => {
     let state = stateBySession.get(session)
     if (state === undefined) {
@@ -521,10 +538,10 @@ export async function apply(ctx, config = {}) {
 
   /**
    * 该会话最近一条检查点（去重基准：同 provider 才可比）。
-   * @param {import('@deepseek-ai/dsh-storage-domain').KvTable<string, object>} table - 检查点表。
+   * @param {import('@deepseek-ai/dsh-storage-domain').KvTable<string, import('./types.d.ts').CheckpointRecord>} table - 检查点表。
    * @param {string} sessionId - 会话 id。
    * @param {string} cwd - 工作区绝对路径。
-   * @returns {object|undefined} 最近记录。
+   * @returns {import('./types.d.ts').CheckpointRecord|undefined} 最近记录。
    */
   function latestRecordFor(table, sessionId, cwd) {
     const key = workspaceKeyOf(cwd)
@@ -534,15 +551,19 @@ export async function apply(ctx, config = {}) {
     return sortOldestFirst(mine).at(-1)
   }
 
-  /** 配置快照（普通 JSON 深拷贝，进入检查点记录）。 */
-  const snapshotConfigOf = (config) => structuredClone(config)
+  /**
+   * 配置快照（普通 JSON 深拷贝，进入检查点记录）。
+   * @param {import('./types.d.ts').Config} config - 有效配置。
+   * @returns {Record<string, unknown>} 深拷贝快照。
+   */
+  const snapshotConfigOf = (config) => /** @type {Record<string, unknown>} */ (structuredClone(config))
 
   /**
    * 统一捕获：工作区快照 + 三态记录落盘。返回 {record}（成功）/ {deduped}
    * （与上一检查点内容一致）/ {failed: message}（已警告）。绝不抛出。
    * @param {import('@deepseek-ai/dsh-session').Session} session - 会话。
-   * @param {object} opts - {kind, triggerTool, note?, retryWithoutBaseline?}。
-   * @returns {Promise<{record?: object, deduped?: boolean, failed?: string}|undefined>} 捕获结果；会话无 cwd 时为 undefined。
+   * @param {{kind: import('./types.d.ts').CheckpointRecord['kind'], triggerTool: string, note?: string, retryWithoutBaseline?: boolean}} opts - 捕获参数。
+   * @returns {Promise<{record?: import('./types.d.ts').CheckpointRecord, deduped?: boolean, detail?: string, failed?: string}|undefined>} 捕获结果；会话无 cwd 时为 undefined。
    */
   async function captureCheckpoint(session, opts) {
     const cwd = session.header?.cwd
@@ -623,7 +644,7 @@ export async function apply(ctx, config = {}) {
    * - 去重基准是自动快照时说明该状态已被自动快照记录（手动调用紧随自动
    *   快照之后时会看到这条，避免"调用成功却无新记录"的困惑）。
    * @param {import('./lib/providers/definition.mjs').SnapshotProvider} provider - 已解析的快照 provider。
-   * @param {object|undefined} previous - 去重基准记录（latestRecordFor 结果）。
+   * @param {import('./types.d.ts').CheckpointRecord|undefined} previous - 去重基准记录（latestRecordFor 结果）。
    * @param {{cwd: string, key: string}} workspace - 工作区。
    * @returns {Promise<string>} 补充说明（多行或空串）。
    */
@@ -645,7 +666,11 @@ export async function apply(ctx, config = {}) {
     return lines.join('\n')
   }
 
-  /** 去重结果文本：基础句 + 可选补充说明（多行）。 */
+  /**
+   * 去重结果文本：基础句 + 可选补充说明（多行）。
+   * @param {string|undefined} detail - dedupDetailOf 的补充说明。
+   * @returns {string} 去重说明文本。
+   */
   function dedupedCheckpointText(detail) {
     const base = 'checkpoint: workspace unchanged since the last checkpoint — nothing new was captured'
     return typeof detail === 'string' && detail.length > 0 ? `${base}\n${detail}` : base
@@ -718,7 +743,7 @@ export async function apply(ctx, config = {}) {
    * 可撤回（/rewind <guard-id> 即可撤销）。命令运行于轮次之间，定位用
    * latestStepOf（最近出现的 turn/step），不要求开放步骤。
    * @param {import('@deepseek-ai/dsh-session').Session} session - 会话。
-   * @returns {Promise<{record: object}|undefined>} 捕获的记录；跳过/去重为 undefined。
+   * @returns {Promise<{record?: import('./types.d.ts').CheckpointRecord, deduped?: boolean, detail?: string, failed?: string}|undefined>} 捕获结果；跳过/去重为 undefined。
    */
   async function captureRewindGuard(session) {
     if (liveConfig.preRewindCheckpoint === PRE_REWIND_MODES.OFF) return undefined
@@ -735,7 +760,14 @@ export async function apply(ctx, config = {}) {
     return result
   }
 
-  /** step/end 补记：该 step 内未关联的检查点获得 stepEndSeq（"回到第 N 步"映射）。 */
+  /**
+   * step/end 补记：该 step 内未关联的检查点获得 stepEndSeq（"回到第 N 步"映射）。
+   * @param {import('@deepseek-ai/dsh-session').Session} session - 会话。
+   * @param {number} turn - step 所在轮次。
+   * @param {number} step - 步骤号。
+   * @param {number} endSeq - step/end 事件 seq。
+   * @returns {void}
+   */
   function backfillStepEnd(session, turn, step, endSeq) {
     schedule(async () => {
       const table = await getTablePromise()
@@ -749,7 +781,7 @@ export async function apply(ctx, config = {}) {
 
   /**
    * 删除记录及其 provider 存储（先记录后 discard，逐条隔离失败）。
-   * @param {Array<{key: string, value: object}>} entries - 全表快照条目。
+   * @param {Array<{key: string, value: import('./types.d.ts').CheckpointRecord}>} entries - 全表快照条目。
    * @param {string[]} ids - 待删记录 id。
    * @returns {Promise<void>} 完成（单条失败已警告）。
    */
@@ -786,11 +818,15 @@ export async function apply(ctx, config = {}) {
       const table = await getTablePromise()
       const entries = [...table.entries()].map(([key, value]) => ({ key, value }))
       let liveSessionIds
+      // alpha.2 的 SessionStore 公开面没有 entries()/list() 遍历器；运行时按能力
+      // 探测（宿主侧有 store 快照遍历），类型上放开为可选能力。
+      /** @type {import('@deepseek-ai/dsh-session').SessionStore & { entries?: () => Iterable<[string, unknown]>; list?: () => Array<import('@deepseek-ai/dsh-session').Session> }} */
+      const sessionsStore = ctx.sessions
       try {
-        if (typeof ctx.sessions?.entries === 'function') {
-          liveSessionIds = new Set([...ctx.sessions.entries()].map(([id]) => id))
-        } else if (typeof ctx.sessions?.list === 'function') {
-          liveSessionIds = new Set(ctx.sessions.list().map(s => s.id))
+        if (typeof sessionsStore.entries === 'function') {
+          liveSessionIds = new Set([...sessionsStore.entries()].map(([id]) => id))
+        } else if (typeof sessionsStore.list === 'function') {
+          liveSessionIds = new Set(sessionsStore.list().map(s => s.id))
         }
       } catch {
         // fallback
@@ -810,10 +846,23 @@ export async function apply(ctx, config = {}) {
 
   // --- 变更前快照监听：fs seam（所有经 ctx.fs 的写入/编辑）——prepend 直通，
   // 不占据决策槽（策略插件仍作唯一决策方）。
+  /**
+   * 从事件 actor 解析会话（actor 为 null/非对象时返回 undefined）。
+   * @param {{agent?: {session?: import('@deepseek-ai/dsh-session').Session}}|null|undefined} actor - 事件 actor。
+   * @returns {import('@deepseek-ai/dsh-session').Session|undefined} actor 的会话。
+   */
   const sessionOfActor = (actor) => {
     if (actor === null || typeof actor !== 'object') return undefined
-    return actor.agent?.session
+    return /** @type {{agent?: {session?: import('@deepseek-ai/dsh-session').Session}}} */ (actor).agent?.session
   }
+  /**
+   * 变更前快照旁路：先快照再 next() 直通（绝不占据决策槽）。
+   * @template T
+   * @param {import('@deepseek-ai/dsh-session').Session|undefined} session - actor 会话。
+   * @param {string} trigger - 触发工具/事件名。
+   * @param {() => Promise<T>} next - 瀑布下一环。
+   * @returns {Promise<T>} next 的结果。
+   */
   const snapshotPassThrough = async (session, trigger, next) => {
     await snapshotForMutation(session, trigger)
     return next()
@@ -836,6 +885,7 @@ export async function apply(ctx, config = {}) {
   // --- 提示词段落：一句角色陈述开头、保持短小（对齐官方 Minimal persona 风格）。
   // promptSection 配置可关；设置页修改即时生效（段落重新注册）。
   ctx.inject(['systemPrompt'], (promptCtx) => {
+    /** @type {(() => void) | undefined} */
     let dispose
     const update = () => {
       dispose?.()
@@ -913,11 +963,12 @@ export async function apply(ctx, config = {}) {
             if (result.deduped === true) return dedupedCheckpointText(result.detail)
             if (result.failed !== undefined) return `checkpoint: capture failed (${result.failed}) — no checkpoint was created`
             const record = result.record
+            if (record === undefined) return 'checkpoint: capture produced no record'
             return [
               `checkpoint: captured #${record.id}`,
               `kind: manual · provider: ${record.provider} · turn ${record.turn} step ${record.step}`,
               `session cursor: seq ${record.seq} · workspace tree: ${record.tree ?? 'n/a (copy)'}`,
-              `config snapshot: ${Object.keys(record.config).length} key(s)`,
+              `config snapshot: ${Object.keys(record.config ?? {}).length} key(s)`,
               ...(record.note !== undefined ? [`note: ${record.note}`] : []),
               'restore with /rewind <id> (all three states) or /rewind workspace|session|config <id>',
             ].join('\n')
@@ -935,7 +986,7 @@ export async function apply(ctx, config = {}) {
    * 本会话本工作区的检查点记录。
    * @param {import('@deepseek-ai/dsh-session').Session} session - 会话。
    * @param {string} cwd - 已校验的工作区。
-   * @returns {Promise<object[]>} 记录数组。
+   * @returns {Promise<import('./types.d.ts').CheckpointRecord[]>} 记录数组。
    */
   async function mineFor(session, cwd) {
     const table = await getTablePromise()
@@ -946,10 +997,10 @@ export async function apply(ctx, config = {}) {
 
   /**
    * 寻址解析：latest / step <N> / id 前缀 → 目标记录或错误文本。
-   * @param {object[]} mine - 本会话本工作区的检查点记录。
+   * @param {import('./types.d.ts').CheckpointRecord[]} mine - 本会话本工作区的检查点记录。
    * @param {import('@deepseek-ai/dsh-session').Session} session - 会话。
-   * @param {{kind: string, step?: number, input?: string}} parsed - parseRewindInput 的目标形态。
-   * @returns {{record: object} | {error: string}} 命中或错误文本。
+   * @param {{kind: 'id', input: string} | {kind: 'latest'} | {kind: 'step', step: number}} parsed - parseRewindInput 的目标形态。
+   * @returns {{record: import('./types.d.ts').CheckpointRecord} | {error: string}} 命中或错误文本。
    */
   function resolveRewindTarget(mine, session, parsed) {
     if (parsed.kind === 'latest') {
@@ -968,6 +1019,7 @@ export async function apply(ctx, config = {}) {
       if (record === undefined) return { error: `rewind: no checkpoint at or before step ${parsed.step}` }
       return { record }
     }
+    // 调用方已保证 kind ∈ {latest, step, id}。
     const resolvedId = resolveRecordByPrefix(mine, parsed.input)
     if (resolvedId.record !== undefined) return { record: resolvedId.record }
     if (resolvedId.notFound === true) {
@@ -980,7 +1032,7 @@ export async function apply(ctx, config = {}) {
 
   /**
    * 两两对比（/rewind diff 与 /checkpoint diff 共用）。
-   * @param {object[]} records - 同会话同工作区的记录。
+   * @param {import('./types.d.ts').CheckpointRecord[]} records - 同会话同工作区的记录。
    * @param {import('@deepseek-ai/dsh-session').Session} session - 会话。
    * @param {string} a - 旧检查点 id 或前缀。
    * @param {string} b - 新检查点 id 或前缀。
@@ -1000,6 +1052,9 @@ export async function apply(ctx, config = {}) {
     }
     const from = ra.record
     const to = rb.record
+    if (from === undefined || to === undefined) {
+      return { kind: 'error', text: `${command}: checkpoint not found` }
+    }
     if (from.provider !== to.provider) {
       const err = diffUnavailable(`checkpoints use different providers (${from.provider} vs ${to.provider})`)
       return { kind: 'error', text: `${command}: ${err.message}` }
@@ -1009,8 +1064,12 @@ export async function apply(ctx, config = {}) {
       const err = diffUnavailable(`provider ${from.provider} does not support pairwise diff`)
       return { kind: 'error', text: `${command}: ${err.message}` }
     }
+    const sessionCwd = session.header?.cwd
+    if (typeof sessionCwd !== 'string' || sessionCwd.length === 0) {
+      return { kind: 'error', text: `${command}: session has no workspace cwd` }
+    }
     try {
-      const files = await provider.diffFiles({ cwd: session.header?.cwd, key: workspaceKeyOf(session.header?.cwd) }, from.ref, to.ref)
+      const files = await provider.diffFiles({ cwd: sessionCwd, key: workspaceKeyOf(sessionCwd) }, from.ref, to.ref)
       const names = files.names.slice(0, LIMITS.MAX_DIFF_FILES)
       const text = formatCheckpointDiff(from, to, {
         files: { changed: files.changed, added: files.added, removed: files.removed, names, truncated: files.names.length > names.length },
@@ -1029,7 +1088,7 @@ export async function apply(ctx, config = {}) {
   /**
    * /rewind preview：只读影响面预览——不写文件、不经确认门、不 fork，
    * 只报告该检查点恢复将覆盖/保留哪些文件（确认前知情权）。
-   * @param {object[]} mine - 本会话本工作区的检查点记录。
+   * @param {import('./types.d.ts').CheckpointRecord[]} mine - 本会话本工作区的检查点记录。
    * @param {import('@deepseek-ai/dsh-session').Session} session - 会话。
    * @param {string} cwd - 已校验的工作区。
    * @param {string} target - preview 之后的原始寻址文本。
@@ -1044,7 +1103,7 @@ export async function apply(ctx, config = {}) {
       }
     }
     const hit = resolveRewindTarget(mine, session, parsed)
-    if (hit.error !== undefined) {
+    if ('error' in hit) {
       return { kind: 'error', text: hit.error }
     }
     const record = hit.record
@@ -1069,10 +1128,10 @@ export async function apply(ctx, config = {}) {
   /**
    * 三态回滚影响摘要（确认门 detail 与结果文本共用）。
    * @param {import('@deepseek-ai/dsh-session').Session} session - 会话。
-   * @param {object} record - 目标检查点。
+   * @param {import('./types.d.ts').CheckpointRecord} record - 目标检查点。
    * @param {string} cwd - 已校验的工作区。
    * @param {{workspace: boolean, session: boolean, config: boolean}} targets - 回滚目标。
-   * @returns {Promise<object>} {workspace, config, session, mode}。
+   * @returns {Promise<{mode?: 'restore'|'reset-hard', workspace?: import('./lib/providers/definition.mjs').PreviewResult, workspaceError?: string, config?: {changed: boolean, lines: number, text: string}, session?: {cursor: number, boundary?: number, currentCursor: number, replayable: boolean}}>} 影响摘要。
    */
   async function buildRewindImpact(session, record, cwd, targets) {
     const impact = {}
@@ -1106,8 +1165,8 @@ export async function apply(ctx, config = {}) {
 
   /**
    * 影响摘要 → 文本（确认 detail + 回退结果前缀）。
-   * @param {object} record - 目标检查点。
-   * @param {object} impact - buildRewindImpact 产物。
+   * @param {import('./types.d.ts').CheckpointRecord} record - 目标检查点。
+   * @param {Awaited<ReturnType<typeof buildRewindImpact>>} impact - buildRewindImpact 产物。
    * @returns {string} 多行文本。
    */
   function formatImpact(record, impact) {
@@ -1136,6 +1195,7 @@ export async function apply(ctx, config = {}) {
   }
 
   /** 目标集合 → 确认文案（一体/单态措辞）。 */
+  /** @param {{workspace: boolean, session: boolean, config: boolean}} targets */
   function confirmTextsFor(targets) {
     const count = (targets.workspace ? 1 : 0) + (targets.session ? 1 : 0) + (targets.config ? 1 : 0)
     if (count >= 2) {
@@ -1184,30 +1244,43 @@ export async function apply(ctx, config = {}) {
   }
 
   /**
-   * 会话回退：官方重放 —— 以检查点边界为界 seed 出全新子会话
-   * （sessions.create(id,{seed})）。原会话完整保留（非破坏，CC 差异化）。
+   * 会话回退：官方重放 —— 以检查点边界为界 seed 出全新子会话。优先走
+   * SessionStore.fork（边界前缀深拷贝，fork 自行设定 isSeeded /
+   * inheritedEventCount / cwd / parentSession）；宿主无 fork 时手搓回退：
+   * create + 显式 `inheritedEventCount: seed.length` + `meta.isSeeded: true`
+   * （两者必须同批——宿主对 seeded 构造校验三条）。原会话完整保留
+   * （非破坏，CC 差异化）。
    * @param {import('@deepseek-ai/dsh-session').Session} source - 源会话。
-   * @param {object} record - 目标检查点。
+   * @param {import('./types.d.ts').CheckpointRecord} record - 目标检查点。
    * @returns {import('@deepseek-ai/dsh-session').Session} 子会话。
    */
   function replaySession(source, record) {
     const boundary = typeof record.sessionBoundary === 'number' ? record.sessionBoundary : undefined
+    if (boundary !== undefined && typeof ctx.sessions.fork === 'function') {
+      // 官方 fork：边界前缀深拷贝进子会话（fork 自行设定 isSeeded /
+      // inheritedEventCount / cwd / parentSession）。boundary 是现有事件 seq，
+      // 按 SessionSeq 品牌构造（运行时即原数字）。
+      return ctx.sessions.fork(source, SessionSeq(boundary))
+    }
+    // 手搓回退：无闭合边界（空种子全新子会话）或宿主无 fork 时 —— create +
+    // 显式 `inheritedEventCount: seed.length` + `meta.isSeeded: true`
+    // （两者必须同批——宿主对 seeded 构造校验三条）。
     const seed = replaySeedOf(sessionEvents(source), boundary)
     const meta = {
       ...(typeof source.header?.cwd === 'string' && source.header.cwd.length > 0 ? { cwd: source.header.cwd } : {}),
       parentSession: source.id,
-      seedLength: seed.length,
+      isSeeded: true,
     }
-    return ctx.sessions.create(undefined, { seed, meta })
+    return ctx.sessions.create(undefined, { seed, inheritedEventCount: SessionLogOffset(seed.length), meta })
   }
 
   /**
    * 向重放子会话注入一条回退通知：说明哪些状态已恢复、之后的结果可能失效。
    * 通知是持久的 user/message（plugin source），派生历史会投影它。
    * @param {import('@deepseek-ai/dsh-session').Session} child - 重放子会话。
-   * @param {object} record - 检查点记录。
-   * @param {object} segments - {workspace?, config?, session?, workspaceNote?, configNote?}。
-   * @param {{record: object}|undefined} guard - pre-rewind 保护检查点。
+   * @param {import('./types.d.ts').CheckpointRecord} record - 检查点记录。
+   * @param {{workspace?: unknown, config?: unknown, workspaceNote?: string, configNote?: string}} segments - 各态恢复标记与备注（值只作真值判断）。
+   * @param {{record?: import('./types.d.ts').CheckpointRecord}|undefined} guard - pre-rewind 保护检查点。
    */
   function injectReplayNotice(child, record, segments, guard) {
     const text = [
@@ -1226,7 +1299,9 @@ export async function apply(ctx, config = {}) {
     try {
       child.append('user/message', createUserMessage({
         content: [{ type: 'text', text }],
-        source: { kind: 'plugin', plugin: PLUGIN_NAME, form: 'rewind-notice', summary: 'rewind' },
+        // 宿主消息 form 词汇尚未收录 'rewind-notice'（插件自有表单名，运行时
+        // 接受任意 form 字符串）：类型上放开这一处。
+        source: { kind: 'plugin', plugin: PLUGIN_NAME, form: /** @type {any} */ ('rewind-notice'), summary: 'rewind' },
       }), { surfaceOp: 'append' })
     } catch (error) {
       // 通知是锦上添花：append 失败绝不能把一次成功的回退变成失败。
@@ -1292,7 +1367,7 @@ export async function apply(ctx, config = {}) {
         return { kind: 'error', text: 'rewind: usage: /rewind [workspace|session|config|all] <id-prefix | step <N> | latest>' }
       }
       const hit = resolveRewindTarget(mine, session, inner)
-      if (hit.error !== undefined) return { kind: 'error', text: hit.error }
+      if ('error' in hit) return { kind: 'error', text: hit.error }
       target = hit
       targets = parsed.target === REWIND_TARGETS.ALL
         ? { workspace: true, session: true, config: true }
@@ -1303,7 +1378,7 @@ export async function apply(ctx, config = {}) {
         }
     } else {
       const hit = resolveRewindTarget(mine, session, parsed)
-      if (hit.error !== undefined) return { kind: 'error', text: hit.error }
+      if ('error' in hit) return { kind: 'error', text: hit.error }
       target = hit
       targets = { workspace: true, session: true, config: true }
     }
@@ -1351,7 +1426,7 @@ export async function apply(ctx, config = {}) {
         target: parsed.kind === 'target' ? parsed.target : REWIND_TARGETS.ALL, error: verdict.reason,
       })
       logger.info(`rewind denied: checkpoint ${record.id} (${verdict.channel}: ${verdict.reason})`)
-      const err = rewindDenied(verdict.reason)
+      const err = rewindDenied(verdict.reason ?? 'denied')
       return { kind: 'error', text: `rewind: ${err.message}` }
     }
     logger.info(`rewind approved (${verdict.channel}): checkpoint ${record.id}, targets ${JSON.stringify(targets)}, phase 0.5 = pre-rewind guard`)
@@ -1381,6 +1456,7 @@ export async function apply(ctx, config = {}) {
       : ''
 
     // 阶段 1：工作区恢复（restore 安全覆盖 / reset-hard CC 对标）。
+    /** @type {{workspace?: {restored: number, mode: 'restore'|'reset-hard'}, config?: {durable: boolean, note: string} | {error: string}, session?: {childSessionId?: string, seedLength?: import('@deepseek-ai/dsh-session').SessionLogOffset, error?: string}}} */
     const segments = {}
     const notes = []
     if (targets.workspace) {
@@ -1395,10 +1471,11 @@ export async function apply(ctx, config = {}) {
         return { kind: 'error', text: `rewind: ${err.message} — nothing was changed` }
       }
       const useResetHard = impact.mode === WORKSPACE_RESTORE_MODES.RESET_HARD && typeof provider.resetHard === 'function'
+      const resetHard = useResetHard && typeof provider.resetHard === 'function' ? provider.resetHard : undefined
       let restore
       try {
-        restore = useResetHard
-          ? await provider.resetHard({ cwd, key: workspaceKeyOf(cwd) }, record.ref, signal)
+        restore = resetHard !== undefined
+          ? await resetHard({ cwd, key: workspaceKeyOf(cwd) }, record.ref, signal)
           : await provider.restore({ cwd, key: workspaceKeyOf(cwd) }, record.ref, signal, parsed.files)
       } catch (error) {
         const message = messageOf(error)
@@ -1434,7 +1511,7 @@ export async function apply(ctx, config = {}) {
     if (targets.session) {
       try {
         const child = replaySession(session, record)
-        segments.session = { childSessionId: child.id, seedLength: child.header?.inheritedEventCount ?? 0 }
+        segments.session = { childSessionId: child.id, seedLength: child.inheritedEventCount }
         injectReplayNotice(child, record, segments, guard)
         logger.info(`rewind phase 3 ok: replayed session ${child.id} from checkpoint ${record.id} (boundary ${record.sessionBoundary ?? 'none'})`)
       } catch (error) {
@@ -1445,8 +1522,10 @@ export async function apply(ctx, config = {}) {
     }
 
     const workspaceFailed = segments.workspace === undefined && targets.workspace
-    const configFailed = segments.config?.error !== undefined
-    const sessionFailed = segments.session?.error !== undefined
+    const configError = segments.config !== undefined && 'error' in segments.config ? segments.config.error : undefined
+    const sessionError = segments.session?.error
+    const configFailed = configError !== undefined
+    const sessionFailed = sessionError !== undefined
     const outcome = workspaceFailed || configFailed || sessionFailed
       ? (workspaceFailed ? REWIND_OUTCOMES.FAILED : REWIND_OUTCOMES.PARTIAL)
       : REWIND_OUTCOMES.RESTORED
@@ -1454,7 +1533,11 @@ export async function apply(ctx, config = {}) {
       checkpointId: record.id, sessionId: session.id, outcome,
       target: parsed.kind === 'target' ? parsed.target : REWIND_TARGETS.ALL,
       workspace: segments.workspace !== undefined ? { restored: segments.workspace.restored, mode: segments.workspace.mode } : undefined,
-      config: segments.config !== undefined ? { durable: segments.config.durable ?? false, error: segments.config.error } : undefined,
+      config: segments.config !== undefined
+        ? ('error' in segments.config
+          ? { durable: false, error: segments.config.error }
+          : { durable: segments.config.durable })
+        : undefined,
       session: segments.session !== undefined ? { childSessionId: segments.session.childSessionId, error: segments.session.error } : undefined,
       preCheckpointId: guard?.record?.id,
     })
@@ -1464,7 +1547,7 @@ export async function apply(ctx, config = {}) {
       resultLines.push(`workspace: restored ${segments.workspace.restored} file(s) via ${segments.workspace.mode === WORKSPACE_RESTORE_MODES.RESET_HARD ? 'git reset --hard' : 'safe overwrite'} (provider ${record.provider})`)
     }
     if (segments.config !== undefined) {
-      resultLines.push(segments.config.error !== undefined
+      resultLines.push('error' in segments.config
         ? `config: restore failed (${segments.config.error})`
         : `config: ${segments.config.note}`)
     }
@@ -1474,8 +1557,8 @@ export async function apply(ctx, config = {}) {
         : `session: replayed as child session ${segments.session.childSessionId} (open it to continue from before the checkpoint turn; this session keeps its later history)`)
     }
     const errors = []
-    if (configFailed) errors.push(`config restore failed: ${segments.config.error}`)
-    if (sessionFailed) errors.push(`session replay failed: ${segments.session.error}`)
+    if (configFailed) errors.push(`config restore failed: ${configError}`)
+    if (sessionFailed) errors.push(`session replay failed: ${sessionError}`)
     if (errors.length > 0) {
       resultLines.push(`rewind: ${outcome === REWIND_OUTCOMES.FAILED ? 'failed' : 'completed with errors'} — ${errors.join('; ')}`)
     }
@@ -1534,13 +1617,16 @@ export async function apply(ctx, config = {}) {
       return { kind: 'error', text: `checkpoint: capture failed (${result.failed}) — no checkpoint was created` }
     }
     const record = result.record
+    if (record === undefined) {
+      return { kind: 'error', text: 'checkpoint: capture produced no record' }
+    }
     return {
       kind: 'success',
       text: [
         `checkpoint: captured #${record.id}`,
         `kind: manual · provider: ${record.provider} · turn ${record.turn} step ${record.step}`,
         `session cursor: seq ${record.seq} · workspace tree: ${record.tree ?? 'n/a (copy)'}`,
-        `config snapshot: ${Object.keys(record.config).length} key(s)`,
+        `config snapshot: ${Object.keys(record.config ?? {}).length} key(s)`,
         ...(record.note !== undefined ? [`note: ${record.note}`] : []),
         'restore with /rewind <id> (all three states) or /rewind workspace|session|config <id>',
       ].join('\n'),
@@ -1550,10 +1636,11 @@ export async function apply(ctx, config = {}) {
   /**
    * /rewind clear：删除本会话本工作区的全部检查点（记录 + provider 存储），
    * 经同一确认门（自定义问题与标签），绝不触碰工作区文件。
-   * @param {object[]} mine - 本会话记录。
+   * @param {import('./types.d.ts').CheckpointRecord[]} mine - 本会话记录。
    * @param {import('@deepseek-ai/dsh-session').Session} session - 会话。
-   * @param {object} agent - 命令所属 agent（确认门路由与审计归属）。
+   * @param {import('@deepseek-ai/dsh-agent').Agent} agent - 命令所属 agent（确认门路由与审计归属）。
    * @param {AbortSignal} signal - 取消信号。
+   * @param {boolean} [all] - 是否跨全部会话清理。
    * @returns {Promise<import('@deepseek-ai/dsh-commands').CommandResult>} 命令结果。
    */
   async function handleClear(mine, session, agent, signal, all = false) {
