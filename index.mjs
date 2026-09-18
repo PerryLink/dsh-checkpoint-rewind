@@ -1184,21 +1184,33 @@ export async function apply(ctx, config = {}) {
   }
 
   /**
-   * 会话回退：官方重放 —— 以检查点边界为界 seed 出全新子会话
-   * （sessions.create(id,{seed})）。原会话完整保留（非破坏，CC 差异化）。
+   * 会话回退：官方重放 —— 以检查点边界为界 seed 出全新子会话。优先走
+   * SessionStore.fork（边界前缀深拷贝，fork 自行设定 isSeeded /
+   * inheritedEventCount / cwd / parentSession）；宿主无 fork 时手搓回退：
+   * create + 显式 `inheritedEventCount: seed.length` + `meta.isSeeded: true`
+   * （两者必须同批——宿主对 seeded 构造校验三条）。原会话完整保留
+   * （非破坏，CC 差异化）。
    * @param {import('@deepseek-ai/dsh-session').Session} source - 源会话。
    * @param {object} record - 目标检查点。
    * @returns {import('@deepseek-ai/dsh-session').Session} 子会话。
    */
   function replaySession(source, record) {
     const boundary = typeof record.sessionBoundary === 'number' ? record.sessionBoundary : undefined
+    if (boundary !== undefined && typeof ctx.sessions.fork === 'function') {
+      // 官方 fork：边界前缀深拷贝进子会话（fork 自行设定 isSeeded /
+      // inheritedEventCount / cwd / parentSession）。
+      return ctx.sessions.fork(source, boundary)
+    }
+    // 手搓回退：无闭合边界（空种子全新子会话）或宿主无 fork 时 —— create +
+    // 显式 `inheritedEventCount: seed.length` + `meta.isSeeded: true`
+    // （两者必须同批——宿主对 seeded 构造校验三条）。
     const seed = replaySeedOf(sessionEvents(source), boundary)
     const meta = {
       ...(typeof source.header?.cwd === 'string' && source.header.cwd.length > 0 ? { cwd: source.header.cwd } : {}),
       parentSession: source.id,
-      seedLength: seed.length,
+      isSeeded: true,
     }
-    return ctx.sessions.create(undefined, { seed, meta })
+    return ctx.sessions.create(undefined, { seed, inheritedEventCount: seed.length, meta })
   }
 
   /**
@@ -1434,7 +1446,7 @@ export async function apply(ctx, config = {}) {
     if (targets.session) {
       try {
         const child = replaySession(session, record)
-        segments.session = { childSessionId: child.id, seedLength: child.header?.inheritedEventCount ?? 0 }
+        segments.session = { childSessionId: child.id, seedLength: child.inheritedEventCount }
         injectReplayNotice(child, record, segments, guard)
         logger.info(`rewind phase 3 ok: replayed session ${child.id} from checkpoint ${record.id} (boundary ${record.sessionBoundary ?? 'none'})`)
       } catch (error) {
