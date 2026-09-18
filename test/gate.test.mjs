@@ -4,21 +4,29 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { confirmRewind, hasOpenTurn, makeEventGate, maybeAppendSessionEvent, pickChannel } from '../lib/gate.mjs'
 
+/** @param {(request: object) => object} answer */
 function fakeQuestions(answer) {
+  /** @type {any[]} */
+  const calls = []
   return {
-    calls: [],
+    calls,
+    /** @param {object} request */
     async ask(request) {
-      this.calls.push(request)
+      calls.push(request)
       return answer(request)
     },
   }
 }
 
+/** @param {string | Error} outcome */
 function fakeApproval(outcome) {
+  /** @type {any[]} */
+  const calls = []
   return {
-    calls: [],
+    calls,
+    /** @param {object} req */
     async request(req) {
-      this.calls.push(req)
+      calls.push(req)
       if (outcome instanceof Error) throw outcome
       return outcome
     },
@@ -26,18 +34,20 @@ function fakeApproval(outcome) {
 }
 
 const signal = new AbortController().signal
+/** @param {{get: (name: string) => unknown}} ctx @param {string} [confirmVia] */
 const deps = (ctx, confirmVia = 'auto') => ({ ctx, confirmVia, summary: 'summary-text' })
+/** @param {Array<{type: string, data?: object}>} [events] */
 const agentInTurn = (events = [{ type: 'turn/start', data: { turn: 1 } }]) => ({ id: 'a1', session: { events } })
 
 describe('pickChannel', () => {
   it('auto 优先 userQuestions、其次 approval、皆无 → none', () => {
-    assert.equal(pickChannel('auto', { get: (n) => (n === 'userQuestions' ? {} : undefined) }), 'userQuestions')
-    assert.equal(pickChannel('auto', { get: (n) => (n === 'approval' ? {} : undefined) }), 'approval')
+    assert.equal(pickChannel('auto', { get: (/** @type {string} */ n) => (n === 'userQuestions' ? {} : undefined) }), 'userQuestions')
+    assert.equal(pickChannel('auto', { get: (/** @type {string} */ n) => (n === 'approval' ? {} : undefined) }), 'approval')
     assert.equal(pickChannel('auto', { get: () => undefined }), 'none')
   })
 
   it('显式指定不再自动选择', () => {
-    const ctx = { get: (n) => (n === 'userQuestions' ? {} : n === 'approval' ? {} : undefined) }
+    const ctx = { get: (/** @type {string} */ n) => (n === 'userQuestions' ? {} : n === 'approval' ? {} : undefined) }
     assert.equal(pickChannel('userQuestions', ctx), 'userQuestions')
     assert.equal(pickChannel('approval', ctx), 'approval')
   })
@@ -57,7 +67,7 @@ describe('confirmRewind（userQuestions 通道）', () => {
     const questions = fakeQuestions(() => ({ answers: [{ id: 'rewind-confirm', selected: ['Cancel'] }] }))
     const verdict = await confirmRewind(deps({ get: () => questions }), agentInTurn(), signal)
     assert.equal(verdict.allowed, false)
-    assert.match(verdict.reason, /chose not to restore/)
+    assert.match(verdict.reason ?? '', /chose not to restore/)
   })
 
   it('自由文本回答不是批准 → 拒绝', async () => {
@@ -70,7 +80,7 @@ describe('confirmRewind（userQuestions 通道）', () => {
     const questions = fakeQuestions(() => { throw new Error('ui exploded') })
     const verdict = await confirmRewind(deps({ get: () => questions }), agentInTurn(), signal)
     assert.equal(verdict.allowed, false)
-    assert.match(verdict.reason, /ui exploded/)
+    assert.match(verdict.reason ?? '', /ui exploded/)
   })
 
   it('无 userQuestions 服务 → 失败关闭', async () => {
@@ -115,8 +125,8 @@ describe('confirmRewind（approval 通道）', () => {
     const closed = agentInTurn([{ type: 'turn/start', data: { turn: 1 } }, { type: 'turn/end', data: { turn: 1 } }])
     const verdict = await confirmRewind(deps({ get: () => approval }, 'approval'), closed, signal)
     assert.equal(verdict.allowed, false)
-    assert.match(verdict.reason, /approval requires an open turn/)
-    assert.match(verdict.reason, /mount userQuestions/)
+    assert.match(verdict.reason ?? '', /approval requires an open turn/)
+    assert.match(verdict.reason ?? '', /mount userQuestions/)
     assert.equal(approval.calls.length, 0, '绝不调用无轮次必抛的 approval.request')
   })
 
@@ -124,7 +134,7 @@ describe('confirmRewind（approval 通道）', () => {
     const approval = fakeApproval(new Error('no open turn'))
     const verdict = await confirmRewind(deps({ get: () => approval }, 'approval'), agentInTurn(), signal)
     assert.equal(verdict.allowed, false)
-    assert.match(verdict.reason, /no open turn/)
+    assert.match(verdict.reason ?? '', /no open turn/)
   })
 })
 
@@ -152,9 +162,11 @@ describe('confirmRewind（无回答者）', () => {
 describe('会话事件自适应门', () => {
   it('宿主未收录的类型不 append（rc.2 持久化加载安全）', () => {
     const gate = makeEventGate(new Set(['known/type']))
+    /** @type {string[]} */
     const appended = []
     const session = {
-      append(type, data) {
+      /** @param {string} type @param {object} _data */
+      append(type, _data) {
         appended.push(type)
         return { type }
       },
@@ -166,8 +178,10 @@ describe('会话事件自适应门', () => {
 
   it('宿主收录的类型正常 append', () => {
     const gate = makeEventGate(new Set(['checkpoint/snapshot']))
+    /** @type {Array<{type: string, data?: object}>} */
     const appended = []
     const session = {
+      /** @param {string} type @param {object} data */
       append(type, data) {
         const event = { type, data }
         appended.push(event)
@@ -176,11 +190,12 @@ describe('会话事件自适应门', () => {
     }
     const result = maybeAppendSessionEvent(session, 'checkpoint/snapshot', { id: 'x' }, gate, () => {})
     assert.deepEqual(appended, [{ type: 'checkpoint/snapshot', data: { id: 'x' } }])
-    assert.equal(result.type, 'checkpoint/snapshot')
+    assert.equal(/** @type {{type?: string}} */ (result).type, 'checkpoint/snapshot')
   })
 
   it('append 抛错只警告不抛出（快照是旁路，绝不破坏会话）', () => {
     const gate = makeEventGate(new Set(['checkpoint/snapshot']))
+    /** @type {string[]} */
     const warnings = []
     const session = {
       append() {
@@ -199,8 +214,10 @@ describe('会话事件自适应门', () => {
 
   it('宿主支持 ignorable 信封：未收录类型以 { ignorable: true } append（投影/审计链点亮）', () => {
     const gate = makeEventGate(new Set(['known/type']), true)
+    /** @type {Array<{type: string, data?: object, ignorable?: boolean}>} */
     const appended = []
     const session = {
+      /** @param {string} type @param {object} data @param {{ignorable?: boolean}} [options] */
       append(type, data, options) {
         const event = { type, data, ...(options?.ignorable === true ? { ignorable: true } : {}) }
         appended.push(event)
@@ -209,14 +226,16 @@ describe('会话事件自适应门', () => {
     }
     const result = maybeAppendSessionEvent(session, 'checkpoint/snapshot', { id: 'x' }, gate, () => {})
     assert.deepEqual(appended, [{ type: 'checkpoint/snapshot', data: { id: 'x' }, ignorable: true }])
-    assert.equal(result.ignorable, true)
+    assert.equal(/** @type {{ignorable?: boolean}} */ (result).ignorable, true)
   })
 
   it('宿主支持 ignorable 信封：已收录类型仍直接 append（不带信封）', () => {
     const gate = makeEventGate(new Set(['checkpoint/snapshot']), true)
+    /** @type {Array<{ignorable?: boolean} | null>} */
     const appended = []
     const session = {
-      append(type, data, options) {
+      /** @param {string} type @param {object} _data @param {{ignorable?: boolean}} [options] */
+      append(type, _data, options) {
         appended.push(options ?? null)
         return { type }
       },
@@ -227,6 +246,7 @@ describe('会话事件自适应门', () => {
 
   it('ignorable append 抛错（宿主拒绝未知选项）→ 只警告不抛出', () => {
     const gate = makeEventGate(new Set(['known/type']), true)
+    /** @type {string[]} */
     const warnings = []
     const session = {
       append() {

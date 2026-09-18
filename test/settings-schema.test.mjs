@@ -33,8 +33,8 @@ describe('双源 schema 键一致（cordis.yml Schemastery ⇄ settings Schemast
   })
 
   it('schema 默认值与 entry 默认值一致（设置页与 cordis.yml 同源默认）', () => {
-    const schemaValue = checkpointSettingsSchema({})
-    const entryValue = resolveConfig({})
+    const schemaValue = /** @type {Record<string, unknown>} */ (checkpointSettingsSchema({}))
+    const entryValue = /** @type {Record<string, unknown>} */ (resolveConfig({}))
     for (const key of Object.keys(entryValue)) {
       assert.deepEqual(schemaValue[key], entryValue[key], `default mismatch on ${key}`)
     }
@@ -46,11 +46,12 @@ describe('双源 schema 键一致（cordis.yml Schemastery ⇄ settings Schemast
   })
 
   it('Config schema 加载期仍校验非法值（settings 之外的响亮失败面）', () => {
-    assert.throws(() => resolveConfig({ workspaceRestore: 'clean' }), /workspaceRestore/)
-    assert.throws(() => resolveConfig({ autoCheckpoint: { intervalMinutes: -1 } }), /intervalMinutes/)
-    assert.throws(() => resolveConfig({ autoCheckpoint: { enabled: 'yes' } }), /autoCheckpoint\.enabled/)
-    assert.throws(() => resolveConfig({ promptSection: 1 }), /promptSection/)
-    assert.throws(() => resolveConfig({ checkpointTool: 1 }), /checkpointTool/)
+    // 非法值负例：类型上按 any 传入（这些正是要证明会被加载期校验拒绝的值）。
+    assert.throws(() => resolveConfig(/** @type {any} */ ({ workspaceRestore: 'clean' })), /workspaceRestore/)
+    assert.throws(() => resolveConfig(/** @type {any} */ ({ autoCheckpoint: { intervalMinutes: -1 } })), /intervalMinutes/)
+    assert.throws(() => resolveConfig(/** @type {any} */ ({ autoCheckpoint: { enabled: 'yes' } })), /autoCheckpoint\.enabled/)
+    assert.throws(() => resolveConfig(/** @type {any} */ ({ promptSection: 1 })), /promptSection/)
+    assert.throws(() => resolveConfig(/** @type {any} */ ({ checkpointTool: 1 })), /checkpointTool/)
   })
 })
 

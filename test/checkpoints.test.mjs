@@ -17,6 +17,7 @@ import {
   stepEndSeqOf,
 } from '../lib/checkpoints.mjs'
 
+/** @param {object} [overrides] @returns {import('../types.d.ts').CheckpointRecord} */
 function record(overrides) {
   return {
     id: 'cp-1',
@@ -25,6 +26,7 @@ function record(overrides) {
     seq: 10,
     time: 1000,
     provider: 'copy',
+    kind: 'manual',
     triggerTool: 'bash',
     turn: 1,
     step: 1,
@@ -34,6 +36,10 @@ function record(overrides) {
     ...overrides,
   }
 }
+
+/** 断言辅助：解析结果收窄到 invalid 形态（测试已知输入非法）。 */
+/** @param {unknown} result @returns {{message: string}} */
+const invalidOf = (result) => /** @type {{message: string}} */ (result)
 
 describe('sortOldestFirst', () => {
   it('按 (time, seq) 升序且不修改入参', () => {
@@ -206,7 +212,7 @@ describe('parseRewindInput（/rewind 寻址语法）', () => {
     assert.deepEqual(parseRewindInput('step 3'), { kind: 'step', step: 3 })
     assert.deepEqual(parseRewindInput('  STEP 12 '), { kind: 'step', step: 12 })
     assert.deepEqual(parseRewindInput('step 0').kind, 'invalid')
-    assert.match(parseRewindInput('step 0').message, /positive-integer/)
+    assert.match(invalidOf(parseRewindInput('step 0')).message, /positive-integer/)
     assert.deepEqual(parseRewindInput('step abc').kind, 'invalid')
     assert.deepEqual(parseRewindInput('step').kind, 'invalid')
   })
@@ -217,14 +223,14 @@ describe('parseRewindInput（/rewind 寻址语法）', () => {
     assert.deepEqual(parseRewindInput('config step 2'), { kind: 'target', target: 'config', input: 'step 2' })
     assert.deepEqual(parseRewindInput('  ALL a1b2 '), { kind: 'target', target: 'all', input: 'a1b2' })
     assert.deepEqual(parseRewindInput('workspace').kind, 'invalid')
-    assert.match(parseRewindInput('workspace').message, /usage: \/rewind \[workspace\|session\|config\|all\]/)
+    assert.match(invalidOf(parseRewindInput('workspace')).message, /usage: \/rewind \[workspace\|session\|config\|all\]/)
   })
 
   it('diff <a> <b> → diff；缺参数 → invalid', () => {
     assert.deepEqual(parseRewindInput('diff a1b2 c3d4'), { kind: 'diff', a: 'a1b2', b: 'c3d4' })
     assert.deepEqual(parseRewindInput('  DIFF a b '), { kind: 'diff', a: 'a', b: 'b' })
     assert.deepEqual(parseRewindInput('diff a').kind, 'invalid')
-    assert.match(parseRewindInput('diff a').message, /diff <checkpoint-a> <checkpoint-b>/)
+    assert.match(invalidOf(parseRewindInput('diff a')).message, /diff <checkpoint-a> <checkpoint-b>/)
   })
 
   it('其余输入 → id', () => {
@@ -237,7 +243,7 @@ describe('parseRewindInput（/rewind 寻址语法）', () => {
     assert.deepEqual(parseRewindInput('  PREVIEW step 2 '), { kind: 'preview', target: 'step 2' })
     assert.deepEqual(parseRewindInput('preview latest'), { kind: 'preview', target: 'latest' })
     assert.deepEqual(parseRewindInput('preview').kind, 'invalid')
-    assert.match(parseRewindInput('preview').message, /preview <id-prefix/)
+    assert.match(invalidOf(parseRewindInput('preview')).message, /preview <id-prefix/)
   })
 
   it('--files 选择性恢复过滤器：挂到目标形态（去重、保序）', () => {
@@ -275,7 +281,7 @@ describe('parseCheckpointInput（/checkpoint 语法）', () => {
     assert.deepEqual(parseCheckpointInput('  NOTE before release '), { kind: 'create', note: 'before release' })
     assert.deepEqual(parseCheckpointInput('before release'), { kind: 'create', note: 'before release' })
     assert.deepEqual(parseCheckpointInput('note').kind, 'invalid')
-    assert.match(parseCheckpointInput('note').message, /note <text>/)
+    assert.match(invalidOf(parseCheckpointInput('note')).message, /note <text>/)
     assert.deepEqual(parseCheckpointInput('diff a').kind, 'invalid')
   })
 })
@@ -424,6 +430,7 @@ describe('doctorPass / unrestorable 标记', () => {
       record({ id: 'cp-dead', ref: 'sha-dead' }),
     ]
     const mockProvider = {
+      /** @param {object} _ws @param {string} ref */
       async verifyObjectExists(_ws, ref) {
         return ref === 'sha-alive'
       },

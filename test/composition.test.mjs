@@ -18,6 +18,7 @@ const runner = join(repositoryRoot, 'scripts', 'loader-runner.mjs')
 const entry = join(repositoryRoot, 'index.mjs')
 
 /** One cordis.yml: real service rows, then the plugin row with config. */
+/** @param {string} pluginRow @param {string[]} [configLines] */
 function configFor(pluginRow, configLines = []) {
   return [
     "- name: '@deepseek-ai/dsh-session'",
@@ -30,6 +31,7 @@ function configFor(pluginRow, configLines = []) {
   ].join('\n')
 }
 
+/** @param {string} configPath @param {string} expected */
 function runRunner(configPath, expected) {
   const result = spawnSync(process.execPath, [runner, configPath, expected], {
     cwd: repositoryRoot,
@@ -49,6 +51,7 @@ test('Loader composition mounts the plugin and applies its default config', () =
   const evidence = runRunner(configPath, 'tool')
   assert.equal(evidence.status, 0, `stdout:\n${evidence.stdout}\nstderr:\n${evidence.stderr}`)
   const marker = evidence.stdout.match(/DSH_LOADER_RESULT (.+)$/mu)
+  assert.ok(marker !== null, `loader result marker missing:\n${evidence.stdout}`)
   const summary = JSON.parse(marker[1])
   assert.ok(summary.commands.includes('rewind'))
   assert.ok(summary.commands.includes('checkpoint'))
@@ -64,6 +67,7 @@ test('Loader composition applies the special config value (checkpointTool: false
   const evidence = runRunner(configPath, 'no-tool')
   assert.equal(evidence.status, 0, `stdout:\n${evidence.stdout}\nstderr:\n${evidence.stderr}`)
   const marker = evidence.stdout.match(/DSH_LOADER_RESULT (.+)$/mu)
+  assert.ok(marker !== null, `loader result marker missing:\n${evidence.stdout}`)
   const summary = JSON.parse(marker[1])
   assert.equal(summary.checkpointTool, false)
   assert.ok(summary.commands.includes('rewind'), '/rewind stays registered when only the tool is disabled')

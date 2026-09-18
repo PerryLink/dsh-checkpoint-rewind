@@ -17,10 +17,12 @@ const SHA2 = 'fedcba9876543210fedcba9876543210fedcba98'
 
 /**
  * scripted git：按 (args) → 响应 的脚本表回放，记录全部调用。
- * @param {object} script - { 'verb sub...': {code, stdout, stderr} | '...' }。
+ * @param {Record<string, {code: number, stdout: string, stderr: string} | Error>} script - 脚本表。
  */
 function scriptedGit(script) {
+  /** @type {string[][]} */
   const calls = []
+  /** @param {string[]} args */
   const run = async (args) => {
     calls.push(args)
     const key = args.join(' ')
@@ -51,7 +53,7 @@ describe('git provider（scripted runner）', () => {
     const provider = makeGitProvider({ gitBin: 'git', run })
     const probe = await provider.available(workspace)
     assert.equal(probe.ok, false)
-    assert.match(probe.reason, /not inside a git working tree/)
+    assert.match(probe.reason ?? '', /not inside a git working tree/)
   })
 
   it('available：unborn HEAD（无初始提交）→ ok=false + 原因（快照原语依赖 HEAD）', async () => {
@@ -62,7 +64,7 @@ describe('git provider（scripted runner）', () => {
     const provider = makeGitProvider({ gitBin: 'git', run })
     const probe = await provider.available(workspace)
     assert.equal(probe.ok, false)
-    assert.match(probe.reason, /unborn HEAD/)
+    assert.match(probe.reason ?? '', /unborn HEAD/)
   })
 
   it('available：探测结果按工作区键缓存（第二次调用不再 spawn）', async () => {
@@ -133,6 +135,7 @@ describe('git provider（scripted runner）', () => {
     })
     const provider = makeGitProvider({ gitBin: 'git', run })
     const result = await provider.snapshot(workspace, { triggerTool: 'bash' })
+    assert.ok(result, 'snapshot captured')
     assert.equal(result.bytes, 24, '未变更的 a.txt 不计入增量')
   })
 
@@ -183,13 +186,14 @@ describe('git provider（scripted runner）', () => {
     const result = await provider.restore(workspace, SHA)
     assert.equal(result.restored, 1, '只计 ref 中存在且工作树不同的文件（staged.txt 不在 ref）')
     assert.deepEqual(result.leftovers, ['new.txt', 'staged.txt'])
-    assert.match(result.notes[0], /left in place/)
+    assert.match((result.notes ?? [])[0], /left in place/)
     assert.deepEqual(calls[3], ['restore', `--source=${SHA}`, '--worktree', '--', 'a.txt', 'b.txt'])
   })
 
   it('restore：显式路径按批分块（超过批量上限拆多次 restore）', async () => {
     const count = 201
     const names = Array.from({ length: count }, (_, index) => `f${index}.txt`)
+    /** @type {Record<string, {code: number, stdout: string, stderr: string} | Error>} */
     const script = {
       [`cat-file -e ${SHA}`]: { code: 0, stdout: '', stderr: '' },
       [`ls-tree -r --name-only ${SHA}`]: { code: 0, stdout: `${names.join('\n')}\n`, stderr: '' },
@@ -349,7 +353,7 @@ describe('git provider（scripted runner）', () => {
     const result = await provider.resetHard(workspace, SHA)
     assert.equal(result.restored, 2)
     assert.deepEqual(result.leftovers, ['new.txt'])
-    assert.match(result.notes[0], /branch head moved/)
+    assert.match((result.notes ?? [])[0], /branch head moved/)
     assert.deepEqual(calls[1], ['reset', '--hard', SHA])
   })
 
@@ -404,6 +408,7 @@ describe('git provider（scripted runner）', () => {
 describe('git provider（真实 git，能力检测）', () => {
   it('真实仓库：快照 → 修改 → 恢复 → 内容还原；索引与历史不动', async (t) => {
     const repo = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-rewind-git-'))
+    /** @param {string[]} args */
     const runReal = async (args) => {
       const result = await new Promise((resolve, reject) => {
         const child = spawn('git', args, { cwd: repo, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
@@ -438,7 +443,7 @@ describe('git provider（真实 git，能力检测）', () => {
     assert.ok(snapshot, 'snapshot should exist')
     assert.ok(snapshot.bytes > 0)
     assert.equal(snapshot.files, 1)
-    assert.match(snapshot.tree, /^[0-9a-f]{40,64}$/, '三态模型：快照携带 tree SHA')
+    assert.match(snapshot.tree ?? '', /^[0-9a-f]{40,64}$/, '三态模型：快照携带 tree SHA')
     assert.equal((await runReal(['rev-parse', `${snapshot.ref}^{tree}`])).stdout.trim(), snapshot.tree, 'tree 与快照提交一致')
 
     await fs.writeFile(path.join(repo, 'a.txt'), 'v3\n')
@@ -464,6 +469,7 @@ describe('git provider（真实 git，能力检测）', () => {
 
   it('真实仓库：resetHard 把分支头移到快照提交（工作树/索引一致化，未跟踪保留）', async (t) => {
     const repo = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-rewind-reset-'))
+    /** @param {string[]} args */
     const runReal = async (args) => {
       const result = await new Promise((resolve, reject) => {
         const child = spawn('git', args, { cwd: repo, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
@@ -490,6 +496,7 @@ describe('git provider（真实 git，能力检测）', () => {
     const provider = makeGitProvider({ gitBin: 'git', run: runReal })
     const ws = { cwd: repo, key: repo }
     const snapshot = await provider.snapshot(ws, { triggerTool: 'bash' })
+    assert.ok(snapshot, 'snapshot should exist')
     // 快照后：改文件 + 提交 + 新建未跟踪文件。
     await fs.writeFile(path.join(repo, 'a.txt'), 'v2\n')
     await runReal(['commit', '-q', '-am', 'after'])
@@ -504,6 +511,7 @@ describe('git provider（真实 git，能力检测）', () => {
 
   it('真实仓库：diffFiles 对比两个快照的变更集', async (t) => {
     const repo = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-rewind-diff-'))
+    /** @param {string[]} args */
     const runReal = async (args) => {
       const result = await new Promise((resolve, reject) => {
         const child = spawn('git', args, { cwd: repo, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
@@ -530,10 +538,12 @@ describe('git provider（真实 git，能力检测）', () => {
     const provider = makeGitProvider({ gitBin: 'git', run: runReal })
     const ws = { cwd: repo, key: repo }
     const first = await provider.snapshot(ws, { triggerTool: 'bash' })
+    assert.ok(first, 'first snapshot should exist')
     await fs.writeFile(path.join(repo, 'a.txt'), 'v2\n')
     await fs.writeFile(path.join(repo, 'b.txt'), 'new\n')
     await runReal(['add', 'b.txt']) // stash create 只捕获已跟踪文件：新文件先入索引
     const second = await provider.snapshot(ws, { triggerTool: 'bash' })
+    assert.ok(second, 'second snapshot should exist')
     const diff = await provider.diffFiles(ws, first.ref, second.ref)
     assert.deepEqual(diff.names, ['a.txt', 'b.txt'])
     assert.equal(diff.added, 1)

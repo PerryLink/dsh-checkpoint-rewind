@@ -18,11 +18,16 @@ import {
 } from '../lib/projection.mjs'
 import { mountPlugin } from './helpers/ctx-harness.mjs'
 
+/** @param {object} data */
 const snapshotEvent = (data) => ({ type: 'checkpoint/snapshot', data })
+/** @param {object} data */
 const boundStep = (data) => ({ type: 'checkpoint/bound', data })
+/** @param {string[]} ids @param {string} [reason] */
 const prune = (ids, reason = 'maxSnapshots') => ({ type: 'checkpoint/prune', data: { ids, reason } })
+/** @param {string} checkpointId @param {string} outcome */
 const rewind = (checkpointId, outcome) => ({ type: 'checkpoint/rewind', data: { checkpointId, sessionId: 's1', outcome } })
 
+/** @param {object} [overrides] @returns {import('../types.d.ts').CheckpointRecord} */
 function record(overrides = {}) {
   return {
     id: 'cp-1',
@@ -31,6 +36,7 @@ function record(overrides = {}) {
     seq: 10,
     time: 1000,
     provider: 'copy',
+    kind: 'manual',
     triggerTool: 'bash',
     turn: 1,
     step: 1,
@@ -102,7 +108,9 @@ describe('checkpoints 投影单元（纯折叠）', () => {
 describe('checkpoints 投影单元（真注册表接线）', () => {
   it('插件在注册表存在时注册单元；合成事件驱动后 snapshot 包含 checkpoints', async () => {
     const root = new Context()
+    /** @type {Awaited<ReturnType<typeof root.plugin>>[]} */
     const fibers = []
+    /** @param {any} plugin @param {unknown} [config] */
     const mount = async (plugin, config) => { fibers.push(await root.plugin(plugin, config)) }
     const { facility, records } = await import('./helpers/ctx-harness.mjs').then((m) => m.makeDomainFacility())
     root.provide('storageDomain', facility)
@@ -110,7 +118,7 @@ describe('checkpoints 投影单元（真注册表接线）', () => {
     await mount(SessionProjectionRegistry)
     await import('@deepseek-ai/dsh-commands').then(async ({ default: CommandRuntime }) => mount(CommandRuntime))
     const plugin = await import('../index.mjs')
-    await mount({ name: plugin.name, inject: plugin.inject, apply: (ctx) => plugin.apply(ctx, { provider: 'copy', snapshotDir: path.resolve('/tmp', 'unused') }) })
+    await mount({ name: plugin.name, inject: plugin.inject, apply: (/** @type {import('@deepseek-ai/cordis').Context} */ ctx) => plugin.apply(ctx, { provider: 'copy', snapshotDir: path.resolve('/tmp', 'unused') }) })
 
     const session = root.sessions.create(SessionId('proj-session'), { meta: { cwd: path.resolve('/work') } })
     // 合成事件直接 append（绕过自适应门：投影只消费、不生产）。

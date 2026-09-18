@@ -16,6 +16,7 @@ import {
   sumEntryBytes,
 } from '../lib/render.mjs'
 
+/** @type {{from: string, to: string, error: null, files: {changed: number, added: number, removed: number, names: string[], truncated: boolean, entries: Array<{path: string, status: 'added'|'removed'|'changed'}>}, configDiff: {changed: boolean, lines: number, text: string}, session: {fromSeq: number, toSeq: number, dropped: number}}} */
 const diffData = {
   from: 'aaaa1111',
   to: 'bbbb2222',

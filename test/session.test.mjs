@@ -33,7 +33,7 @@ describe('replaySeedOf（重放种子）', () => {
   it('边界存在 → [0, boundary] 稳定前缀（含 turn/end，结束于轮次之间）', () => {
     const seed = replaySeedOf(events, 3)
     assert.equal(seed.length, 4)
-    assert.equal(seed.at(-1).type, 'turn/end')
+    assert.equal(seed.at(-1)?.type, 'turn/end')
     assert.deepEqual(seed, events.slice(0, 4))
   })
 

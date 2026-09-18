@@ -7,6 +7,7 @@ import { CheckpointPanelService } from '../lib/panel.mjs'
 import { TIMELINE_DESCRIPTOR } from '../lib/wire.mjs'
 
 /** 合成领域记录（面板只读视图所需字段 + diff 所需 ref/config/cwd）。 */
+/** @param {object} [over] */
 function recordOf(over = {}) {
   return {
     id: 'aaaa1111',
@@ -31,13 +32,14 @@ function recordOf(over = {}) {
 }
 
 /** 面板依赖夹具：内存表 + 空写链 + copy provider 的 diffFiles 桩。 */
+/** @param {Array<{id: string}>} records @returns {any} */
 function makeDeps(records) {
   const table = new Map(records.map((record) => [record.id, record]))
   return {
     getTable: () => Promise.resolve(table),
     ops: Promise.resolve(),
     registry: {
-      get: (name) => name === 'copy'
+      get: (/** @type {string} */ name) => name === 'copy'
         ? {
           name: 'copy',
           diffFiles: async () => ({
@@ -53,6 +55,7 @@ function makeDeps(records) {
 }
 
 /** 经代理调用服务方法，复刻 cordis getTraceable 的 this=Proxy 形态。 */
+/** @param {Array<{id: string}>} records */
 function makeProxiedService(records) {
   const service = new CheckpointPanelService(new Context(), makeDeps(records))
   return new Proxy(service, {})
@@ -61,11 +64,13 @@ function makeProxiedService(records) {
 describe('TIMELINE_DESCRIPTOR 契约（issue #5 回归）', () => {
   it('limit 参数声明 acceptsUndefined: true，网关放行缺席字段', () => {
     const limit = TIMELINE_DESCRIPTOR.parameters.find((p) => p.name === 'limit')
+    assert.ok(limit !== undefined, 'limit 参数在描述符中')
     assert.equal(limit.acceptsUndefined, true)
   })
 
   it('zod .optional() 只校验已提供的值：越界拒绝、合法放行', () => {
     const limit = TIMELINE_DESCRIPTOR.parameters.find((p) => p.name === 'limit')
+    assert.ok(limit !== undefined, 'limit 参数在描述符中')
     assert.equal(limit.codec.schema.safeParse(50).success, true)
     assert.equal(limit.codec.schema.safeParse(0).success, false)
   })
@@ -120,7 +125,7 @@ describe('CheckpointPanelService 经 traceable proxy 调用（issue #6 回归）
   it('restorePreview：未知 id 返回 error（不抛业务异常）', async () => {
     const proxy = makeProxiedService([recordOf()])
     const result = await proxy.restorePreview('nope')
-    assert.match(result.error, /unknown checkpoint id/)
+    assert.match(result.error ?? '', /unknown checkpoint id/)
     assert.deepEqual(result.files, [])
   })
 })

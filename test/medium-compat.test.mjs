@@ -14,6 +14,7 @@ import path from 'node:path'
 import { checkpointRecordSchema, checkpointRecordSchemaCompat } from '../lib/domain.mjs'
 import { mountPlugin, openStep, dispatchWriteIntent } from './helpers/ctx-harness.mjs'
 
+/** @param {Record<string, string>} files */
 async function makeWorkspace(files) {
   const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'dsh-rewind-ws-'))
   for (const [rel, content] of Object.entries(files)) {
@@ -29,6 +30,7 @@ async function makeSnapDir() {
 }
 
 /** 轮询等待表内记录数（插件内部领域操作异步落盘）。 */
+/** @param {Map<string, any>} table @param {number} count @param {number} [timeoutMs] */
 async function waitForRecords(table, count, timeoutMs = 15000) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
@@ -40,11 +42,13 @@ async function waitForRecords(table, count, timeoutMs = 15000) {
   throw new Error(`timed out waiting for ${count} records (have ${records.length})`)
 }
 
+/** @param {any} app @param {string} line */
 function command(app, line) {
   return app.root.commands.execute(app.agent, line, [], new AbortController().signal)
 }
 
 /** 0.4.x 时代的 v1 记录形状：核心字段 + 可选 forkSeq，无 kind/config。 */
+/** @param {string} cwd @returns {{id: string} & Record<string, unknown>} */
 function v1RecordOf(cwd) {
   return {
     id: 'v1-record-0001',
@@ -64,6 +68,7 @@ function v1RecordOf(cwd) {
 }
 
 /** 0.5.x 的记录形状：核心字段 + kind/config 必填（git provider，含 tree）。 */
+/** @param {string} cwd @returns {{id: string} & Record<string, unknown>} */
 function v2RecordOf(cwd) {
   return {
     id: 'v2-record-0001',
@@ -133,8 +138,12 @@ describe('存储介质版本兼容（回归：0.5.3 打不开 v1 介质）', () 
     openStep(app.session, 1, 1)
     await dispatchWriteIntent(app.root, app.agent, 'write')
     const records = await waitForRecords(app.records, 2)
-    const oldRecord = records.find(([, record]) => record.id === seed.id)[1]
-    const fresh = records.find(([, record]) => record.id !== seed.id)[1]
+    const oldHit = records.find(([, record]) => record.id === seed.id)
+    assert.ok(oldHit !== undefined, 'v1 record present')
+    const oldRecord = oldHit[1]
+    const freshHit = records.find(([, record]) => record.id !== seed.id)
+    assert.ok(freshHit !== undefined, 'fresh record present')
+    const fresh = freshHit[1]
     assert.equal(oldRecord.kind, undefined, '旧 v1 记录原样保留')
     assert.equal(oldRecord.forkSeq, 0)
     assert.equal(fresh.kind, 'mutation')
@@ -166,7 +175,9 @@ describe('存储介质版本兼容（回归：0.5.3 打不开 v1 介质）', () 
     const records = await waitForRecords(app.records, 2)
     // 首次使用（捕获）才惰性打开域：v2 介质直接以版本 2 打开，无回退。
     assert.deepEqual(app.specVersions, [2])
-    const fresh = records.find(([, record]) => record.id !== seed.id)[1]
+    const freshHit = records.find(([, record]) => record.id !== seed.id)
+    assert.ok(freshHit !== undefined, 'fresh record present')
+    const fresh = freshHit[1]
     assert.equal(fresh.kind, 'mutation')
     assert.equal(typeof fresh.config, 'object')
     await app.dispose()
