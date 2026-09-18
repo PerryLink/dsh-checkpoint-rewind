@@ -1,5 +1,6 @@
-// test/settings-schema.test.mjs — settings 命名空间 zod schema 与 Schemastery
-// Config 的键一致性（Schema 配置双源：cordis.yml + 设置页），及语义校验。
+// test/settings-schema.test.mjs — settings 命名空间 Schemastery schema 与
+// Schemastery Config 的键一致性（Schema 配置双源：cordis.yml + 设置页），
+// 及语义校验。
 
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
@@ -17,23 +18,30 @@ describe('checkpointSettingsNamespace', () => {
   })
 })
 
-describe('双源 schema 键一致（cordis.yml Schemastery ⇄ settings zod）', () => {
-  it('zod schema 解析出与 resolveConfig 完全相同的顶层键集', () => {
-    const zodKeys = Object.keys(checkpointSettingsSchema.parse({}))
-    const entryKeys = Object.keys(resolveConfig({}))
-    assert.deepEqual(zodKeys.sort(), entryKeys.sort())
+describe('双源 schema 键一致（cordis.yml Schemastery ⇄ settings Schemastery）', () => {
+  it('schema 是可调用函数（宿主 settings 服务当函数调用的 B4 判据）', () => {
+    assert.equal(typeof checkpointSettingsSchema, 'function')
+    // 真实调用并产生规范化输出（不是 zod 实例那种不可调用的对象）。
+    const value = checkpointSettingsSchema({})
+    assert.equal(typeof value.enabled, 'boolean')
   })
 
-  it('zod 默认值与 entry 默认值一致（设置页与 cordis.yml 同源默认）', () => {
-    const zodValue = checkpointSettingsSchema.parse({})
+  it('schema 解析出与 resolveConfig 完全相同的顶层键集', () => {
+    const schemaKeys = Object.keys(checkpointSettingsSchema({}))
+    const entryKeys = Object.keys(resolveConfig({}))
+    assert.deepEqual(schemaKeys.sort(), entryKeys.sort())
+  })
+
+  it('schema 默认值与 entry 默认值一致（设置页与 cordis.yml 同源默认）', () => {
+    const schemaValue = checkpointSettingsSchema({})
     const entryValue = resolveConfig({})
     for (const key of Object.keys(entryValue)) {
-      assert.deepEqual(zodValue[key], entryValue[key], `default mismatch on ${key}`)
+      assert.deepEqual(schemaValue[key], entryValue[key], `default mismatch on ${key}`)
     }
   })
 
   it('settings 解析值能通过 entry 语义校验（validateCheckpointSettings）', () => {
-    const value = checkpointSettingsSchema.parse({})
+    const value = checkpointSettingsSchema({})
     assert.doesNotThrow(() => validateCheckpointSettings(value))
   })
 
@@ -47,7 +55,7 @@ describe('双源 schema 键一致（cordis.yml Schemastery ⇄ settings zod）',
 })
 
 describe('validateCheckpointSettings（跨字段语义校验）', () => {
-  const base = checkpointSettingsSchema.parse({})
+  const base = checkpointSettingsSchema({})
 
   it('合法值通过', () => {
     assert.doesNotThrow(() => validateCheckpointSettings(base))
