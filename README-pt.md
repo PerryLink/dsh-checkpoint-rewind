@@ -27,7 +27,7 @@
 
 | Superfície | Status |
 |---|---|
-| Harness | DeepSeek Harness `dsh-v0.1.5-rc.2` (tag do GitHub, verificado em 2026-09-11; pin npm `0.1.5-rc.2`, peers `>=0.1.2-rc.1 <0.2.0 || >=0.1.5-alpha.1 <0.2.0`) (adaptado em 2026-09-10): o envelope de sessão mantém seu campo ignorable apenas para compatibilidade de leitura de logs armazenados - o Session.append ainda não consegue estampá-lo, então o comportamento da porta não muda. Verificado em 2026-09-11 contra o checkout master do dsh-v0.1.5-rc.2 (cadeia completa de portas + smoke de instalação do perfil). |
+| Harness | DeepSeek Harness `dsh-v0.1.6-alpha.2` (tag do GitHub, verificado em 2026-09-18; pin npm `0.1.6-alpha.2`, peers `>=0.1.2-rc.1 <0.2.0 || >=0.1.5-alpha.1 <0.2.0 || >=0.1.6-0 <0.2.0`) (adaptado em 2026-09-18): o namespace de ajustes agora registra um esquema Schemastery invocável (o host do alpha.2 chama esquemas como funções, então a instância zod anterior travava a página de Configurações); a reprodução de sessão passa pelo `SessionStore.fork` oficial quando o checkpoint tem limite de turno. Verificado em 2026-09-18 contra o checkout do `dsh-v0.1.6-alpha.2` (typecheck contra a superfície de tipos do alpha.2 + suíte de unidades completa + integração headless montada). |
 | Node | `^22.19.0 \|\| >=24.0.0` |
 | Plataformas | Todas (comandos + listeners de host; linha do tempo de Configurações opcional via capacidade settings) |
 | Modelo | Qualquer (sem chamadas ao modelo — instantâneos e restaurações são determinísticos) |
@@ -40,7 +40,7 @@ O `dsh-checkpoint-rewind` captura um **checkpoint unificado de três estados** �
 2. **Quatro disparadores de captura** — antes de cada ferramenta de mutação (`fs/write-intent`, `fs/edit-intent`, `tools/pre-execute`), no intervalo automático (`autoCheckpoint`, padrão a cada passo), manualmente (`/checkpoint` e a ferramenta `checkpoint`), e como guarda antes de cada reversão.
 3. **Provedor git primeiro** — `git stash create` / `commit-tree` produzem objetos de instantâneo não referenciados que nunca tocam seu worktree, índice ou histórico; a restauração é somente-worktree e por caminhos explícitos. Diretórios não git (e repositórios com HEAD não nascido) degradam para um provedor `copy` incremental com reuso de hardlinks.
 4. **Reversão de um só passo** — `/rewind workspace|session|config|all <target>` restaura os estados selecionados; `preview` é um relatório de impacto somente leitura, `diff <a> <b>` compara dois checkpoints, `clear` os exclui (esta sessão; `clear --all` abrange todas as sessões e workspaces).
-5. **Reversão de sessão por reprodução de semente** — a reversão de sessão reproduz eventos até o limite do checkpoint pela API oficial `sessions.create` com semente, criando uma nova sessão filha; a sessão original mantém seu histórico completo.
+5. **Reversão de sessão por fork** — a reversão de sessão reproduz eventos até o limite do checkpoint pela primitiva oficial `SessionStore.fork`, criando uma nova sessão filha (com fallback para o caminho `sessions.create` com semente quando o host não tem fork ou o checkpoint não tem limite); a sessão original mantém seu histórico completo.
 6. **Linha do tempo em Configurações** — a aba `Plugins → Checkpoints` renderiza os checkpoints da sessão com diffs linha a linha entre pares.
 
 ## Por que outro plugin de rewind?
@@ -191,7 +191,7 @@ capture ── fs/write-intent · fs/edit-intent · tools/pre-execute (prepend, 
 /rewind <target> ── confirm (userQuestions / approval, fail-closed) ──▶ guard checkpoint
              ├─ workspace: provider.restore(ref)  (restore | reset-hard)
              ├─ config:   settings namespace write-back (persisted)
-             └─ session:  sessions.create(seed replay) → new child session (original untouched)
+             └─ session:  SessionStore.fork(source, boundary) → new child session (original untouched)
 ```
 
 Registro de decisões completo, vocabulário de eventos e contrato da costura de provedores: [ARCHITECTURE.md](ARCHITECTURE.md).
@@ -243,7 +243,7 @@ Uma execução real de integração headless montada (`npm run test:integration`
 
 - No rc.2, os eventos de sessão `checkpoint/*` são suprimidos pela porta adaptativa; a cadeia de auditoria usa `command/run` + `command/done` mais o domínio de armazenamento até que um host envie o vocabulário ou o envelope `ignorable`.
 - `confirmVia: approval` precisa de um turno aberto, e os comandos rodam entre turnos — monte userQuestions (ou defina `confirmVia: userQuestions`) no rc.2.
-- A reversão de sessão cria uma **nova sessão filha** semeada a partir do limite do checkpoint; ela nunca reescreve nem trunca a sessão original.
+- A reversão de sessão **bifurca (fork) uma nova sessão filha** no limite do checkpoint; ela nunca reescreve nem trunca a sessão original.
 - `workspaceRestore: 'reset-hard'` move a cabeça da ramificação para o commit do instantâneo; está desativado por padrão.
 - Um checkpoint capturado antes de qualquer turno fechado não tem limite de reprodução — a reversão de sessão cria então uma nova sessão filha com contexto vazio.
 

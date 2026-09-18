@@ -4,6 +4,18 @@ All notable changes to dsh-checkpoint-rewind are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project versions with [SemVer](https://semver.org/).
 
+## [0.6.12] - 2026-09-18
+
+### Changed
+
+- **Fork-based session replay.** `/rewind …` with a session target now creates the replayed child session through the official `SessionStore.fork(source, boundary)` primitive whenever the checkpoint carries a turn boundary (previously the plugin hand-rolled a seeded `sessions.create()` call). The replayed child is now a real fork child: the host sets `isSeeded`, `inheritedEventCount`, `cwd` and `parentSession` itself, and the child's persistence shape is the fork shape instead of the hand-seeded shape. This is a one-time, read-compatible change: already-persisted replayed children (created by the previous hand-seeded path) keep loading normally — nothing needs migration, and the source session is untouched either way.
+- Adapt the `checkpoint-rewind` settings namespace schema from zod to Schemastery (the host calls registered settings schemas as functions, and zod v4 instances are not callable — mounting the plugin alongside the Settings page crashed with `TypeError: schema is not a function`). Settings-page behavior is unchanged.
+- Extend the `@deepseek-ai/dsh-*` peer ranges with the `>=0.1.6-0 <0.2.0` tuple clause and declare `manifestVersion: 1` plus the `engines.dsh` range — adaptation to DeepSeek Harness `dsh-v0.1.6-alpha.2`.
+
+### Fixed
+
+- The copy provider's `verifyByHash` resolver was consulted as a truthy value instead of being called at two gates: the hardlink-reuse decision (which silently disabled hardlink reuse for every default-config snapshot) and the preview unchanged-file judgment (which could count unchanged files as changed when hashing was off). Both gates now call the resolver; default-config snapshots reclaim hardlink reuse and preview counts are accurate.
+
 ## [0.6.11] - 2026-09-12
 
 ### Changed
