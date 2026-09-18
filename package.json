@@ -163,6 +163,7 @@
     "test:integration": "node test/integration/rewind-headless.mjs",
     "coverage": "node --test --experimental-test-coverage \"test/**/*.test.mjs\"",
     "check": "tsc -p tsconfig.json",
+    "typecheck:ci": "tsc -p tsconfig.ci.json --noEmit",
     "lint": "oxlint",
     "check:readmes": "node scripts/check-readme-sync.mjs",
     "verify:self-contained": "node scripts/verify-self-contained.mjs",
