@@ -27,6 +27,8 @@ jobs:
 
       - name: Type gate
         run: npm run check
+      - name: Typecheck (published line)
+        run: npm run typecheck:ci
 
       - name: Unit tests
         run: npm test

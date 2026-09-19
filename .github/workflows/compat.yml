@@ -59,6 +59,7 @@ jobs:
           node --input-type=module -e "import('dsh-checkpoint-rewind').then(()=>process.exit(0)).catch(e=>{console.error(e);process.exit(1)})"
   profile:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     strategy:
       # Both supported host lines are smoke-tested; a red line must not hide
       # the other line's result (B4 fix lands on alpha.2; rc.2 keeps pre-fix
