@@ -16,7 +16,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
+          # No registry-url: it writes //registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}
+          # into .npmrc, and with the secret retired that line is an empty bearer
+          # token - the registry answers 404 on PUT instead of letting npm perform
+          # the OIDC trusted-publishing exchange.
 
       - name: Install
         run: npm ci --no-audit --no-fund
@@ -27,6 +30,16 @@ jobs:
       - name: Assembled-headless integration
         run: npm run test:integration
 
+      # trusted publishing needs npm >= 11.5.1; the diagnostics make a failure
+      # self-explanatory (npm swallows OIDC exchange errors unless verbose).
+      - name: Upgrade npm and show what the publish will authenticate with
+        run: |
+          npm install -g npm@^11.5.1
+          echo "npm: $(npm --version)"
+          echo "registry: $(npm config get registry)"
+          if [ -f .npmrc ]; then echo "--- workspace .npmrc ---"; cat .npmrc; else echo "no workspace .npmrc"; fi
+          if [ -n "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then echo "OIDC request TOKEN: present"; else echo "OIDC request TOKEN: MISSING"; fi
+
       - name: Publish to npm
         run: |
           version="$(node -p "require('./package.json').version")"
@@ -36,7 +49,9 @@ jobs:
           fi
           npm publish --provenance
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # npm's OIDC exchange never throws: a failure is only visible at verbose
+          # level, otherwise the step just fails with ENEEDAUTH and no reason.
+          NPM_CONFIG_LOGLEVEL: verbose
 
   # npm publish alone left every release without a GitHub Release page (the
   # first ones had to be created by hand after the fact). This job closes that
