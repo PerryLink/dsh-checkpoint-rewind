@@ -287,7 +287,7 @@ Sem etapa de build: ESM puro — `index.mjs`/`lib/` são os artefatos publicados
 
 ## Família de Plugins DSH PerryLink
 
-Este projeto é um dos [41 plugins de DeepSeek Harness](https://github.com/PerryLink) mantidos por [PerryLink](https://github.com/PerryLink). Se este ajuda você, os outros provavelmente também:
+Este projeto é um dos [42 plugins de DeepSeek Harness](https://github.com/PerryLink) mantidos por [PerryLink](https://github.com/PerryLink). Se este ajuda você, os outros provavelmente também:
 
 | Plugin | One-liner |
 |---|---|
@@ -337,6 +337,7 @@ Este projeto é um dos [41 plugins de DeepSeek Harness](https://github.com/Perry
 | **[dsh-plugin-upgrade-015](https://github.com/PerryLink/dsh-plugin-upgrade-015)** | Merged `0.1.3-alpha.1` → `0.1.5-rc.1` upgrade corridor card plus a zero-dependency seam scanner | |
 | **[dsh-team-rooms](https://github.com/PerryLink/dsh-team-rooms)** | Cross-session team rooms: shared message bus, task board and timeline | |
 | **[dsh-plugin-doctor](https://github.com/PerryLink/dsh-plugin-doctor)** | Zero-dependency static + sandbox smoke detector for DSH plugins | |
+| **[dsh-laya](https://github.com/PerryLink/dsh-laya)** | Laya typed decisions (`noul`/`choice`/`score`) as a first-class Cordis service and model-visible tools | |
 
 ## Licença
 
