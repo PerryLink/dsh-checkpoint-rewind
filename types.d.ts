@@ -1,5 +1,7 @@
 // types.d.ts — dsh-checkpoint-rewind 类型契约（会话事件声明合并 + 配置类型）。
 
+import type { Volatile } from '@deepseek-ai/cordis'
+
 /**
  * 检查点记录（与 lib/domain.mjs 的持久 schema 同构；存储领域记录为权威）。
  * 一体化三态模型：{id, 时间, 会话事件游标(seq), 工作区 git tree SHA(tree),
@@ -129,7 +131,12 @@ declare module '@deepseek-ai/dsh-session-projection' {
   }
 }
 
-export interface Config {
+/**
+ * 插件配置的纯值形态（cordis.yml 字面值；也是检查点 config 快照与设置页表单
+ * 处理的值）。可选字段 = apply 之前用户层可能缺席，缺失由 schema 默认 /
+ * resolveConfig 补齐。
+ */
+export interface CheckpointConfig {
   /** 总开关；false 时命令、监听器与 provider 全部卸载。 */
   enabled?: boolean
   /** 快照 provider：auto（git 可用则 git，否则 copy）· git · copy。 */
@@ -177,4 +184,14 @@ export interface Config {
   promptSection?: boolean
   /** 注册 checkpoint 模型工具（默认 true）。 */
   checkpointTool?: boolean
+}
+
+/**
+ * cordis 交给 apply 的配置形态：Config schema 里标了 volatile 的字段在
+ * 0.1.7-alpha.1+ 宿主上解析为稳定的 Volatile 引用（设置页编辑时就地更新，
+ * 插件不重挂），读值必须走 `.get()`；旧宿主行（schemastery 无 volatile 支持）
+ * 与直接调用拿到的是纯值。index.mjs 的 resolveConfig 两种形态都接受。
+ */
+export type Config = {
+  [K in keyof CheckpointConfig]-?: Volatile<NonNullable<CheckpointConfig[K]>>
 }

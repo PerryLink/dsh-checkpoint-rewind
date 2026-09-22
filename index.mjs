@@ -14,13 +14,14 @@
 //   workspace|session|config|all <目标> 三态独立或一体回滚；preview 只读影响面；
 //   diff <a> <b> 两两对比；clear 清空。回滚前展示三态 diff 摘要并过确认门
 //   （userQuestions/approval，失败关闭），然后：保护检查点 → 工作区恢复
-//   （restore 安全覆盖 / reset-hard CC 对标模式）→ 配置还原（settings 命名空间
-//   写回，持久）→ 会话回退（sessions.create(id,{seed}) 官方重放：以事件游标
+//   （restore 安全覆盖 / reset-hard CC 对标模式）→ 配置还原（持久写回设置面）
+//   → 会话回退（sessions.create(id,{seed}) 官方重放：以事件游标
 //   为界 seed 出全新子会话，原会话不破坏）。
 // - 记录存 ctx.storageDomain 域 'checkpoints'；checkpoint/* 会话事件经自适应门
 //   append（宿主收录该类型或支持 ignorable 信封才写，见 lib/gate.mjs）。
-// - Schema 配置：settings 命名空间 'checkpoint-rewind'（zod，expose 进设置页），
-//   cordis.yml 为 base 层；设置页 Plugins → Checkpoints 标签页展示时间线与两两
+// - Schema 配置：Config 的 volatile 字段即设置页表单（0.1.7-alpha.1 起宿主把
+//   每个 Loader 条目的 Config 投影成表单并在 profile patch 上持久化），cordis.yml
+//   为基；设置页 Plugins → Checkpoints 标签页展示时间线与两两
 //   diff（lib/panel.mjs + typert.host.mjs + client/）。
 //
 // 只消费公开服务：sessions / commands（inject 声明）；storageDomain /
@@ -31,7 +32,6 @@
 
 import { randomUUID } from 'node:crypto'
 import { Context } from '@deepseek-ai/cordis'
-import Schema from '@deepseek-ai/schemastery'
 import SessionStore, { KNOWN_SESSION_EVENT_TYPES, SessionLogOffset, SessionSeq } from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { defineTool } from '@deepseek-ai/dsh-tools'
@@ -91,7 +91,7 @@ import { checkpointsProjectionDefinition } from './lib/projection.mjs'
 import { SnapshotProviderRegistry } from './lib/providers/registry.mjs'
 import { makeGitProvider } from './lib/providers/git.mjs'
 import { makeCopyProvider } from './lib/providers/copy.mjs'
-import { checkpointSettingsNamespace, checkpointSettingsSchema, validateCheckpointSettings } from './lib/settings-schema.mjs'
+import { checkpointSettingsNamespace, checkpointSettingsSchema, checkpointLegacySettingsSchema, validateCheckpointSettings } from './lib/settings-schema.mjs'
 import { CheckpointPanelService } from './lib/panel.mjs'
 
 export const name = PLUGIN_NAME
@@ -155,9 +155,10 @@ export function probeIgnorableAppend() {
 }
 
 /**
- * 插件配置（Schemastery，全部可 cordis.yml 覆盖；无硬编码 tunable）。
- * 同构的 zod schema 见 lib/settings-schema.mjs（settings 命名空间，设置页可改）。
- * @typedef {object} Config
+ * 插件配置的纯值形态（cordis.yml 字面值 / 检查点 config 快照；全部可覆盖，
+ * 无硬编码 tunable）。权威 schema 是 lib/settings-schema.mjs 的
+ * checkpointSettingsSchema（cordis.yml 与设置页同源，见该文件头部）。
+ * @typedef {object} CheckpointConfig
  * @property {boolean} [enabled] 整体开关；false 时不注册任何东西。
  * @property {'auto'|'git'|'copy'} [provider] 快照 provider 解析模式。
  * @property {string} [gitBin] git 可执行路径（默认 'git'）。
@@ -181,65 +182,82 @@ export function probeIgnorableAppend() {
  * @property {boolean} [promptSection] 注入一句角色陈述式短提示词段落（默认 true）。
  * @property {boolean} [checkpointTool] 注册 checkpoint 模型工具（默认 true）。
  */
-// Service Definition — 插件公共契约：下方 Schemastery Config schema 声明全部可配置面
-// （cordis.yml 与 settings 命名空间同构），即本插件对外公开的服务/配置契约。
-export const Config = Schema.object({
-  enabled: Schema.boolean().default(DEFAULTS.ENABLED),
-  provider: Schema.union(Object.values(PROVIDER_MODES)).default(DEFAULTS.PROVIDER),
-  gitBin: Schema.string().default(DEFAULTS.GIT_BIN),
-  snapshotDir: Schema.string().default(DEFAULTS.SNAPSHOT_DIR),
-  maxSnapshots: Schema.number().default(DEFAULTS.MAX_SNAPSHOTS),
-  maxSnapshotBytes: Schema.number().default(DEFAULTS.MAX_SNAPSHOT_BYTES),
-  pruneOnTurnEnd: Schema.boolean().default(DEFAULTS.PRUNE_ON_TURN_END),
-  mutationTools: Schema.array(Schema.string()).default([...DEFAULTS.MUTATION_TOOLS]),
-  excludeGlobs: Schema.array(Schema.string()).default([...DEFAULTS.EXCLUDE_GLOBS]),
-  confirmVia: Schema.union(Object.values(CONFIRM_CHANNELS)).default(DEFAULTS.CONFIRM_VIA),
-  listLimit: Schema.number().default(DEFAULTS.LIST_LIMIT),
-  preRewindCheckpoint: Schema.union(Object.values(PRE_REWIND_MODES)).default(DEFAULTS.PRE_REWIND_CHECKPOINT),
-  verifyByHash: Schema.boolean().default(DEFAULTS.VERIFY_BY_HASH),
-  autoCheckpoint: Schema.object({
-    enabled: Schema.boolean().default(DEFAULTS.AUTO_CHECKPOINT_ENABLED),
-    intervalMinutes: Schema.number().default(DEFAULTS.AUTO_CHECKPOINT_INTERVAL_MINUTES),
-  }).default({
-    enabled: DEFAULTS.AUTO_CHECKPOINT_ENABLED,
-    intervalMinutes: DEFAULTS.AUTO_CHECKPOINT_INTERVAL_MINUTES,
-  }),
-  workspaceRestore: Schema.union(Object.values(WORKSPACE_RESTORE_MODES)).default(DEFAULTS.WORKSPACE_RESTORE),
-  diffRenderer: Schema.union(Object.values(DIFF_RENDERER_MODES)).default(DEFAULTS.DIFF_RENDERER),
-  selectiveRestore: Schema.boolean().default(DEFAULTS.SELECTIVE_RESTORE),
-  promptSection: Schema.boolean().default(DEFAULTS.PROMPT_SECTION),
-  checkpointTool: Schema.boolean().default(DEFAULTS.CHECKPOINT_TOOL),
-})
+// Service Definition — 插件公共契约：Config schema（lib/settings-schema.mjs 的
+// checkpointSettingsSchema）声明全部可配置面，即本插件对外公开的服务/配置契约。
+// 0.1.7-alpha.1 起它就是设置页表单 schema：只有标了 volatile 的字段进表单，
+// 宿主在 profile patch 上持久化并就地更新引用（读值一律 getLive()）。
+export const Config = checkpointSettingsSchema
+
+/**
+ * 读取一个配置字段：0.1.7-alpha.1 宿主把 volatile 字段解析为 Volatile 引用
+ * （值由宿主就地更新），旧宿主与直接调用是普通值——两种形态都归一为纯值。
+ * @param {unknown} value - 字段原值（可能是 Volatile 引用）。
+ * @returns {any} 纯值（Volatile 时取当前快照）。
+ */
+function readConfigField(value) {
+  return typeof (/** @type {any} */ (value))?.get === 'function' ? /** @type {any} */ (value).get() : value
+}
+
+/**
+ * cosmokit 的共享 volatile 写协议符号（与它的 isVolatile 同判据）。按符号探测
+ * 而非鸭子类型，跨 ESM/CJS 副本的引用也认得出来。
+ */
+const VOLATILE_WRITE = Symbol.for('cosmokit.volatile.write')
+
+/**
+ * 收集配置对象里的 volatile 引用（宿主把可热改字段解析成 Volatile 包装；
+ * 旧宿主 / 直接调用没有引用，返回空数组）。判据与 cosmokit 的 volatileEntries
+ * 一致：引用即叶子，不再下钻它的快照。
+ * @param {unknown} value - apply 收到的配置。
+ * @returns {Array<{get: () => unknown}>} 引用列表。
+ */
+function collectVolatileRefs(value) {
+  /** @type {Array<{get: () => unknown}>} */
+  const found = []
+  /** @param {unknown} node */
+  const visit = (node) => {
+    if (typeof node !== 'object' || node === null) return
+    if (VOLATILE_WRITE in node) {
+      found.push(/** @type {{get: () => unknown}} */ (/** @type {unknown} */ (node)))
+      return
+    }
+    for (const child of Object.values(node)) visit(child)
+  }
+  visit(value)
+  return found
+}
 
 /**
  * 显式补齐默认 + 加载期校验（非法配置响亮失败）。
- * @param {Partial<Config>|undefined} config - cordis loader 传入的配置。
- * @returns {Required<Config>} 校验后的配置。
+ * @param {Partial<CheckpointConfig>|undefined} config - cordis loader 传入的配置（volatile 字段自动解包）。
+ * @returns {Required<CheckpointConfig>} 校验后的配置。
  */
 export function resolveConfig(config = {}) {
+  /** @type {any} */
+  const raw = config
   const resolved = {
-    enabled: config.enabled ?? DEFAULTS.ENABLED,
-    provider: config.provider ?? DEFAULTS.PROVIDER,
-    gitBin: config.gitBin ?? DEFAULTS.GIT_BIN,
-    snapshotDir: config.snapshotDir ?? DEFAULTS.SNAPSHOT_DIR,
-    maxSnapshots: config.maxSnapshots ?? DEFAULTS.MAX_SNAPSHOTS,
-    maxSnapshotBytes: config.maxSnapshotBytes ?? DEFAULTS.MAX_SNAPSHOT_BYTES,
-    pruneOnTurnEnd: config.pruneOnTurnEnd ?? DEFAULTS.PRUNE_ON_TURN_END,
-    mutationTools: config.mutationTools ?? [...DEFAULTS.MUTATION_TOOLS],
-    excludeGlobs: config.excludeGlobs ?? [...DEFAULTS.EXCLUDE_GLOBS],
-    confirmVia: config.confirmVia ?? DEFAULTS.CONFIRM_VIA,
-    listLimit: config.listLimit ?? DEFAULTS.LIST_LIMIT,
-    preRewindCheckpoint: config.preRewindCheckpoint ?? DEFAULTS.PRE_REWIND_CHECKPOINT,
-    verifyByHash: config.verifyByHash ?? DEFAULTS.VERIFY_BY_HASH,
+    enabled: readConfigField(raw.enabled) ?? DEFAULTS.ENABLED,
+    provider: readConfigField(raw.provider) ?? DEFAULTS.PROVIDER,
+    gitBin: readConfigField(raw.gitBin) ?? DEFAULTS.GIT_BIN,
+    snapshotDir: readConfigField(raw.snapshotDir) ?? DEFAULTS.SNAPSHOT_DIR,
+    maxSnapshots: readConfigField(raw.maxSnapshots) ?? DEFAULTS.MAX_SNAPSHOTS,
+    maxSnapshotBytes: readConfigField(raw.maxSnapshotBytes) ?? DEFAULTS.MAX_SNAPSHOT_BYTES,
+    pruneOnTurnEnd: readConfigField(raw.pruneOnTurnEnd) ?? DEFAULTS.PRUNE_ON_TURN_END,
+    mutationTools: readConfigField(raw.mutationTools) ?? [...DEFAULTS.MUTATION_TOOLS],
+    excludeGlobs: readConfigField(raw.excludeGlobs) ?? [...DEFAULTS.EXCLUDE_GLOBS],
+    confirmVia: readConfigField(raw.confirmVia) ?? DEFAULTS.CONFIRM_VIA,
+    listLimit: readConfigField(raw.listLimit) ?? DEFAULTS.LIST_LIMIT,
+    preRewindCheckpoint: readConfigField(raw.preRewindCheckpoint) ?? DEFAULTS.PRE_REWIND_CHECKPOINT,
+    verifyByHash: readConfigField(raw.verifyByHash) ?? DEFAULTS.VERIFY_BY_HASH,
     autoCheckpoint: {
-      enabled: config.autoCheckpoint?.enabled ?? DEFAULTS.AUTO_CHECKPOINT_ENABLED,
-      intervalMinutes: config.autoCheckpoint?.intervalMinutes ?? DEFAULTS.AUTO_CHECKPOINT_INTERVAL_MINUTES,
+      enabled: readConfigField(raw.autoCheckpoint?.enabled) ?? DEFAULTS.AUTO_CHECKPOINT_ENABLED,
+      intervalMinutes: readConfigField(raw.autoCheckpoint?.intervalMinutes) ?? DEFAULTS.AUTO_CHECKPOINT_INTERVAL_MINUTES,
     },
-    workspaceRestore: config.workspaceRestore ?? DEFAULTS.WORKSPACE_RESTORE,
-    diffRenderer: config.diffRenderer ?? DEFAULTS.DIFF_RENDERER,
-    selectiveRestore: config.selectiveRestore ?? DEFAULTS.SELECTIVE_RESTORE,
-    promptSection: config.promptSection ?? DEFAULTS.PROMPT_SECTION,
-    checkpointTool: config.checkpointTool ?? DEFAULTS.CHECKPOINT_TOOL,
+    workspaceRestore: readConfigField(raw.workspaceRestore) ?? DEFAULTS.WORKSPACE_RESTORE,
+    diffRenderer: readConfigField(raw.diffRenderer) ?? DEFAULTS.DIFF_RENDERER,
+    selectiveRestore: readConfigField(raw.selectiveRestore) ?? DEFAULTS.SELECTIVE_RESTORE,
+    promptSection: readConfigField(raw.promptSection) ?? DEFAULTS.PROMPT_SECTION,
+    checkpointTool: readConfigField(raw.checkpointTool) ?? DEFAULTS.CHECKPOINT_TOOL,
   }
   if (resolved.enabled === false) return resolved
   if (!Object.values(PROVIDER_MODES).includes(resolved.provider)) {
@@ -298,7 +316,7 @@ export function resolveConfig(config = {}) {
 /**
  * 插件挂载。enabled:false 时不注册任何东西；非法配置在加载期响亮抛错。
  * @param {import('@deepseek-ai/cordis').Context} ctx - Cordis 上下文。
- * @param {Partial<Config>} [config] - 插件配置。
+ * @param {Partial<CheckpointConfig>} [config] - 插件配置。
  */
 export async function apply(ctx, config = {}) {
   const resolved = resolveConfig(config)
@@ -311,11 +329,16 @@ export async function apply(ctx, config = {}) {
   /** @type {(session: import('@deepseek-ai/dsh-session').Session, type: string, data: object) => void} */
   const appendEvent = (session, type, data) => maybeAppendSessionEvent(session, type, data, eventGate, warn)
 
-  // --- 有效配置：cordis.yml（resolved）为基，settings 命名空间存在时其解析值为活配置。
-  // settings 写回（含 /rewind config）经 watch 即时生效；settings 卸载回落到 entry。
+  // --- 有效配置：cordis.yml（resolved）为基。0.1.7-alpha.1 宿主把 Config 的
+  // volatile 字段解析为 Volatile 引用，设置页编辑时**就地更新引用**（不重挂
+  // 插件），因此读值一律走 getLive()：引用快照身份变化时才重新解析校验；普通值
+  // 宿主（旧行 / 直接调用）恒为 apply 传入的快照。旧宿主（<= 0.1.6-alpha.2）仍有
+  // settings 命名空间注册面，其解析值是活配置（watch 即时生效，卸载回落 entry）。
   let liveConfig = resolved
   /** @type {any | undefined} */
-  let settingsScope
+  let legacySettingsScope
+  /** @type {any | undefined} */
+  let settingsForms
   const liveListeners = new Set()
   /** @type {(next: typeof resolved) => void} */
   const setLive = (next) => {
@@ -327,32 +350,57 @@ export async function apply(ctx, config = {}) {
     liveListeners.add(listener)
     return () => liveListeners.delete(listener)
   }
+  const volatileRefs = collectVolatileRefs(config)
+  /** @type {unknown[]} */
+  let volatileValues = volatileRefs.map(ref => ref.get())
+  /** @type {() => Required<CheckpointConfig>} */
+  const getLive = () => {
+    // 旧宿主的命名空间注册面是权威活配置（存在时不再看 volatile 引用）。
+    if (volatileRefs.length === 0 || legacySettingsScope !== undefined) return liveConfig
+    const current = volatileRefs.map(ref => ref.get())
+    if (current.some((value, index) => value !== volatileValues[index])) {
+      volatileValues = current
+      setLive(resolveConfig(config))
+    }
+    return liveConfig
+  }
   ctx.inject(['settings'], /** @param {any} sctx */ (sctx) => {
-    const scope = sctx.settings.register(checkpointSettingsNamespace(), checkpointSettingsSchema, {
-      base: resolved,
-      expose: true,
-      applies: 'live',
-      validate: validateCheckpointSettings,
-    })
-    settingsScope = scope
-    setLive(scope.get())
-    const unwatch = scope.watch(/** @param {typeof resolved} next */ (next) => setLive(next))
-    sctx.effect(() => () => {
-      unwatch()
-      if (settingsScope === scope) settingsScope = undefined
-      setLive(resolved)
-    }, `${PLUGIN_NAME}.settings`)
+    const settings = sctx.settings
+    // 旧宿主（<= 0.1.6-alpha.2）：settings 命名空间注册面。必须传「未标 volatile」
+    // 的同形 schema——旧 provider 把 schema 当函数调用并 deepFreeze 结果，标了
+    // volatile 的字段在那里只会解析成解不开的引用（语义校验与设置页 wire 都会坏）。
+    if (typeof settings?.register === 'function') {
+      const scope = settings.register(checkpointSettingsNamespace(), checkpointLegacySettingsSchema, {
+        base: resolved,
+        expose: true,
+        applies: 'live',
+        validate: validateCheckpointSettings,
+      })
+      legacySettingsScope = scope
+      setLive(scope.get())
+      const unwatch = scope.watch(/** @param {typeof resolved} next */ (next) => setLive(next))
+      sctx.effect(() => () => {
+        unwatch()
+        if (legacySettingsScope === scope) legacySettingsScope = undefined
+        setLive(resolved)
+      }, `${PLUGIN_NAME}.settings`)
+      return
+    }
+    // 新宿主（>= 0.1.7-alpha.1）：Config 的 volatile 字段就是设置页表单，宿主在
+    // profile patch 上持久化并就地更新引用——本插件不再注册、不再 watch（getLive()
+    // 读到的就是当前值）。只记住服务，供 /rewind config 的持久写回寻址。
+    settingsForms = settings
   })
 
   // --- provider seam：两个 provider 经 registry 注册（注册即 effect，卸载撤销）。
   // Service Provider — provider seam：git/copy 两个快照 provider 经
   // SnapshotProviderRegistry 注册（registry.register 返回 disposer，卸载撤销）。
   const registry = new SnapshotProviderRegistry()
-  const unregGit = registry.register(makeGitProvider({ gitBin: () => liveConfig.gitBin }))
+  const unregGit = registry.register(makeGitProvider({ gitBin: () => getLive().gitBin }))
   /** @type {string | undefined} */
   let snapshotDirCache
   const getSnapshotDir = () => {
-    if (snapshotDirCache === undefined) snapshotDirCache = resolveSnapshotDir(liveConfig.snapshotDir)
+    if (snapshotDirCache === undefined) snapshotDirCache = resolveSnapshotDir(getLive().snapshotDir)
     return snapshotDirCache
   }
   onLiveChange(() => {
@@ -360,8 +408,8 @@ export async function apply(ctx, config = {}) {
   })
   const unregCopy = registry.register(makeCopyProvider({
     snapshotDir: getSnapshotDir,
-    excludeGlobs: () => liveConfig.excludeGlobs,
-    verifyByHash: () => liveConfig.verifyByHash,
+    excludeGlobs: () => getLive().excludeGlobs,
+    verifyByHash: () => getLive().verifyByHash,
   }))
   ctx.effect(() => () => {
     unregGit()
@@ -472,7 +520,7 @@ export async function apply(ctx, config = {}) {
         const state = ensureState(session)
         state.turn = undefined
         state.step = undefined
-        if (liveConfig.pruneOnTurnEnd) pruneAll(session, PRUNE_REASONS.TURN_END)
+        if (getLive().pruneOnTurnEnd) pruneAll(session, PRUNE_REASONS.TURN_END)
         break
       }
       default:
@@ -553,7 +601,7 @@ export async function apply(ctx, config = {}) {
 
   /**
    * 配置快照（普通 JSON 深拷贝，进入检查点记录）。
-   * @param {import('./types.d.ts').Config} config - 有效配置。
+   * @param {Required<CheckpointConfig>} config - 有效配置。
    * @returns {Record<string, unknown>} 深拷贝快照。
    */
   const snapshotConfigOf = (config) => /** @type {Record<string, unknown>} */ (structuredClone(config))
@@ -580,7 +628,7 @@ export async function apply(ctx, config = {}) {
       const cursor = session.seq
       const boundary = sessionBoundaryAt(sessionEvents(session), cursor)
       const table = await getTablePromise()
-      const provider = await registry.resolve(liveConfig.provider, { cwd, key: workspaceKeyOf(cwd) })
+      const provider = await registry.resolve(getLive().provider, { cwd, key: workspaceKeyOf(cwd) })
       const previous = latestRecordFor(table, session.id, cwd)
       const previousRef = previous !== undefined && previous.provider === provider.name ? previous.ref : undefined
       let result
@@ -619,13 +667,13 @@ export async function apply(ctx, config = {}) {
         bytes: result.bytes,
         ref: result.ref,
         tree: result.tree ?? null,
-        config: snapshotConfigOf(liveConfig),
+        config: snapshotConfigOf(getLive()),
         ...(note === undefined ? {} : { note }),
         ...(typeof boundary === 'number' ? { sessionBoundary: boundary } : {}),
       }
       await schedule(() => table.put(record.id, record))
-      if (record.bytes > liveConfig.maxSnapshotBytes) {
-        warn(`checkpoint ${record.id} alone exceeds maxSnapshotBytes (${record.bytes} > ${liveConfig.maxSnapshotBytes}); the per-session newest-retained floor keeps it, older checkpoints will be pruned`)
+      if (record.bytes > getLive().maxSnapshotBytes) {
+        warn(`checkpoint ${record.id} alone exceeds maxSnapshotBytes (${record.bytes} > ${getLive().maxSnapshotBytes}); the per-session newest-retained floor keeps it, older checkpoints will be pruned`)
       }
       appendEvent(session, SESSION_EVENTS.SNAPSHOT, record)
       logger.info(`checkpoint ${record.id} captured (${record.kind}, ${record.provider}, turn ${record.turn} step ${record.step}, cursor seq ${record.seq}, ${record.files} files, ${record.bytes} bytes, trigger ${record.triggerTool})`)
@@ -714,7 +762,7 @@ export async function apply(ctx, config = {}) {
    * @returns {Promise<void>} 完成。
    */
   async function autoCheckpointOnStep(session) {
-    const auto = liveConfig.autoCheckpoint
+    const auto = getLive().autoCheckpoint
     if (auto.enabled !== true) return
     const state = ensureState(session)
     const now = Date.now()
@@ -746,7 +794,7 @@ export async function apply(ctx, config = {}) {
    * @returns {Promise<{record?: import('./types.d.ts').CheckpointRecord, deduped?: boolean, detail?: string, failed?: string}|undefined>} 捕获结果；跳过/去重为 undefined。
    */
   async function captureRewindGuard(session) {
-    if (liveConfig.preRewindCheckpoint === PRE_REWIND_MODES.OFF) return undefined
+    if (getLive().preRewindCheckpoint === PRE_REWIND_MODES.OFF) return undefined
     if (latestStepOf(session) === undefined) return undefined // 无轮次历史：没有检查点可回退，无需保护
     const result = await captureCheckpoint(session, {
       kind: CHECKPOINT_KINDS.GUARD,
@@ -832,8 +880,8 @@ export async function apply(ctx, config = {}) {
         // fallback
       }
       const plan = prunePlan(entries, {
-        maxSnapshots: liveConfig.maxSnapshots,
-        maxSnapshotBytes: liveConfig.maxSnapshotBytes,
+        maxSnapshots: getLive().maxSnapshots,
+        maxSnapshotBytes: getLive().maxSnapshotBytes,
         ...(liveSessionIds !== undefined ? { liveSessionIds } : {}),
       })
       if (plan.ids.length === 0) return
@@ -870,7 +918,7 @@ export async function apply(ctx, config = {}) {
   ctx.on('fs/write-intent', (target, actor, next) => snapshotPassThrough(sessionOfActor(actor), 'fs/write-intent', next), { prepend: true })
   ctx.on('fs/edit-intent', (target, actor, next) => snapshotPassThrough(sessionOfActor(actor), 'fs/edit-intent', next), { prepend: true })
   ctx.on('tools/pre-execute', (exec, next) => {
-    if (liveConfig.mutationTools.includes(exec?.name)) {
+    if (getLive().mutationTools.includes(exec?.name)) {
       return snapshotPassThrough(exec?.agent?.session, exec.name, next)
     }
     return next()
@@ -890,7 +938,7 @@ export async function apply(ctx, config = {}) {
     const update = () => {
       dispose?.()
       dispose = undefined
-      if (liveConfig.promptSection === true) {
+      if (getLive().promptSection === true) {
         dispose = promptCtx.systemPrompt.section({
           name: PROMPT_SECTION_NAME,
           order: PROMPT_SECTION_ORDER,
@@ -912,7 +960,7 @@ export async function apply(ctx, config = {}) {
     getTable: getTablePromise,
     ops,
     registry,
-    getLive: () => liveConfig,
+    getLive,
   })
 
   // --- /rewind 命令（三态回滚）。
@@ -938,7 +986,7 @@ export async function apply(ctx, config = {}) {
   // --- checkpoint 模型工具（可选能力：tools 服务装配时注册；配置可关）。
   ctx.inject(['tools'], (toolsCtx) => {
     const update = () => {
-      if (liveConfig.checkpointTool === true) {
+      if (getLive().checkpointTool === true) {
         toolsCtx.effect(() => toolsCtx.tools.register(defineTool({
           name: CHECKPOINT_TOOL,
           description: 'Capture a manual unified checkpoint of the current session: workspace files (git snapshot), session event cursor, and plugin configuration, with an optional note. Use /rewind later to restore any of the three states. Checkpoints are additive and need no approval.',
@@ -1137,7 +1185,7 @@ export async function apply(ctx, config = {}) {
     const impact = {}
     if (targets.workspace) {
       const provider = registry.get(record.provider)
-      const mode = liveConfig.workspaceRestore === WORKSPACE_RESTORE_MODES.RESET_HARD && typeof provider?.resetHard === 'function'
+      const mode = getLive().workspaceRestore === WORKSPACE_RESTORE_MODES.RESET_HARD && typeof provider?.resetHard === 'function'
         ? WORKSPACE_RESTORE_MODES.RESET_HARD
         : WORKSPACE_RESTORE_MODES.RESTORE
       impact.mode = mode
@@ -1150,7 +1198,7 @@ export async function apply(ctx, config = {}) {
       }
     }
     if (targets.config) {
-      impact.config = configDiff(record.config, snapshotConfigOf(liveConfig))
+      impact.config = configDiff(record.config, snapshotConfigOf(getLive()))
     }
     if (targets.session) {
       impact.session = {
@@ -1227,15 +1275,23 @@ export async function apply(ctx, config = {}) {
   }
 
   /**
-   * 配置还原：settings 命名空间写回（持久）；无 settings 服务时进程内回退
-   * （结果文本明示非持久，绝不静默降级）。
+   * 配置还原（持久写回），两代宿主各有写回面：
+   * - 旧宿主：settings 命名空间 scope.replace（写持久文档的该 ns 段）；
+   * - 0.1.7-alpha.1+：SettingsForms.replace(条目 id, 段) —— 写 profile patch 的
+   *   用户层，宿主随即就地更新 Config 的 volatile 引用。写回必须持久：volatile
+   *   引用的值只由宿主更新，插件手上没有可写的进程内通道，所以「无写回面」时
+   *   如实返回非持久（绝不静默假装成功）。
    * @param {object} snapshot - 检查点 config 快照。
    * @returns {Promise<{durable: boolean, note: string}>} 还原说明。
    */
   async function restoreConfig(snapshot) {
-    if (settingsScope !== undefined) {
-      await settingsScope.replace(snapshot)
+    if (legacySettingsScope !== undefined) {
+      await legacySettingsScope.replace(snapshot)
       return { durable: true, note: 'config restored through the settings namespace (persisted in the settings document)' }
+    }
+    if (settingsForms !== undefined) {
+      await settingsForms.replace(checkpointSettingsNamespace(), snapshot)
+      return { durable: true, note: 'config restored through the settings forms (persisted in the profile patch)' }
     }
     const next = { ...resolved, ...snapshot }
     validateCheckpointSettings(next)
@@ -1340,7 +1396,7 @@ export async function apply(ctx, config = {}) {
       return { kind: 'error', text: `rewind: ${parsed.message}` }
     }
     if (parsed.kind === 'list') {
-      const newest = sortOldestFirst(mine).slice(-liveConfig.listLimit)
+      const newest = sortOldestFirst(mine).slice(-getLive().listLimit)
       return { kind: 'success', text: formatCheckpointList(newest, { now: Date.now(), total: mine.length, command: 'rewind' }) }
     }
     if (parsed.kind === 'clear') {
@@ -1390,10 +1446,10 @@ export async function apply(ctx, config = {}) {
       if (!targets.workspace) {
         return { kind: 'error', text: 'rewind: --files applies only to a workspace restore (use /rewind workspace <id> --files …)' }
       }
-      if (liveConfig.selectiveRestore !== true) {
+      if (getLive().selectiveRestore !== true) {
         return { kind: 'error', text: 'rewind: selective restore is disabled (selectiveRestore: false); remove --files or enable it' }
       }
-      if (liveConfig.workspaceRestore === WORKSPACE_RESTORE_MODES.RESET_HARD) {
+      if (getLive().workspaceRestore === WORKSPACE_RESTORE_MODES.RESET_HARD) {
         return { kind: 'error', text: 'rewind: --files selective restore is incompatible with workspaceRestore: reset-hard (use workspaceRestore: restore)' }
       }
     }
@@ -1419,7 +1475,7 @@ export async function apply(ctx, config = {}) {
 
     // 确认门：任何覆盖/回滚写操作必须先经 ask 语义，无回答者失败关闭。
     const texts = confirmTextsFor(targets)
-    const verdict = await confirmRewind({ ctx, confirmVia: liveConfig.confirmVia, summary, ...texts }, agent, signal)
+    const verdict = await confirmRewind({ ctx, confirmVia: getLive().confirmVia, summary, ...texts }, agent, signal)
     if (!verdict.allowed) {
       appendEvent(session, SESSION_EVENTS.REWIND, {
         checkpointId: record.id, sessionId: session.id, outcome: REWIND_OUTCOMES.DENIED,
@@ -1437,7 +1493,7 @@ export async function apply(ctx, config = {}) {
       guard = await captureRewindGuard(session)
     } catch (error) {
       const message = messageOf(error)
-      if (liveConfig.preRewindCheckpoint === PRE_REWIND_MODES.REQUIRE) {
+      if (getLive().preRewindCheckpoint === PRE_REWIND_MODES.REQUIRE) {
         appendEvent(session, SESSION_EVENTS.REWIND, {
           checkpointId: record.id, sessionId: session.id, outcome: REWIND_OUTCOMES.FAILED,
           target: parsed.kind === 'target' ? parsed.target : REWIND_TARGETS.ALL,
@@ -1592,7 +1648,7 @@ export async function apply(ctx, config = {}) {
         await ops
         const mine = await mineFor(session, cwd)
         if (parsed.kind === 'list') {
-          const newest = sortOldestFirst(mine).slice(-liveConfig.listLimit)
+          const newest = sortOldestFirst(mine).slice(-getLive().listLimit)
           return { kind: 'success', text: formatCheckpointList(newest, { now: Date.now(), total: mine.length, command: 'checkpoint' }) }
         }
         return handleDiff(mine, session, parsed.a, parsed.b, 'checkpoint')
@@ -1655,7 +1711,7 @@ export async function apply(ctx, config = {}) {
     const scopeDesc = all ? 'across ALL sessions and workspaces' : 'for this session and workspace'
     const verdict = await confirmRewind({
       ctx,
-      confirmVia: liveConfig.confirmVia,
+      confirmVia: getLive().confirmVia,
       summary: `${targets.length} checkpoint(s) ${scopeDesc} will be deleted (snapshot storage discarded; workspace files are NOT touched).`,
       question: `Delete all checkpoints ${all ? 'across ALL sessions' : 'for this session'}?`,
       approveLabel: 'Delete',
@@ -1707,7 +1763,9 @@ export {
   checkpointsDomainSpec,
   checkpointsDomainSpecV1,
   checkpointsProjectionDefinition,
+  checkpointSettingsNamespace,
   checkpointSettingsSchema,
+  checkpointLegacySettingsSchema,
   validateCheckpointSettings,
   CheckpointPanelService,
 }

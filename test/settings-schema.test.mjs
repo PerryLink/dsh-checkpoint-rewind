@@ -1,51 +1,107 @@
-// test/settings-schema.test.mjs — settings 命名空间 Schemastery schema 与
-// Schemastery Config 的键一致性（Schema 配置双源：cordis.yml + 设置页），
-// 及语义校验。
+// test/settings-schema.test.mjs — 'checkpoint-rewind' 配置 schema（单一真源）：
+// volatile 标记、数值边界、以及纯函数跨字段校验。
+//
+// 0.1.7-alpha.1 起宿主删除了 settings 注册面，Config schema 直接就是设置页
+// 表单 schema（只有 volatile 字段进表单），所以「双源一致」不再需要断言——
+// 双源已合一，本文件改为断言合一后的契约。
 
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { Config, resolveConfig } from '../index.mjs'
 import {
+  checkpointLegacySettingsSchema,
   checkpointSettingsNamespace,
   checkpointSettingsSchema,
   validateCheckpointSettings,
 } from '../lib/settings-schema.mjs'
 
 describe('checkpointSettingsNamespace', () => {
-  it('命名空间为合法小写 kebab-case', () => {
+  it('命名空间为合法小写 kebab-case（也是 Loader 条目 id 约定）', () => {
     assert.equal(checkpointSettingsNamespace(), 'checkpoint-rewind')
     assert.match(checkpointSettingsNamespace(), /^[a-z][a-z0-9-]*$/)
   })
 })
 
-describe('双源 schema 键一致（cordis.yml Schemastery ⇄ settings Schemastery）', () => {
-  it('schema 是可调用函数（宿主 settings 服务当函数调用的 B4 判据）', () => {
+/**
+ * schema 解析值 → 纯值：标了 volatile 的字段在 3.18.3+ 上是 Volatile 引用
+ * （宿主就地更新），比对/校验前必须先 .get()。
+ * @param {unknown} value - schema 解析值。
+ * @returns {any} 纯值。
+ */
+function plain(value) {
+  if (Array.isArray(value)) return value.map(plain)
+  if (value !== null && typeof value === 'object') {
+    if (typeof (/** @type {any} */ (value)).get === 'function') return plain(/** @type {any} */ (value).get())
+    return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, plain(child)]))
+  }
+  return value
+}
+
+describe('Config schema = 设置页表单 schema（单一真源）', () => {
+  it('插件导出的 Config 就是该 schema（宿主按条目读取 runtime.Config）', () => {
+    assert.equal(Config, checkpointSettingsSchema)
+  })
+
+  it('schema 是可调用函数（宿主把 schema 当函数调用）', () => {
     assert.equal(typeof checkpointSettingsSchema, 'function')
-    // 真实调用并产生规范化输出（不是 zod 实例那种不可调用的对象）。
-    const value = checkpointSettingsSchema({})
-    assert.equal(typeof value.enabled, 'boolean')
+    const value = /** @type {any} */ (checkpointSettingsSchema({}))
+    assert.equal(typeof value.enabled.get, 'function', 'volatile 字段解析为引用')
+    assert.equal(typeof value.enabled.get(), 'boolean')
   })
 
-  it('schema 解析出与 resolveConfig 完全相同的顶层键集', () => {
-    const schemaKeys = Object.keys(checkpointSettingsSchema({}))
-    const entryKeys = Object.keys(resolveConfig({}))
-    assert.deepEqual(schemaKeys.sort(), entryKeys.sort())
-  })
-
-  it('schema 默认值与 entry 默认值一致（设置页与 cordis.yml 同源默认）', () => {
-    const schemaValue = /** @type {Record<string, unknown>} */ (checkpointSettingsSchema({}))
+  it('schema 解析出与 resolveConfig 完全相同的顶层键集与默认值', () => {
+    const schemaValue = /** @type {Record<string, unknown>} */ (plain(checkpointSettingsSchema({})))
     const entryValue = /** @type {Record<string, unknown>} */ (resolveConfig({}))
+    assert.deepEqual(Object.keys(schemaValue).sort(), Object.keys(entryValue).sort())
     for (const key of Object.keys(entryValue)) {
       assert.deepEqual(schemaValue[key], entryValue[key], `default mismatch on ${key}`)
     }
   })
 
-  it('settings 解析值能通过 entry 语义校验（validateCheckpointSettings）', () => {
-    const value = checkpointSettingsSchema({})
-    assert.doesNotThrow(() => validateCheckpointSettings(value))
+  it('resolveConfig 直接吃 schema 解析出的 volatile 配置（真引用，非合成）', () => {
+    const resolved = resolveConfig(/** @type {any} */ (checkpointSettingsSchema({ provider: 'git', maxSnapshots: 3 })))
+    assert.equal(resolved.provider, 'git')
+    assert.equal(resolved.maxSnapshots, 3)
+    assert.equal(resolved.snapshotDir, '', '未提供的字段仍补齐默认')
   })
 
-  it('Config schema 加载期仍校验非法值（settings 之外的响亮失败面）', () => {
+  it('schema 解析值（解包 volatile 后）能通过跨字段语义校验', () => {
+    assert.doesNotThrow(() => validateCheckpointSettings(plain(checkpointSettingsSchema({}))))
+  })
+
+  it('每个用户可配置字段都标了 volatile（宿主只把 volatile 字段投影进设置页）', () => {
+    const dict = /** @type {Record<string, any>} */ (/** @type {any} */ (checkpointSettingsSchema).dict)
+    assert.ok(Object.keys(dict).length > 0, 'schema 有字段')
+    for (const [key, field] of Object.entries(dict)) {
+      if (key === 'autoCheckpoint') {
+        for (const [nested, child] of Object.entries(/** @type {Record<string, any>} */ (field.dict))) {
+          assert.equal(child.meta?.volatile, true, `autoCheckpoint.${nested} 必须 volatile`)
+        }
+        continue
+      }
+      assert.equal(field.meta?.volatile, true, `${key} 必须 volatile`)
+    }
+  })
+
+  it('旧宿主注册面用同形但未标 volatile 的副本（旧 provider 会把 schema 当函数调用）', () => {
+    const volatileDict = /** @type {Record<string, any>} */ (/** @type {any} */ (checkpointSettingsSchema).dict)
+    const legacyDict = /** @type {Record<string, any>} */ (/** @type {any} */ (checkpointLegacySettingsSchema).dict)
+    assert.deepEqual(Object.keys(legacyDict).sort(), Object.keys(volatileDict).sort())
+    for (const [key, field] of Object.entries(legacyDict)) {
+      assert.equal(field.meta?.volatile, undefined, `${key} 在旧宿主 schema 上不得标 volatile`)
+    }
+    assert.deepEqual(checkpointLegacySettingsSchema({}), plain(checkpointSettingsSchema({})))
+  })
+
+  it('宿主在持久化前就能拒绝越界值（边界/整数性写在 schema 上）', () => {
+    assert.throws(() => checkpointSettingsSchema({ listLimit: 999 }), /listLimit/)
+    assert.throws(() => checkpointSettingsSchema({ maxSnapshots: 1.5 }), /maxSnapshots/)
+    assert.throws(() => checkpointSettingsSchema({ autoCheckpoint: { intervalMinutes: -1 } }), /intervalMinutes/)
+    assert.throws(() => checkpointSettingsSchema({ gitBin: '' }), /gitBin/)
+    assert.throws(() => checkpointSettingsSchema({ provider: 'rsync' }), /provider/)
+  })
+
+  it('resolveConfig 仍校验非法值（settings 之外的响亮失败面）', () => {
     // 非法值负例：类型上按 any 传入（这些正是要证明会被加载期校验拒绝的值）。
     assert.throws(() => resolveConfig(/** @type {any} */ ({ workspaceRestore: 'clean' })), /workspaceRestore/)
     assert.throws(() => resolveConfig(/** @type {any} */ ({ autoCheckpoint: { intervalMinutes: -1 } })), /intervalMinutes/)
@@ -55,8 +111,8 @@ describe('双源 schema 键一致（cordis.yml Schemastery ⇄ settings Schemast
   })
 })
 
-describe('validateCheckpointSettings（跨字段语义校验）', () => {
-  const base = checkpointSettingsSchema({})
+describe('validateCheckpointSettings（跨字段语义校验，纯函数）', () => {
+  const base = plain(checkpointSettingsSchema({}))
 
   it('合法值通过', () => {
     assert.doesNotThrow(() => validateCheckpointSettings(base))

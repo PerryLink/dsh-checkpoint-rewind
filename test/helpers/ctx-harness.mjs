@@ -79,7 +79,7 @@ export function makeDomainFacility(opts = {}) {
 
 /**
  * 组装完整测试上下文。
- * @param {{config?: object, userQuestions?: unknown, approval?: unknown, tools?: unknown, systemPrompt?: unknown, storageDomain?: boolean | 'late', cwd?: string, sessionId?: string, mediumVersion?: number, seedRecords?: Record<string, object>}} [opts] - 组装选项。
+ * @param {{config?: object, userQuestions?: unknown, approval?: unknown, tools?: unknown, systemPrompt?: unknown, settings?: unknown, storageDomain?: boolean | 'late', cwd?: string, sessionId?: string, mediumVersion?: number, seedRecords?: Record<string, object>}} [opts] - 组装选项。
  * @returns {Promise<{root: Context, dispose: () => Promise<void>, records: Map<string, object>, opened: object[], specVersions: number[], agent: any, session: import('@deepseek-ai/dsh-session').Session, makeSession: (cwd?: string) => {session: any, agent: any}}>}
  */
 export async function mountPlugin(opts = {}) {
@@ -104,6 +104,9 @@ export async function mountPlugin(opts = {}) {
   if (opts.approval !== undefined) root.provide(/** @type {any} */ ('approval'), opts.approval)
   if (opts.tools !== undefined) root.provide(/** @type {any} */ ('tools'), opts.tools)
   if (opts.systemPrompt !== undefined) root.provide(/** @type {any} */ ('systemPrompt'), opts.systemPrompt)
+  // settings 两代形态都由测试注入：旧宿主 = SettingsProvider 形状（register），
+  // 新宿主（0.1.7+）= SettingsForms 形状（configure/describe/update/replace/mutate）。
+  if (opts.settings !== undefined) root.provide(/** @type {any} */ ('settings'), opts.settings)
   await mount(SessionStore)
   await mount(CommandRuntime)
   const plugin = await import('../../index.mjs')
