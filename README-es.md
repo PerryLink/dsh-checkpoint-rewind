@@ -28,7 +28,7 @@
 
 | Superficie | Estado |
 |---|---|
-| Harness | DeepSeek Harness `dsh-v0.1.6-alpha.2` (tag de GitHub, verificado el 2026-09-18; pin npm `0.1.6-alpha.2`, peers `>=0.1.2-rc.1 <0.2.0 || >=0.1.5-alpha.1 <0.2.0 || >=0.1.6-0 <0.2.0`) (adaptado el 2026-09-18): el namespace de ajustes ahora registra un esquema Schemastery invocable (el host de alpha.2 llama a los esquemas como funciones, por lo que la instancia zod anterior hacía fallar la página de Ajustes); la reproducción de sesión pasa por el `SessionStore.fork` oficial cuando el checkpoint tiene límite de turno. Verificado el 2026-09-18 contra el checkout de `dsh-v0.1.6-alpha.2` (typecheck contra la superficie de tipos de alpha.2 + suite de unidades completa + integración headless ensamblada). |
+| Harness | DeepSeek Harness `dsh-v0.1.7-alpha.1` (tag de GitHub, verificado el 2026-09-22; pin npm `0.1.7-alpha.1`, peers `>=0.1.2-rc.1 <0.2.0 || >=0.1.5-alpha.1 <0.2.0 || >=0.1.6-0 <0.2.0`) (adaptado el 2026-09-22): el host eliminó `@deepseek-ai/dsh-settings-file` y sustituyó la superficie de registro de namespaces de `ctx.settings` por `SettingsForms`, que proyecta el `Config` de cada entrada del Loader en el formulario de Ajustes y persiste las ediciones en el patch del perfil — los campos de configuración del plugin ahora se declaran `volatile()` y se leen en vivo, los códecs estrictos de typert solo llevan su fábrica `create()`, y el aviso de rebobinado declara su propio `kind` de origen de mensaje. La ruta heredada `settings.register` se mantiene para los hosts `0.1.5-rc.2`/`0.1.6-alpha.2`. Verificado el 2026-09-22 contra el checkout de `dsh-v0.1.7-alpha.1` (typecheck contra la superficie de tipos de alpha.1 + suite de unidades completa + integración headless ensamblada). |
 | Node | `^22.19.0 \|\| >=24.0.0` |
 | Plataformas | Todas (comandos + listeners de host; línea de tiempo de Ajustes opcional mediante la capacidad settings) |
 | Modelo | Cualquiera (sin llamadas al modelo — las instantáneas y restauraciones son deterministas) |
@@ -191,7 +191,7 @@ capture ── fs/write-intent · fs/edit-intent · tools/pre-execute (prepend, 
 
 /rewind <target> ── confirm (userQuestions / approval, fail-closed) ──▶ guard checkpoint
              ├─ workspace: provider.restore(ref)  (restore | reset-hard)
-             ├─ config:   settings namespace write-back (persisted)
+             ├─ config:   settings write-back (persisted on the profile patch)
              └─ session:  SessionStore.fork(source, boundary) → new child session (original untouched)
 ```
 

@@ -31,7 +31,7 @@
 
 | Surface | Status |
 |---|---|
-| Harness | DeepSeek Harness `dsh-v0.1.6-alpha.2` (GitHub tag, verified 2026-09-18; npm pin `0.1.6-alpha.2`, peers `>=0.1.2-rc.1 <0.2.0 || >=0.1.5-alpha.1 <0.2.0 || >=0.1.6-0 <0.2.0`) (adapted 2026-09-18): the settings namespace now registers a callable Schemastery schema (the alpha.2 host invokes schemas as functions, so the previous zod instance crashed the Settings page); session replay goes through the official `SessionStore.fork` when the checkpoint carries a turn boundary. Verified 2026-09-18 against the `dsh-v0.1.6-alpha.2` checkout (typecheck against the alpha.2 type surface + full unit suite + assembled-headless integration). |
+| Harness | DeepSeek Harness `dsh-v0.1.7-alpha.1` (GitHub tag, verified 2026-09-22; npm pin `0.1.7-alpha.1`, peers `>=0.1.2-rc.1 <0.2.0 || >=0.1.5-alpha.1 <0.2.0 || >=0.1.6-0 <0.2.0`) (adapted 2026-09-22): the host removed `@deepseek-ai/dsh-settings-file` and replaced the `ctx.settings` namespace-registration surface with `SettingsForms`, which projects each Loader entry's `Config` into the Settings form and persists edits on the profile patch — plugin config fields are now declared `volatile()` and read live, strict typert codecs carry only their `create()` factory, and the rewind notice declares its own message-source `kind`. The legacy `settings.register` path is kept for `0.1.5-rc.2`/`0.1.6-alpha.2` hosts. Verified 2026-09-22 against the `dsh-v0.1.7-alpha.1` checkout (typecheck against the alpha.1 type surface + full unit suite + assembled-headless integration). |
 | Node | `^22.19.0 \|\| >=24.0.0` |
 | Platforms | All (host commands + listeners; optional Settings page timeline via the settings capability) |
 | Model | Any (no model calls — snapshots and restores are deterministic) |
@@ -195,7 +195,7 @@ capture ── fs/write-intent · fs/edit-intent · tools/pre-execute (prepend, 
 
 /rewind <target> ── confirm (userQuestions / approval, fail-closed) ──▶ guard checkpoint
              ├─ workspace: provider.restore(ref)  (restore | reset-hard)
-             ├─ config:   settings namespace write-back (persisted)
+             ├─ config:   settings write-back (persisted on the profile patch)
              └─ session:  SessionStore.fork(source, boundary) → new child session (original untouched)
 ```
 

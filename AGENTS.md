@@ -39,7 +39,7 @@ dev/                 ❌ 本地工程面：冒烟脚本、夹具、演示——�
 ## 命令
 
 ```sh
-npm install          # 安装 peer 依赖（@deepseek-ai/dsh-session@0.1.5-rc.2、schemastery、zod 等）
+npm install          # 安装 peer 依赖（@deepseek-ai/dsh-* 钉 0.1.7-alpha.1、cordis ^4.0.3、schemastery ^3.18.2、zod 等）
 npm test             # node --test 跑 test/**/*.test.mjs（含 test/providers/ 单测套件；集成验证单独跑）
 npm run test:integration   # 组装式 headless 集成验证（test/integration/，不进发布包）
 ```
@@ -63,6 +63,15 @@ npm run test:integration   # 组装式 headless 集成验证（test/integration/
 - **git 安全边界**：只允许 `stash create` / `commit-tree` / `restore --worktree` 一类无副作用原语（白名单 + 运行时断言）；恢复必须是**显式路径**分块（`git restore … -- .` 会删除检查点之后 `git add` 的新文件，禁止发出）；绝不 `reset --hard` / `clean` / 改写索引或历史。
 - **失败要大声**：非法配置加载期抛错；领域打开失败/恢复失败/fork 失败返回结构化错误文本；绝不静默吞、绝不静默截断。
 - **本地优先**：零网络、零凭据；文件快照只写 `snapshotDir`（默认 `$DSH_HOME/dsh-checkpoint-rewind/`）。
+
+## settings 契约的两代形态（必读）
+
+`lib/settings-schema.mjs` 是配置的**唯一真源**：导出的 `checkpointSettingsSchema` 既是插件 `Config`，也是 0.1.7-alpha.1+ 宿主的设置页表单 schema（宿主只把标了 `volatile` 的字段投影进表单，编辑落到 profile patch 并**就地更新 Volatile 引用**，插件不重挂）。
+
+- **读值一律走 `getLive()`**：volatile 字段必须 `.get()`（`resolveConfig` 已统一解包，判据是 cosmokit 的 `Symbol.for('cosmokit.volatile.write')`）。直接读 `config.x` 会拿到引用对象——这是本仓最容易漏的一处。
+- **旧宿主行**（<= 0.1.6-alpha.2）仍有 `settings.register` 命名空间注册面，走 `checkpointLegacySettingsSchema`（同形但**不标** volatile：旧 provider 把 schema 当函数调用并 deepFreeze 结果，标了会解析成解不开的引用）。`/rewind config` 两代各有写回面（`scope.replace` / `SettingsForms.replace(条目 id, 段)`）。
+- `.volatile()` 是 schemastery 3.18.3 才有的运行时方法：`volatileField()` 在缺方法时退化为等价的 `.extra('volatile', true)`，**不要**改成无条件 `.volatile()`（3.18.2 的宿主行会在 import 期抛错）。
+- 校验分两层：schema 管类型/枚举/数值边界与整数性（宿主在**持久化前**校验）；跨字段语义留在纯函数 `validateCheckpointSettings`（宿主 3.18.3 的 schemastery **没有** cookbook 提到的 `.check()`）。
 
 ## 会话事件的 alpha.5 约束（必读）
 
