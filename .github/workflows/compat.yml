@@ -62,11 +62,13 @@ jobs:
     timeout-minutes: 25
     strategy:
       # Both supported host lines are smoke-tested; a red line must not hide
-      # the other line's result (B4 fix lands on alpha.2; rc.2 keeps pre-fix
-      # coverage).
+      # the other line's result. alpha.1 is the line this repo's devDependencies
+      # pin, and it is the line whose settings contract (SettingsForms + volatile
+      # Config fields) the plugin's primary path targets; rc.2 keeps the legacy
+      # `settings.register` path covered.
       fail-fast: false
       matrix:
-        dsh: ['0.1.5-rc.2', '0.1.6-alpha.2']
+        dsh: ['0.1.5-rc.2', '0.1.6-alpha.2', '0.1.7-alpha.1']
     steps:
       - uses: actions/checkout@v5
 

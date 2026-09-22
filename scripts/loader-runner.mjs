@@ -19,6 +19,12 @@ import { createRequire } from 'node:module'
 import { dirname, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
+/**
+ * FiberState.FAILED 的值镜像（const enum 没有运行时对象可导入，与宿主
+ * settings 包 isUnloading 的做法一致）。
+ */
+const FIBER_FAILED = 3
+
 const configArgument = process.argv[2]
 const expected = process.argv[3]
 if (configArgument === undefined || (expected !== 'tool' && expected !== 'no-tool')) {
@@ -50,6 +56,16 @@ try {
     config: { path: pathToFileURL(configPath).href },
   })
   await ctx.loader.await()
+
+  // 0.1.7-alpha.1 的 loader await() 用 Promise.allSettled 等各行任务（不再重抛行
+  // 启动错误）：配置被拒 / 启动抛错的行只把错误留在该行 fiber 上，整个组合照常
+  // 返回。这里显式把它捞出来重抛，两个负例（非法 config、default 导出）因此仍以
+  // 真实原因响亮失败，而不是退化成「命令没注册」。
+  const failedEntry = [...ctx.loader.entries()].find(entry => entry.fiber?.state === FIBER_FAILED)
+  if (failedEntry !== undefined) {
+    throw /** @type {any} */ (failedEntry.fiber)._error
+      ?? new Error(`loader entry ${failedEntry.options.id ?? ''} failed without a recorded error`)
+  }
 
   // Authoritative registries carry the plugin's contributions.
   const session = ctx.sessions.create(SessionId('dsh-checkpoint-rewind-loader-runner'), { meta: { cwd: resolve('work/proj') } })
