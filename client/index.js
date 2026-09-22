@@ -22,8 +22,9 @@ window.__ModuleLoader__.load({
 
     // --- 与 lib/wire.mjs 的 PANEL_INVOCATIONS 完全一致的 descriptor（手抄，
     // 校验由两端注册器各自执行；改 lib/wire.mjs 必须同步此处）。
-    // codec.schema 是轻量解析器：客户端注册表只要求 schema.parse 是函数；
-    // 权威严格校验在宿主端（zod）。客户端 parse 只做形状防御。
+    // codec 只有 create() 一个面（0.1.7-alpha.1 的 TypertCodec 删除了 `schema`
+    // 字段；网关以 codec.create().parse(value) 消费），create 返回的轻量解析器
+    // 只做形状防御——权威严格校验在宿主端（zod）。
     var SOURCE_LOCATION = Object.freeze({ file: 'lib/wire.mjs', line: 1, column: 1 })
 
     function failShape(field, value) {
@@ -76,14 +77,12 @@ window.__ModuleLoader__.load({
           codec: Object.freeze({
             mode: 'strict',
             typeSymbol: 'dsh-checkpoint-rewind/types#TimelineLimit',
-            schema: Object.freeze({ parse: parseOptionalLimit }),
             create: function () { return { parse: parseOptionalLimit } },
           }),
         })]),
         result: Object.freeze({
           mode: 'strict',
           typeSymbol: 'dsh-checkpoint-rewind/types#TimelineSnapshot',
-          schema: Object.freeze({ parse: parseTimelineSnapshot }),
           create: function () { return { parse: parseTimelineSnapshot } },
         }),
         sourceLocation: SOURCE_LOCATION,
@@ -100,7 +99,6 @@ window.__ModuleLoader__.load({
             codec: Object.freeze({
               mode: 'strict',
               typeSymbol: 'dsh-checkpoint-rewind/types#CheckpointIdRef',
-              schema: Object.freeze({ parse: parseIdRef }),
               create: function () { return { parse: parseIdRef } },
             }),
           }),
@@ -109,7 +107,6 @@ window.__ModuleLoader__.load({
             codec: Object.freeze({
               mode: 'strict',
               typeSymbol: 'dsh-checkpoint-rewind/types#CheckpointIdRef',
-              schema: Object.freeze({ parse: parseIdRef }),
               create: function () { return { parse: parseIdRef } },
             }),
           }),
@@ -117,7 +114,6 @@ window.__ModuleLoader__.load({
         result: Object.freeze({
           mode: 'strict',
           typeSymbol: 'dsh-checkpoint-rewind/types#DiffResult',
-          schema: Object.freeze({ parse: parseDiffResult }),
           create: function () { return { parse: parseDiffResult } },
         }),
         sourceLocation: SOURCE_LOCATION,
@@ -134,7 +130,6 @@ window.__ModuleLoader__.load({
             codec: Object.freeze({
               mode: 'strict',
               typeSymbol: 'dsh-checkpoint-rewind/types#CheckpointIdRef',
-              schema: Object.freeze({ parse: parseIdRef }),
               create: function () { return { parse: parseIdRef } },
             }),
           }),
@@ -142,7 +137,6 @@ window.__ModuleLoader__.load({
         result: Object.freeze({
           mode: 'strict',
           typeSymbol: 'dsh-checkpoint-rewind/types#RestorePreviewResult',
-          schema: Object.freeze({ parse: parseRestorePreviewResult }),
           create: function () { return { parse: parseRestorePreviewResult } },
         }),
         sourceLocation: SOURCE_LOCATION,

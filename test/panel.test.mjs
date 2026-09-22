@@ -4,7 +4,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { Context } from '@deepseek-ai/cordis'
 import { CheckpointPanelService } from '../lib/panel.mjs'
-import { TIMELINE_DESCRIPTOR } from '../lib/wire.mjs'
+import { DIFF_DESCRIPTOR, RESTORE_PREVIEW_DESCRIPTOR, TIMELINE_DESCRIPTOR } from '../lib/wire.mjs'
 
 /** 合成领域记录（面板只读视图所需字段 + diff 所需 ref/config/cwd）。 */
 /** @param {object} [over] */
@@ -71,8 +71,27 @@ describe('TIMELINE_DESCRIPTOR 契约（issue #5 回归）', () => {
   it('zod .optional() 只校验已提供的值：越界拒绝、合法放行', () => {
     const limit = TIMELINE_DESCRIPTOR.parameters.find((p) => p.name === 'limit')
     assert.ok(limit !== undefined, 'limit 参数在描述符中')
-    assert.equal(limit.codec.schema.safeParse(50).success, true)
-    assert.equal(limit.codec.schema.safeParse(0).success, false)
+    // strict codec 只有 create() 一个面（0.1.7-alpha.1 删除了 `schema` 字段）。
+    const codec = limit.codec.create()
+    assert.equal(codec.safeParse(50).success, true)
+    assert.equal(codec.safeParse(0).success, false)
+  })
+
+  it('每个 codec 都只暴露 create() 工厂（TypertCodec 单面契约）', () => {
+    const codecs = [
+      ...TIMELINE_DESCRIPTOR.parameters.map((p) => p.codec),
+      TIMELINE_DESCRIPTOR.result,
+      ...DIFF_DESCRIPTOR.parameters.map((p) => p.codec),
+      DIFF_DESCRIPTOR.result,
+      ...RESTORE_PREVIEW_DESCRIPTOR.parameters.map((p) => p.codec),
+      RESTORE_PREVIEW_DESCRIPTOR.result,
+    ]
+    assert.ok(codecs.length > 0, '清单非空')
+    for (const codec of codecs) {
+      assert.equal(typeof codec.create, 'function', 'create() 工厂存在（宿主运行时只认它）')
+      assert.equal('schema' in codec, false, '`schema` 字段已从 TypertCodec 删除，不得残留')
+      assert.equal(typeof codec.create().parse, 'function')
+    }
   })
 })
 
