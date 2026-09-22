@@ -6,7 +6,7 @@ this project versions with [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
-## [0.6.14] - 2026-09-22
+## [0.6.15] - 2026-09-22
 
 ### Changed
 
