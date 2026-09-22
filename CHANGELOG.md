@@ -6,6 +6,8 @@ this project versions with [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.14] - 2026-09-22
+
 ### Changed
 
 - **Adapted to DeepSeek Harness `dsh-v0.1.7-alpha.1`.** The host deleted the whole `@deepseek-ai/dsh-settings-file` package and inverted the `ctx.settings` contract: there is no plugin namespace-registration surface any more (`installSection` / `register` / `SettingsProvider` / `settings/updated` / `SettingsScope` are all gone), and `@deepseek-ai/dsh-settings` now ships `SettingsForms`, which projects each Loader entry's `runtime.Config` into the Settings form and persists edits on the profile patch. The plugin's configuration surface was migrated accordingly:
