@@ -1355,9 +1355,10 @@ export async function apply(ctx, config = {}) {
     try {
       child.append('user/message', createUserMessage({
         content: [{ type: 'text', text }],
-        // 宿主消息 form 词汇尚未收录 'rewind-notice'（插件自有表单名，运行时
-        // 接受任意 form 字符串）：类型上放开这一处。
-        source: { kind: 'plugin', plugin: PLUGIN_NAME, form: /** @type {any} */ ('rewind-notice'), summary: 'rewind' },
+        // 0.1.7-alpha.1 删除了 `kind: 'plugin'` catch-all（且 v3→v4 物理行准入
+        // 拒绝它），生产者必须声明自己的 kind：见 types.d.ts 的 MessageSourceMap
+        // 声明合并（形态对齐宿主 tool-jobs）。notice 表单由宿主按一行摘要渲染。
+        source: { kind: 'dsh-checkpoint-rewind', form: 'notice', summary: 'rewind' },
       }), { surfaceOp: 'append' })
     } catch (error) {
       // 通知是锦上添花：append 失败绝不能把一次成功的回退变成失败。

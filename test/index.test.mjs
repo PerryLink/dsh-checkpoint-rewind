@@ -486,14 +486,18 @@ describe('/rewind 命令', () => {
     assert.ok(child, '重放子会话在 store 中存活')
     assert.equal(child.header.parentSession, app.session.id)
     assert.equal(child.header.cwd, cwd)
-    assert.equal(child.firstLiveSeq, turn1End + 1)
+    // 0.1.7-alpha.1 起 fork 种子自带 child-owned 标记事件，firstLiveSeq 因此比边界
+    // 大 2（rc.2 是 +1）。插件消费的是持久割点 inheritedEventCount（= 边界前缀
+    // 长度，命令结果的 seedLength 取自它），两代宿主上都等于边界 + 1。
+    assert.equal(child.inheritedEventCount, turn1End + 1, '持久 fork 割点 = 边界前缀长度')
     assert.equal(child.snapshotEvents().length, turn1End + 3) // 种子 + session/end-seed + 回退通知
     assert.equal(child.snapshotEvents().at(-1)?.type, 'user/message', '子会话收到回退通知')
     const lastEvent = child.snapshotEvents().at(-1)
     assert.ok(lastEvent !== undefined, '回退通知已 append')
-    const notice = /** @type {{source?: {kind?: string, plugin?: string}, content: Array<{text: string}>}} */ (lastEvent.data)
-    assert.equal(notice.source?.kind, 'plugin')
-    assert.equal(notice.source?.plugin, 'checkpoint-rewind')
+    const notice = /** @type {{source?: {kind?: string, form?: string, summary?: string}, content: Array<{text: string}>}} */ (lastEvent.data)
+    assert.equal(notice.source?.kind, 'dsh-checkpoint-rewind', '生产者自有 kind（plugin catch-all 已从宿主删除）')
+    assert.equal(notice.source?.form, 'notice')
+    assert.equal(notice.source?.summary, 'rewind')
     assert.match(notice.content[0].text, /replayed from checkpoint/)
     for (let seq = 0; seq <= turn1End; seq += 1) {
       assert.deepEqual(child.snapshotEvents()[seq], app.session.snapshotEvents()[seq])

@@ -1,6 +1,8 @@
-// types.d.ts — dsh-checkpoint-rewind 类型契约（会话事件声明合并 + 配置类型）。
+// types.d.ts — dsh-checkpoint-rewind 类型契约（会话事件声明合并 + 消息来源声明
+// 合并 + 配置类型）。
 
 import type { Volatile } from '@deepseek-ai/cordis'
+import type { ContextFormed } from '@deepseek-ai/dsh-llm'
 
 /**
  * 检查点记录（与 lib/domain.mjs 的持久 schema 同构；存储领域记录为权威）。
@@ -50,12 +52,27 @@ declare module '@deepseek-ai/cordis' {
   }
 }
 
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    /**
+     * 本插件注入的回退通知（user/message）。
+     * 0.1.7-alpha.1 删除了 `kind: 'plugin'` catch-all（MessageSourceMap 只剩
+     * user|model|tool|system-prompt），且会话格式 v3→v4 的物理行准入明确拒绝
+     * `kind === 'plugin'`（as any 也拦得住）——生产者必须声明自己的 kind。
+     * 形态与宿主 packages/jobs/tool-jobs 的做法一致：{ kind } & ContextFormed。
+     */
+    'dsh-checkpoint-rewind': { kind: 'dsh-checkpoint-rewind' } & ContextFormed
+  }
+}
+
 declare module '@deepseek-ai/dsh-session' {
   interface SessionEventMap {
     /**
      * 一条三态检查点被捕获（log-only）。
-     * 注意：当前宿主构建（KNOWN_SESSION_EVENT_TYPES）尚未收录 checkpoint/*，
-     * 运行时经自适应门跳过 append；宿主收录后自动开启（见 README「会话事件」）。
+     * 注意：宿主构建的 KNOWN_SESSION_EVENT_TYPES 至今未收录 checkpoint/*（新宿主
+     * 新增的是 developer/message 与 workspace/changes），运行时经自适应门跳过
+     * append；宿主收录该类型或 append 盖章 ignorable 信封后自动开启
+     * （见 lib/gate.mjs 与 README「会话事件」）。
      */
     'checkpoint/snapshot': CheckpointRecord
     /**
@@ -120,8 +137,8 @@ declare module '@deepseek-ai/dsh-session-projection' {
   interface SessionProjectionMap {
     /**
      * Web UI 检查点条的全量列表值（最新在尾）。
-     * 折叠 checkpoint/snapshot|bound|prune|rewind 事件得到；alpha.3 宿主
-     * 未收录该词汇时恒为空列表（见 README「会话事件」）。
+     * 折叠 checkpoint/snapshot|bound|prune|rewind 事件得到；宿主未收录该词汇
+     * 且不支持 ignorable 信封时恒为空列表（见 README「会话事件」）。
      */
     checkpoints: Array<CheckpointWireRecord>
   }

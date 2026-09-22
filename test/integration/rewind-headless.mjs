@@ -192,7 +192,7 @@ async function mainCopyFlow() {
   const lastEvent = child.snapshotEvents().at(-1)
   assert.ok(lastEvent !== undefined, '回退通知已 append')
   assert.equal(lastEvent.type, 'user/message', '子会话收到回退通知')
-  assert.match(/** @type {{content: Array<{text: string}>}} */ (lastEvent.data).content[0].text, /replayed from checkpoint/)
+  assert.match(/** @type {{content: ReadonlyArray<{text: string}>}} */ (/** @type {unknown} */ (lastEvent.data)).content[0].text, /replayed from checkpoint/)
   for (let seq = 0; seq <= forkSeq1; seq += 1) {
     assert.deepEqual(child.snapshotEvents()[seq], session.snapshotEvents()[seq], `child seed seq ${seq} 与源一致`)
   }
