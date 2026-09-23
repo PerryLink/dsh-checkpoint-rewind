@@ -4,7 +4,20 @@ All notable changes to dsh-checkpoint-rewind are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project versions with [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.6.16] - 2026-09-23
+
+### Changed
+
+- The 21 `@deepseek-ai/dsh-*` dev/test pins move from `0.1.7-alpha.1` to `0.1.7-alpha.2`, so the suite executes the alpha.2 host packages instead of the alpha.1 ones it was still testing against. `pnpm-lock.yaml` carries zero `0.1.7-alpha.1` occurrences, and `pnpm-workspace.yaml` records the alpha.2 pins in `minimumReleaseAgeExclude`.
+- Every declared host range gains the trailing clause `|| >=0.1.7-0 <0.2.0` on all 12 sites (`engines.dsh` plus 11 `peerDependencies`, including the three optional client peers). This is a correctness fix, not a tightening: under semver's prerelease rule a comparator set whose only prerelease comparators sit on earlier version tuples cannot admit a later alpha, so the previous band excluded `0.1.7-alpha.2`, the very host this release targets. The three existing segments are kept in place and order, nothing was narrowed, and the five READMEs that quote the range verbatim in their Harness row are updated in the same pass.
+- `dshWorkshop.compatibility.dshVersions` records `0.1.7-alpha.2` alongside the older lines it already carried.
+- `@deepseek-ai/cordis` moves to `^4.0.4` in `peerDependencies` and `devDependencies`, because every alpha.2 host package declares `~4.0.4`. Declaration alignment only: the published 4.0.3 and 4.0.4 tarballs carry the same 32 files with identical content in 31 of them, `package.json` being the only difference.
+- `AGENTS.md`'s command block again names the pins the repository actually installs (`@deepseek-ai/dsh-*` at `0.1.7-alpha.2`, cordis `^4.0.4`, schemastery `^3.18.4`).
+- The monthly Compat workflow smoke-tests `0.1.7-alpha.2` in place of `0.1.7-alpha.1`; `0.1.5-rc.2` and `0.1.6-alpha.2` stay in the matrix, so both settings generations remain exercised.
+
+### Fixed
+
+- The settings-schema assertion that the host treats `volatile` fields as references went red on the pin bump and was fixed without touching the assertion. `test/settings-schema.test.mjs` asserts the 0.1.7-alpha.1+ settings contract — the `Config` schema is callable and a `volatile` field resolves to a Volatile reference (`typeof value.enabled.get === 'function'`) — and it failed with `actual 'undefined'` because this repository's own `@deepseek-ai/schemastery` still resolved to 3.18.2, which has neither `.volatile()` nor Volatile references, while the alpha.2 host line declares `~3.18.4` (the npm lockfile had resolved the same `^3.18.2` range to 3.18.3, which is why the assertion is legitimate and only the resolved copy was stale). Converged on a single copy: an explicit floor `overrides: '@deepseek-ai/schemastery': 3.18.4` in `pnpm-workspace.yaml`, plus the caret `^3.18.2` to `^3.18.4` in `peerDependencies` and `devDependencies`, so exactly one schemastery copy (3.18.4) resolves. No assertion was deleted, skipped or weakened.
 
 ## [0.6.15] - 2026-09-22
 
