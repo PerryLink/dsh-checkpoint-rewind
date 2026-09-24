@@ -4,6 +4,13 @@ All notable changes to dsh-checkpoint-rewind are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project versions with [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- Move the `@deepseek-ai/dsh-*` host pins to the published `0.1.7-rc.1` line and re-verify this plugin against that host line.
+- `dshWorkshop.compatibility.dshVersions` records `0.1.7-rc.1`; the five-language README compatibility rows name `dsh-v0.1.7-rc.1`.
+
 ## [0.6.16] - 2026-09-23
 
 ### Changed
