@@ -38,7 +38,7 @@
 
 | 方面 | 状态 |
 |---|---|
-| Harness | DeepSeek Harness `dsh-v0.1.7-rc.1`（GitHub tag，2026-09-24 已核验；npm 钉号 `0.1.7-rc.1`，peer 依赖范围 `>=0.1.2-rc.1 <0.2.0 || >=0.1.5-alpha.1 <0.2.0 || >=0.1.6-0 <0.2.0 || >=0.1.7-0 <0.2.0`）（2026-09-22 已适配）：宿主删除了 `@deepseek-ai/dsh-settings-file`，并把 `ctx.settings` 的命名空间注册面换成 `SettingsForms` —— 它把每个 Loader 条目的 `Config` 投影成设置页表单、编辑落到 profile patch；插件配置字段因此标为 `volatile()` 并按当前值读取，typert strict codec 只保留 `create()` 工厂，回退通知改用自己的消息来源 `kind`。`0.1.5-rc.2`/`0.1.6-alpha.2` 宿主仍走旧的 `settings.register` 路径。2026-09-22 已针对 `dsh-v0.1.7-alpha.1` 检出版核验（alpha.1 类型面 typecheck + 全量单测 + 组装式 headless 集成）。 |
+| Harness | DeepSeek Harness `dsh-v0.1.7-rc.2`（GitHub tag，2026-09-24 已核验；npm 钉号 `0.1.7-rc.2`，peer 依赖范围 `>=0.1.2-rc.1 <0.2.0 || >=0.1.5-alpha.1 <0.2.0 || >=0.1.6-0 <0.2.0 || >=0.1.7-0 <0.2.0`）（2026-09-22 已适配）：宿主删除了 `@deepseek-ai/dsh-settings-file`，并把 `ctx.settings` 的命名空间注册面换成 `SettingsForms` —— 它把每个 Loader 条目的 `Config` 投影成设置页表单、编辑落到 profile patch；插件配置字段因此标为 `volatile()` 并按当前值读取，typert strict codec 只保留 `create()` 工厂，回退通知改用自己的消息来源 `kind`。`0.1.5-rc.2`/`0.1.6-alpha.2` 宿主仍走旧的 `settings.register` 路径。2026-09-22 已针对 `dsh-v0.1.7-alpha.1` 检出版核验（alpha.1 类型面 typecheck + 全量单测 + 组装式 headless 集成）。 |
 | Node | `^22.19.0 \|\| >=24.0.0` |
 | 平台 | 全部（宿主命令 + 监听器；通过 settings 能力提供可选设置页时间线） |
 | 模型 | 任意（不调用模型 —— 快照与恢复是确定性的） |
