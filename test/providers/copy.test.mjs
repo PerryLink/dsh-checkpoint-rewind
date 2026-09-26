@@ -135,6 +135,33 @@ describe('copy provider', () => {
     }
   })
 
+  it('hardlink 增量复用回归（verifyByHash=false）：第二次快照未变文件 bytes 记 0 且硬链接共享', async () => {
+    const cwd = await makeWorkspace({
+      'stable.txt': 'Stable content '.repeat(64),
+      'mutating.txt': 'Initial content '.repeat(32),
+    })
+    const { provider, snapshotDir } = await makeProvider({ verifyByHash: false })
+    const ws = { cwd, key: cwd }
+    const first = await provider.snapshot(ws, { triggerTool: 'bash' })
+    assert.ok(first.bytes > 0, '首次全量捕获 bytes > 0')
+
+    // 仅修改 mutating.txt
+    await fs.writeFile(path.join(cwd, 'mutating.txt'), 'Updated content '.repeat(32) + '!')
+    const second = await provider.snapshot(ws, { triggerTool: 'bash', previousRef: first.ref })
+    assert.ok(second, '第二次捕获成功')
+
+    const firstStable = path.join(snapshotBaseDir(snapshotDir, cwd), first.ref, 'stable.txt')
+    const secondStable = path.join(snapshotBaseDir(snapshotDir, cwd), second.ref, 'stable.txt')
+    const [st1, st2] = await Promise.all([fs.stat(firstStable), fs.stat(secondStable)])
+
+    // 平台支持 hardlink 时，验证 inode 一致且链接数 >= 2
+    if (st1.nlink >= 2 && st2.nlink >= 2) {
+      assert.equal(st1.ino, st2.ino, '两次快照同名未变文件必须 hardlink 共享同一 inode')
+      const mutatingStat = await fs.stat(path.join(cwd, 'mutating.txt'))
+      assert.equal(second.bytes, mutatingStat.size, '第二次快照只计入变更文件的字节，未变文件 bytes 记 0')
+    }
+  })
+
   it('verifyByHash：同内容不同 mtime 仍按哈希去重', async () => {
     const cwd = await makeWorkspace({ 'a.txt': 'A1' })
     const { provider } = await makeProvider({ verifyByHash: true })
@@ -496,6 +523,23 @@ describe('copy provider: .gitignore 尊重', () => {
     assert.equal(result.files, 2, '只有 .gitignore 与 src/app.js 被捕获')
     const manifest = JSON.parse(await fs.readFile(path.join(snapshotBaseDir(snapshotDir, cwd), result.ref, 'manifest.json'), 'utf8'))
     assert.deepEqual(manifest.files.map((entry) => entry.rel).sort(), ['.gitignore', 'src/app.js'])
+  })
+
+  it('gitignoreReader：尾斜杠规则（decks/）在 isDirectory=true 或尾部 / 时正确识别为 ignored', async () => {
+    const cwd = await makeWorkspace({
+      '.gitignore': 'decks/\nbuild/\n',
+    })
+    const { createGitignoreReader } = await import('../../lib/ignore-files.mjs')
+    const reader = createGitignoreReader(cwd)
+    await reader.enterDirectory('')
+    // 裸名但声明为目录：应匹配 decks/
+    assert.equal(reader.isIgnored('decks', true), true, 'decks 裸目录名应当命中 decks/ 规则')
+    // 尾斜杠路径：应匹配 decks/
+    assert.equal(reader.isIgnored('decks/'), true, 'decks/ 路径应当命中 decks/ 规则')
+    // 裸名且非目录：普通 ignore 规范不把文件 decks 匹配到 decks/
+    assert.equal(reader.isIgnored('decks', false), false, '名为 decks 的普通文件不应命中 decks/ 规则')
+    // 嵌套文件匹配
+    assert.equal(reader.isIgnored('decks/pool.txt'), true, 'decks 下的文件应当被忽略')
   })
 
   it('嵌套 .gitignore 只作用于其子树', async () => {

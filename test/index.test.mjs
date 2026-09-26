@@ -310,16 +310,29 @@ describe('配额清理', () => {
     await app.dispose()
   })
 
-  it('单条检查点超过字节配额不被自清理（保留下限：大工作区可用）', async () => {
+  it('单条检查点超过字节配额时不豁免：配额修剪将其清理（防止巨块永久超限）', async () => {
     const filler = 'x'.repeat(2000)
     const cwd = await makeWorkspace({ 'a.txt': filler })
     const snapshotDir = await makeSnapDir()
     const app = await mountPlugin({ cwd, config: { provider: 'copy', snapshotDir, maxSnapshots: 50, maxSnapshotBytes: 1024 } })
     openStep(app.session, 1, 1)
     await dispatchWriteIntent(app.root, app.agent, 'write')
+    await settle()
+    const records = await recordsOf(app.records)
+    assert.equal(records.length, 0, '超过配额的单条检查点被清理，防止巨块永久击穿配额')
+    await app.dispose()
+  })
+
+  it('单条检查点未超字节配额时正常保留', async () => {
+    const filler = 'x'.repeat(800)
+    const cwd = await makeWorkspace({ 'a.txt': filler })
+    const snapshotDir = await makeSnapDir()
+    const app = await mountPlugin({ cwd, config: { provider: 'copy', snapshotDir, maxSnapshots: 50, maxSnapshotBytes: 1024 } })
+    openStep(app.session, 1, 1)
+    await dispatchWriteIntent(app.root, app.agent, 'write')
     const records = await waitForRecords(app.records, 1)
-    assert.equal(records.length, 1, '超过配额的唯一检查点仍保留（软配额下限）')
-    assert.equal(records[0][1].bytes, 2000)
+    assert.equal(records.length, 1, '未超配额的检查点正常保留')
+    assert.equal(records[0][1].bytes, 800)
     await app.dispose()
   })
 })
