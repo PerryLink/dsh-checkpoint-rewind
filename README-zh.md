@@ -140,7 +140,7 @@ copy provider 遍历工作区时**尊重 `.gitignore`**（根与嵌套文件，�
 | `maxSnapshots` | `50` | 每个会话保留的检查点数（最旧优先清理） |
 | `maxSnapshotBytes` | `536870912`（512 MiB） | 全局增量字节软配额（每个存活会话的最新一条总是保留） |
 | `pruneOnTurnEnd` | `true` | 轮次结束时执行配额清理 |
-| `mutationTools` | `['bash','write','edit','str_replace_editor','pwsh','terminal_send']` | 在 `tools/pre-execute` 上视为变更型的工具 |
+| `mutationTools` | `['bash','write','edit','str_replace_editor','terminal_send']` | 在 `tools/pre-execute` 上视为变更型的工具（默认已移除通用 shell `pwsh` 防只读拖慢；可配置此项覆盖加入） |
 | `excludeGlobs` | `['node_modules','.git','.dsh','dist','build']` | copy provider 跳过的 glob 模式 |
 | `confirmVia` | `auto` | 确认通道：`auto`（优先 userQuestions）· `userQuestions` · `approval` |
 | `listLimit` | `10` | 无参 `/rewind` 显示的检查点数 |
@@ -151,6 +151,8 @@ copy provider 遍历工作区时**尊重 `.gitignore`**（根与嵌套文件，�
 | `snapshotTimeoutMs` | `180000` | 单次快照遍历的墙钟预算（毫秒）；同样的跳过并告警语义 |
 | `autoCheckpoint.enabled` | `true` | `step/start` 上的自动间隔快照 |
 | `autoCheckpoint.intervalMinutes` | `0` | 间隔；`0` = 每步 |
+| `mutationCheckpoint.enabled` | `true` | 变更安全网快照节流总开关 |
+| `mutationCheckpoint.minIntervalMinutes` | `2` | 同一工作区两次变更快照的最小间隔分钟数（`0` = 每次变更步骤均捕获） |
 | `workspaceRestore` | `restore` | 工作区回滚：`restore`（安全覆盖）· `reset-hard`（CC 风格，需显式开启） |
 | `diffRenderer` | `pairwise` | 设置页差异渲染器：`pairwise`（行级文本）· `side-by-side`（逐文件双栏） |
 | `selectiveRestore` | `true` | 逐文件选择性恢复（`/rewind … --files`）以及面板的逐文件复选框 + 大小合计 |

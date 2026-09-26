@@ -138,7 +138,7 @@ run "/rewind <id>" to restore files and fork the session from that checkpoint
 | `maxSnapshots` | `50` | प्रति सत्र रखे गए चेकपॉइंट (सबसे पुराने पहले हटते हैं) |
 | `maxSnapshotBytes` | `536870912` (512 MiB) | वैश्विक वृद्धिशील-बाइट नरम कोटा (प्रति लाइव सत्र नवीनतम हमेशा रहता है) |
 | `pruneOnTurnEnd` | `true` | टर्न समाप्त होने पर कोटा छँटाई चलाएँ |
-| `mutationTools` | `['bash','write','edit','str_replace_editor','pwsh','terminal_send']` | `tools/pre-execute` पर बदलाव वाले माने गए टूल |
+| `mutationTools` | `['bash','write','edit','str_replace_editor','terminal_send']` | `tools/pre-execute` पर बदलाव वाले माने गए टूल (`pwsh` केवल-पढ़ने वाले आदेशों से होने वाली मंदी से बचने के लिए डिफ़ॉल्ट से हटा दिया गया; पुनः जोड़ने के लिए इस सूची को ओवरराइड करें) |
 | `excludeGlobs` | `['node_modules','.git','.dsh','dist','build']` | copy प्रदाता द्वारा छोड़े गए glob पैटर्न |
 | `confirmVia` | `auto` | पुष्टि चैनल: `auto` (पहले userQuestions) · `userQuestions` · `approval` |
 | `listLimit` | `10` | बिना तर्क के `/rewind` द्वारा दिखाए गए चेकपॉइंट |
@@ -149,6 +149,8 @@ run "/rewind <id>" to restore files and fork the session from that checkpoint
 | `snapshotTimeoutMs` | `180000` | प्रति-स्नैपशॉट वॉक वॉल-क्लॉक बजट मिलीसेकंड में; वही स्किप-विथ-चेतावनी सिमेंटिक्स |
 | `autoCheckpoint.enabled` | `true` | `step/start` पर स्वचालित अंतराल स्नैपशॉट |
 | `autoCheckpoint.intervalMinutes` | `0` | अंतराल; `0` = हर चरण |
+| `mutationCheckpoint.enabled` | `true` | म्यूटेशन-पूर्व सुरक्षा नेट स्नैपशॉट थ्रॉटल स्विच |
+| `mutationCheckpoint.minIntervalMinutes` | `2` | प्रति कार्यक्षेत्र म्यूटेशन स्नैपशॉट के बीच न्यूनतम अंतराल मिनट (`0` = प्रत्येक म्यूटेशन चरण) |
 | `workspaceRestore` | `restore` | वर्कस्पेस रोलबैक: `restore` (सुरक्षित अधिलेखन) · `reset-hard` (CC शैली, ऑप्ट-इन) |
 | `diffRenderer` | `pairwise` | सेटिंग्स-पेज diff रेंडरर: `pairwise` (लाइन-स्तरीय टेक्स्ट) · `side-by-side` (प्रति-फ़ाइल दो-कॉलम) |
 | `selectiveRestore` | `true` | प्रति-फ़ाइल चयनात्मक बहाली (`/rewind … --files`) और पैनल का प्रति-फ़ाइल चेकबॉक्स + आकार योग |

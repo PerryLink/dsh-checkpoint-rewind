@@ -178,6 +178,8 @@ export function probeIgnorableAppend() {
  * @property {number} [snapshotTimeoutMs] 单次快照遍历的墙钟预算毫秒（默认 180000；超限跳过快照并告警）。
  * @property {{enabled: boolean, intervalMinutes: number}} [autoCheckpoint]
  *   自动间隔快照：step/start 时检查；intervalMinutes=0 每步；enabled=false 关闭（默认开、每步）。
+ * @property {{enabled: boolean, minIntervalMinutes: number}} [mutationCheckpoint]
+ *   变更安全网节流：tools/pre-execute 与 fs/*-intent 检查；minIntervalMinutes 节流；enabled=false 关闭。
  * @property {'restore'|'reset-hard'} [workspaceRestore] 工作区回滚实现（默认 restore 安全覆盖；
  *   reset-hard = git reset --hard <快照提交>，CC 对标，默认关）。
  * @property {'pairwise'|'side-by-side'} [diffRenderer] 设置页两两 diff 的渲染器（默认 pairwise
@@ -260,6 +262,10 @@ export function resolveConfig(config = {}) {
       enabled: readConfigField(raw.autoCheckpoint?.enabled) ?? DEFAULTS.AUTO_CHECKPOINT_ENABLED,
       intervalMinutes: readConfigField(raw.autoCheckpoint?.intervalMinutes) ?? DEFAULTS.AUTO_CHECKPOINT_INTERVAL_MINUTES,
     },
+    mutationCheckpoint: {
+      enabled: readConfigField(raw.mutationCheckpoint?.enabled) ?? DEFAULTS.MUTATION_CHECKPOINT_ENABLED,
+      minIntervalMinutes: readConfigField(raw.mutationCheckpoint?.minIntervalMinutes) ?? DEFAULTS.MUTATION_CHECKPOINT_MIN_INTERVAL_MINUTES,
+    },
     workspaceRestore: readConfigField(raw.workspaceRestore) ?? DEFAULTS.WORKSPACE_RESTORE,
     diffRenderer: readConfigField(raw.diffRenderer) ?? DEFAULTS.DIFF_RENDERER,
     selectiveRestore: readConfigField(raw.selectiveRestore) ?? DEFAULTS.SELECTIVE_RESTORE,
@@ -316,6 +322,15 @@ export function resolveConfig(config = {}) {
     || resolved.autoCheckpoint.intervalMinutes < LIMITS.MIN_AUTO_INTERVAL_MINUTES
     || resolved.autoCheckpoint.intervalMinutes > LIMITS.MAX_AUTO_INTERVAL_MINUTES) {
     throw badConfig(`autoCheckpoint.intervalMinutes must be an integer in [${LIMITS.MIN_AUTO_INTERVAL_MINUTES}, ${LIMITS.MAX_AUTO_INTERVAL_MINUTES}] (0 = every step)`)
+  }
+  if (typeof resolved.mutationCheckpoint.enabled !== 'boolean') {
+    throw badConfig('mutationCheckpoint.enabled must be a boolean')
+  }
+  if (typeof resolved.mutationCheckpoint.minIntervalMinutes !== 'number'
+    || Number.isNaN(resolved.mutationCheckpoint.minIntervalMinutes)
+    || resolved.mutationCheckpoint.minIntervalMinutes < LIMITS.MIN_MUTATION_INTERVAL_MINUTES
+    || resolved.mutationCheckpoint.minIntervalMinutes > LIMITS.MAX_MUTATION_INTERVAL_MINUTES) {
+    throw badConfig(`mutationCheckpoint.minIntervalMinutes must be a number in [${LIMITS.MIN_MUTATION_INTERVAL_MINUTES}, ${LIMITS.MAX_MUTATION_INTERVAL_MINUTES}]`)
   }
   if (typeof resolved.promptSection !== 'boolean' || typeof resolved.checkpointTool !== 'boolean') {
     throw badConfig('promptSection and checkpointTool must be booleans')
@@ -784,17 +799,31 @@ export async function apply(ctx, config = {}) {
     return typeof detail === 'string' && detail.length > 0 ? `${base}\n${detail}` : base
   }
 
+  // --- 每工作区变更安全网节流状态（workspaceKeyOf(cwd) → 上次变更快照毫秒时间戳）。
+  const lastMutationByWorkspace = new Map()
+
   /**
    * 变更前快照（安全网）：每 (session, turn, step) 最多一次；并发意图共享
-   * 同一次捕获。失败只记日志，绝不阻断工具执行（快照是安全网，不是策略）。
+   * 同一次捕获。检查 mutationCheckpoint.enabled 与 minIntervalMinutes 节流。
+   * 失败只记日志，绝不阻断工具执行（快照是安全网，不是策略）。
    * @param {import('@deepseek-ai/dsh-session').Session|null|undefined} session - 会话。
    * @param {string} triggerTool - 触发工具名。
    * @returns {Promise<void>} 完成（含失败）。
    */
   async function snapshotForMutation(session, triggerTool) {
     if (session === null || session === undefined) return
+    const mutation = liveConfig.mutationCheckpoint
+    if (mutation?.enabled !== true) return
     const pos = currentStepOf(session)
     if (pos === undefined) return // 不在开放步骤内：没有可关联的边界。
+    const cwd = session.header?.cwd
+    const wsKey = workspaceKeyOf(cwd)
+    const now = Date.now()
+    const lastAt = wsKey ? lastMutationByWorkspace.get(wsKey) : undefined
+    if (mutation.minIntervalMinutes > 0 && lastAt !== undefined
+      && now - lastAt < mutation.minIntervalMinutes * 60000) {
+      return
+    }
     const state = ensureState(session)
     const windowKey = `${pos.turn}:${pos.step}`
     if (state.snapshotKey === windowKey) return
@@ -804,7 +833,10 @@ export async function apply(ctx, config = {}) {
     }
     const run = (async () => {
       try {
-        await captureCheckpoint(session, { kind: CHECKPOINT_KINDS.MUTATION, triggerTool })
+        const result = await captureCheckpoint(session, { kind: CHECKPOINT_KINDS.MUTATION, triggerTool })
+        if (result !== undefined && result?.failed === undefined && wsKey) {
+          lastMutationByWorkspace.set(wsKey, Date.now())
+        }
       } finally {
         state.inFlight = undefined
         state.snapshotKey = windowKey
@@ -949,6 +981,13 @@ export async function apply(ctx, config = {}) {
       const eventReason = reason ?? (plan.byRule.maxSnapshots.length > 0 ? PRUNE_REASONS.MAX_SNAPSHOTS : PRUNE_REASONS.MAX_SNAPSHOT_BYTES)
       appendEvent(triggerSession, SESSION_EVENTS.PRUNE, { ids: plan.ids, reason: eventReason })
       logger.info(`pruned ${plan.ids.length} checkpoint(s) (${eventReason})`)
+      const cwd = triggerSession?.header?.cwd
+      if (typeof cwd === 'string' && cwd.length > 0) {
+        const gitProvider = registry.get(PROVIDERS.GIT)
+        if (gitProvider && typeof gitProvider.maybeGc === 'function') {
+          void gitProvider.maybeGc({ cwd, key: workspaceKeyOf(cwd) }).catch(() => {})
+        }
+      }
     }).catch(error => warn(`checkpoint prune failed: ${messageOf(error)}`))
   }
 

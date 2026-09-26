@@ -787,22 +787,102 @@ describe('pre-rewind 保护检查点', () => {
   })
 })
 
-describe('默认变更工具清单', () => {
-  it('pwsh 与 terminal_send 在 tools/pre-execute 上触发快照', async () => {
+describe('默认变更工具清单与配置覆盖', () => {
+  it('terminal_send 触发快照，pwsh 默认不触发（非变更 shell）', async () => {
     const cwd = await makeWorkspace({ 'a.txt': 'A1' })
     const snapshotDir = await makeSnapDir()
     const app = await mountPlugin({ cwd, config: { provider: 'copy', snapshotDir } })
     openStep(app.session, 1, 1)
     await dispatchPreExecute(app.root, app.agent, 'pwsh')
+    await settle()
+    assert.equal((await recordsOf(app.records)).length, 0, 'pwsh 默认不触发快照')
+    await dispatchPreExecute(app.root, app.agent, 'terminal_send')
     await waitForRecords(app.records, 1)
-    await fs.writeFile(path.join(cwd, 'a.txt'), 'A2!') // 尺寸变化：去重判据不依赖 mtime 精度
+    const records = await recordsOf(app.records)
+    assert.equal(records[0][1].triggerTool, 'terminal_send')
+    await app.dispose()
+  })
+
+  it('mutationTools 配置项可显式覆盖（如加入 pwsh）', async () => {
+    const cwd = await makeWorkspace({ 'a.txt': 'A1' })
+    const snapshotDir = await makeSnapDir()
+    const app = await mountPlugin({ cwd, config: { provider: 'copy', snapshotDir, mutationTools: ['pwsh'] } })
+    openStep(app.session, 1, 1)
+    await dispatchPreExecute(app.root, app.agent, 'pwsh')
+    await waitForRecords(app.records, 1)
+    const records = await recordsOf(app.records)
+    assert.equal(records[0][1].triggerTool, 'pwsh')
+    await app.dispose()
+  })
+})
+
+describe('变更安全网节流（mutationCheckpoint）', () => {
+  it('minIntervalMinutes > 0：间隔内跳过变更快照', async () => {
+    const cwd = await makeWorkspace({ 'a.txt': 'A1' })
+    const snapshotDir = await makeSnapDir()
+    const app = await mountPlugin({
+      cwd,
+      config: {
+        provider: 'copy',
+        snapshotDir,
+        mutationCheckpoint: { enabled: true, minIntervalMinutes: 60 },
+      },
+    })
+    openStep(app.session, 1, 1)
+    await dispatchWriteIntent(app.root, app.agent, 'write')
+    await waitForRecords(app.records, 1)
+
+    // 相同工作区、间隔内第二次变更意图：即使文件有变动也因节流跳过
+    await fs.writeFile(path.join(cwd, 'a.txt'), 'A2!')
     closeStep(app.session, 1, 1)
     openStep(app.session, 1, 2)
-    await dispatchPreExecute(app.root, app.agent, 'terminal_send')
-    await waitForRecords(app.records, 2)
-    const records = await recordsOf(app.records)
-    assert.deepEqual(records.map(([, record]) => record.triggerTool).sort(), ['pwsh', 'terminal_send'])
+    await dispatchWriteIntent(app.root, app.agent, 'write')
+    await settle()
+    assert.equal((await recordsOf(app.records)).length, 1, '间隔内节流跳过')
     await app.dispose()
+  })
+
+  it('enabled:false：变更工具不触发快照', async () => {
+    const cwd = await makeWorkspace({ 'a.txt': 'A1' })
+    const snapshotDir = await makeSnapDir()
+    const app = await mountPlugin({
+      cwd,
+      config: {
+        provider: 'copy',
+        snapshotDir,
+        mutationCheckpoint: { enabled: false },
+      },
+    })
+    openStep(app.session, 1, 1)
+    await dispatchWriteIntent(app.root, app.agent, 'write')
+    await settle()
+    assert.equal((await recordsOf(app.records)).length, 0, 'enabled:false 时不触发')
+    await app.dispose()
+  })
+
+  it('多工作区并存：工作区 A 的节流不影响工作区 B', async () => {
+    const cwdA = await makeWorkspace({ 'a.txt': 'A1' })
+    const cwdB = await makeWorkspace({ 'b.txt': 'B1' })
+    const snapshotDir = await makeSnapDir()
+    const appA = await mountPlugin({
+      cwd: cwdA,
+      config: {
+        provider: 'copy',
+        snapshotDir,
+        mutationCheckpoint: { enabled: true, minIntervalMinutes: 60 },
+      },
+    })
+    openStep(appA.session, 1, 1)
+    await dispatchWriteIntent(appA.root, appA.agent, 'write')
+    await waitForRecords(appA.records, 1)
+
+    // 在同一个 plugin 实例下为工作区 B 创建 session
+    const { session: sessionB, agent: agentB } = appA.makeSession(cwdB)
+    openStep(sessionB, 1, 1)
+    await dispatchWriteIntent(appA.root, agentB, 'write')
+    await waitUntil(() => appA.records.size >= 2)
+    assert.equal(appA.records.size, 2, '工作区 B 正常捕获，不受工作区 A 节流影响')
+    await appA.dispose()
   })
 })
 

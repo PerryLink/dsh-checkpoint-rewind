@@ -138,7 +138,7 @@ El proveedor de copia recorre el espacio de trabajo **respetando `.gitignore`** 
 | `maxSnapshots` | `50` | Checkpoints conservados por sesión (los más antiguos se podan primero) |
 | `maxSnapshotBytes` | `536870912` (512 MiB) | Cuota blanda global de bytes incrementales (siempre se conserva el más nuevo por sesión viva) |
 | `pruneOnTurnEnd` | `true` | Ejecuta la poda de cuota al terminar un turno |
-| `mutationTools` | `['bash','write','edit','str_replace_editor','pwsh','terminal_send']` | Herramientas tratadas como mutantes en `tools/pre-execute` |
+| `mutationTools` | `['bash','write','edit','str_replace_editor','terminal_send']` | Herramientas tratadas como mutantes en `tools/pre-execute` (`pwsh` eliminado de valores predeterminados para evitar ralentizaciones por comandos de solo lectura; anular esta lista para volver a incluirlo) |
 | `excludeGlobs` | `['node_modules','.git','.dsh','dist','build']` | Patrones glob omitidos por el proveedor copy |
 | `confirmVia` | `auto` | Canal de confirmación: `auto` (userQuestions primero) · `userQuestions` · `approval` |
 | `listLimit` | `10` | Checkpoints mostrados por `/rewind` sin argumentos |
@@ -149,6 +149,8 @@ El proveedor de copia recorre el espacio de trabajo **respetando `.gitignore`** 
 | `snapshotTimeoutMs` | `180000` | Presupuesto de tiempo de reloj de recorrido por instantánea en milisegundos; misma semántica de omisión con advertencia |
 | `autoCheckpoint.enabled` | `true` | Instantáneas automáticas por intervalo en `step/start` |
 | `autoCheckpoint.intervalMinutes` | `0` | Intervalo; `0` = cada paso |
+| `mutationCheckpoint.enabled` | `true` | Interruptor de limitación de instantáneas de la red de seguridad previa a mutaciones |
+| `mutationCheckpoint.minIntervalMinutes` | `2` | Intervalo mínimo (minutos) entre instantáneas de mutación por espacio de trabajo (`0` = cada paso de mutación) |
 | `workspaceRestore` | `restore` | Reversión del workspace: `restore` (sobrescritura segura) · `reset-hard` (estilo CC, opt-in) |
 | `diffRenderer` | `pairwise` | Renderizador de diff de la página de ajustes: `pairwise` (texto línea a línea) · `side-by-side` (dos columnas por archivo) |
 | `selectiveRestore` | `true` | Restauración selectiva por archivo (`/rewind … --files`) y la casilla por archivo del panel + total de tamaño |

@@ -73,7 +73,7 @@ describe('Config schema = 设置页表单 schema（单一真源）', () => {
     const dict = /** @type {Record<string, any>} */ (/** @type {any} */ (checkpointSettingsSchema).dict)
     assert.ok(Object.keys(dict).length > 0, 'schema 有字段')
     for (const [key, field] of Object.entries(dict)) {
-      if (key === 'autoCheckpoint') {
+      if (key === 'autoCheckpoint' || key === 'mutationCheckpoint') {
         for (const [nested, child] of Object.entries(/** @type {Record<string, any>} */ (field.dict))) {
           assert.equal(child.meta?.volatile, true, `autoCheckpoint.${nested} 必须 volatile`)
         }
@@ -97,6 +97,7 @@ describe('Config schema = 设置页表单 schema（单一真源）', () => {
     assert.throws(() => checkpointSettingsSchema({ listLimit: 999 }), /listLimit/)
     assert.throws(() => checkpointSettingsSchema({ maxSnapshots: 1.5 }), /maxSnapshots/)
     assert.throws(() => checkpointSettingsSchema({ autoCheckpoint: { intervalMinutes: -1 } }), /intervalMinutes/)
+    assert.throws(() => checkpointSettingsSchema({ mutationCheckpoint: { minIntervalMinutes: -1 } }), /minIntervalMinutes/)
     assert.throws(() => checkpointSettingsSchema({ gitBin: '' }), /gitBin/)
     assert.throws(() => checkpointSettingsSchema({ provider: 'rsync' }), /provider/)
   })
@@ -106,6 +107,8 @@ describe('Config schema = 设置页表单 schema（单一真源）', () => {
     assert.throws(() => resolveConfig(/** @type {any} */ ({ workspaceRestore: 'clean' })), /workspaceRestore/)
     assert.throws(() => resolveConfig(/** @type {any} */ ({ autoCheckpoint: { intervalMinutes: -1 } })), /intervalMinutes/)
     assert.throws(() => resolveConfig(/** @type {any} */ ({ autoCheckpoint: { enabled: 'yes' } })), /autoCheckpoint\.enabled/)
+    assert.throws(() => resolveConfig(/** @type {any} */ ({ mutationCheckpoint: { minIntervalMinutes: -1 } })), /minIntervalMinutes/)
+    assert.throws(() => resolveConfig(/** @type {any} */ ({ mutationCheckpoint: { enabled: 'yes' } })), /mutationCheckpoint\.enabled/)
     assert.throws(() => resolveConfig(/** @type {any} */ ({ promptSection: 1 })), /promptSection/)
     assert.throws(() => resolveConfig(/** @type {any} */ ({ checkpointTool: 1 })), /checkpointTool/)
   })
