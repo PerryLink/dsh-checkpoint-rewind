@@ -127,6 +127,8 @@ Enderece um checkpoint pelo prefixo de id único, pelo número do passo ou por `
 
 Todos os ajustes são campos Schemastery `Config` (alteráveis no cordis.yml). Nada é hardcoded. As opções de provedor (`gitBin`, `snapshotDir`, `excludeGlobs`, `verifyByHash`) são lidas da configuração viva no momento do uso, então mudanças no cordis.yml valem sem reiniciar.
 
+O provedor de cópia percorre o workspace **respeitando `.gitignore`** (arquivos raiz e aninhados, regras mais profundas e re-inclusões com `!` vencem) além de `excludeGlobs`, então diretórios ignorados intencionalmente grandes (caches de deck, saídas de build) não custam nada. Cada percurso também é delimitado pelos orçamentos `maxSnapshotFiles` / `snapshotTimeoutMs`: um workspace que os exceda pula esse snapshot com um aviso alto — a chamada de ferramenta protegida sempre prossegue, e `agent.cancel` (ou um turno cancelado/interrompido) aborta um percurso em andamento.
+
 | Chave | Padrão | Significado |
 |---|---|---|
 | `enabled` | `true` | Interruptor mestre; em `false`, remove comandos, listeners e provedores por completo |
@@ -136,14 +138,19 @@ Todos os ajustes são campos Schemastery `Config` (alteráveis no cordis.yml). N
 | `maxSnapshots` | `50` | Checkpoints mantidos por sessão (os mais antigos podados primeiro) |
 | `maxSnapshotBytes` | `536870912` (512 MiB) | Cota branda global de bytes incrementais (o mais novo por sessão viva sempre é mantido) |
 | `pruneOnTurnEnd` | `true` | Executa a poda de cota ao fim de um turno |
-| `mutationTools` | `['bash','write','edit','str_replace_editor','pwsh','terminal_send']` | Ferramentas tratadas como mutantes em `tools/pre-execute` |
+| `mutationTools` | `['bash','write','edit','str_replace_editor','terminal_send']` | Ferramentas tratadas como mutantes em `tools/pre-execute` (`pwsh` removido dos padrões para evitar lentidão por comandos de somente leitura; substitua esta lista para readicionar) |
 | `excludeGlobs` | `['node_modules','.git','.dsh','dist','build']` | Padrões glob omitidos pelo provedor copy |
 | `confirmVia` | `auto` | Canal de confirmação: `auto` (userQuestions primeiro) · `userQuestions` · `approval` |
 | `listLimit` | `10` | Checkpoints mostrados pelo `/rewind` sem argumentos |
 | `preRewindCheckpoint` | `warn` | Checkpoint de guarda antes de restaurar: `warn` · `require` · `off` |
 | `verifyByHash` | `false` | Comparação por hash de conteúdo e verificação de restauração do provedor copy |
+| `respectGitignore` | `true` | O provedor de cópia respeita o `.gitignore` do workspace (raiz + aninhados, regras mais profundas e re-inclusões com `!` vencem) — árvores de cache/artefatos ignoradas nunca são percorridas |
+| `maxSnapshotFiles` | `100000` | Orçamento de percurso por snapshot em arquivos; excedê-lo pula o snapshot com um aviso alto em vez de travar a chamada da ferramenta |
+| `snapshotTimeoutMs` | `180000` | Orçamento de tempo real (wall-clock) por snapshot em milissegundos; mesmas semânticas de pular com aviso |
 | `autoCheckpoint.enabled` | `true` | Instantâneos automáticos por intervalo em `step/start` |
 | `autoCheckpoint.intervalMinutes` | `0` | Intervalo; `0` = a cada passo |
+| `mutationCheckpoint.enabled` | `true` | Interruptor de limitação de instantâneos da rede de segurança prévia a mutações |
+| `mutationCheckpoint.minIntervalMinutes` | `2` | Intervalo mínimo (minutos) entre instantâneos de mutação por workspace (`0` = a cada passo de mutação) |
 | `workspaceRestore` | `restore` | Reversão do workspace: `restore` (sobrescrita segura) · `reset-hard` (estilo CC, opt-in) |
 | `diffRenderer` | `pairwise` | Renderizador de diff da página de configurações: `pairwise` (texto linha a linha) · `side-by-side` (duas colunas por arquivo) |
 | `selectiveRestore` | `true` | Restauração seletiva por arquivo (`/rewind … --files`) e a caixa de seleção por arquivo + total de tamanho do painel |

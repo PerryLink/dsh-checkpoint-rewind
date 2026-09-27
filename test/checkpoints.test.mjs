@@ -136,12 +136,22 @@ describe('prunePlan（配额清理计划）', () => {
     assert.deepEqual(plan.ids, ['c1'])
   })
 
-  it('字节配额是软配额：每会话最新一条总是保留（大工作区不自我清理）', () => {
+  it('字节配额是软配额：单条未超限时多会话最新一条受保护', () => {
+    const entries = [
+      { key: 's1', value: record({ id: 's1', sessionId: 's1', time: 100, bytes: 60 }) },
+      { key: 's2', value: record({ id: 's2', sessionId: 's2', time: 200, bytes: 60 }) },
+    ]
+    const plan = prunePlan(entries, { maxSnapshots: 10, maxSnapshotBytes: 100 })
+    assert.deepEqual(plan.ids, [], '单条未超限的多会话最新条目受软配额保护')
+  })
+
+  it('单条记录超 maxSnapshotBytes 时不豁免：允许被字节配额删除（防止单条巨块击穿配额）', () => {
     const entries = [
       { key: 'big', value: record({ id: 'big', time: 100, bytes: 500 }) },
     ]
     const plan = prunePlan(entries, { maxSnapshots: 10, maxSnapshotBytes: 100 })
-    assert.deepEqual(plan.ids, [], '唯一（最新）一条不受字节配额删除')
+    assert.deepEqual(plan.ids, ['big'], '单条超限时不豁免最新保留')
+    assert.deepEqual(plan.byRule.maxSnapshotBytes, ['big'])
   })
 
   it('keepNewestPerSession: false 时字节配额可删除最新一条', () => {
@@ -160,16 +170,16 @@ describe('prunePlan（配额清理计划）', () => {
       { key: 'b2', value: record({ id: 'b2', sessionId: 'b', time: 250, bytes: 50 }) },
     ]
     const plan = prunePlan(entries, { maxSnapshots: 1, maxSnapshotBytes: 20 })
-    // a1/b1 由每会话上限删除；b2 是 b 的最新保留项，字节配额无法再删它。
+    // a1/b1 由每会话上限删除；b2 单条 50 字节超出 maxSnapshotBytes=20，不予豁免，由字节配额删除。
     assert.deepEqual(plan.byRule.maxSnapshots, ['a1', 'b1'])
-    assert.deepEqual(plan.byRule.maxSnapshotBytes, [])
-    assert.deepEqual(plan.ids, ['a1', 'b1'])
+    assert.deepEqual(plan.byRule.maxSnapshotBytes, ['b2'])
+    assert.deepEqual(plan.ids, ['a1', 'b1', 'b2'])
   })
 
   it('liveSessionIds: dead session newest records are pruned under byte quota, while live session newest records stay exempt', () => {
     const entries = [
-      { key: 'dead-subagent', value: record({ id: 'dead-subagent', sessionId: 'dead-session-1', time: 100, bytes: 500 }) },
-      { key: 'live-main', value: record({ id: 'live-main', sessionId: 'live-session-1', time: 200, bytes: 500 }) },
+      { key: 'dead-subagent', value: record({ id: 'dead-subagent', sessionId: 'dead-session-1', time: 100, bytes: 300 }) },
+      { key: 'live-main', value: record({ id: 'live-main', sessionId: 'live-session-1', time: 200, bytes: 300 }) },
     ]
     const plan = prunePlan(entries, {
       maxSnapshots: 10,

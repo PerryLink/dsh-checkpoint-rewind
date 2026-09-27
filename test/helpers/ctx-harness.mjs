@@ -110,11 +110,18 @@ export async function mountPlugin(opts = {}) {
   await mount(SessionStore)
   await mount(CommandRuntime)
   const plugin = await import('../../index.mjs')
-  // 默认关闭自动间隔快照（openStep 的 step/start 会触发）：既有测试断言的是
-  // 变更安全网/手动路径的精确记录数；autoCheckpoint 相关行为在专门测试中显式开启。
+  // 默认关闭自动间隔快照与变更安全网节流（openStep 的 step/start 会触发）：既有测试断言的是
+  // 变更安全网/手动路径的精确记录数；autoCheckpoint/mutationCheckpoint 相关行为在专门测试中显式开启。
   const config = {
     autoCheckpoint: { enabled: false },
-    ...(opts.config ?? {}),
+    mutationCheckpoint: { minIntervalMinutes: 0 },
+    ...opts.config,
+    ...(/** @type {{mutationCheckpoint?: {minIntervalMinutes?: number}}} */ (opts.config)?.mutationCheckpoint !== undefined ? {
+      mutationCheckpoint: {
+        minIntervalMinutes: 0,
+        .../** @type {{mutationCheckpoint?: object}} */ (opts.config)?.mutationCheckpoint,
+      },
+    } : {}),
   }
   await mount(Object.assign({}, plugin, {
     // Config 走 cordis 的 config 注入：plugin 函数形式在 plugin() 下用第 0 号 config。
@@ -136,8 +143,8 @@ export async function mountPlugin(opts = {}) {
     specVersions,
     agent,
     session,
-    makeSession: (dir = cwd) => {
-      const s = root.sessions.create(undefined, { meta: { cwd: dir } })
+    makeSession: (dir = cwd, id = `session-${Math.random().toString(36).slice(2)}`) => {
+      const s = root.sessions.create(SessionId(id), { meta: { cwd: dir } })
       return { session: s, agent: { id: s.id, session: s } }
     },
     dispose: async () => {

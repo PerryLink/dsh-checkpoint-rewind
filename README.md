@@ -132,6 +132,8 @@ Address a checkpoint by its unique id prefix, by step number, or by `latest`:
 
 All tunables are Schemastery `Config` fields (changeable from cordis.yml). Nothing is hardcoded. Provider options (`gitBin`, `snapshotDir`, `excludeGlobs`, `verifyByHash`) are read from the live config at use time, so cordis.yml changes apply without a restart.
 
+The copy provider walks the workspace **honoring `.gitignore`** (root and nested files, deeper rules and `!` re-includes win) in addition to `excludeGlobs`, so intended-huge ignored directories (deck caches, build outputs) cost nothing. Every walk is also fenced by the `maxSnapshotFiles` / `snapshotTimeoutMs` budgets: a workspace that exceeds them skips that snapshot with a loud warning — the guarded tool call always proceeds, and `agent.cancel` (or a cancelled/interrupted turn) aborts an in-flight walk.
+
 | Key | Default | Meaning |
 |---|---|---|
 | `enabled` | `true` | Master switch; `false` removes the commands, listeners, and providers entirely |
@@ -141,14 +143,19 @@ All tunables are Schemastery `Config` fields (changeable from cordis.yml). Nothi
 | `maxSnapshots` | `50` | Checkpoints kept per session (oldest pruned first) |
 | `maxSnapshotBytes` | `536870912` (512 MiB) | Global incremental-byte soft quota (newest per live session always retained) |
 | `pruneOnTurnEnd` | `true` | Run quota pruning when a turn ends |
-| `mutationTools` | `['bash','write','edit','str_replace_editor','pwsh','terminal_send']` | Tools treated as mutating at `tools/pre-execute` |
+| `mutationTools` | `['bash','write','edit','str_replace_editor','terminal_send']` | Tools treated as mutating at `tools/pre-execute` (`pwsh` removed from defaults to avoid capturing read-only shell commands; override this list via config to re-add) |
 | `excludeGlobs` | `['node_modules','.git','.dsh','dist','build']` | Glob patterns skipped by the copy provider |
 | `confirmVia` | `auto` | Confirmation channel: `auto` (userQuestions first) · `userQuestions` · `approval` |
 | `listLimit` | `10` | Checkpoints shown by bare `/rewind` |
 | `preRewindCheckpoint` | `warn` | Guard checkpoint before restore: `warn` · `require` · `off` |
 | `verifyByHash` | `false` | Copy-provider content-hash comparison and restore verification |
+| `respectGitignore` | `true` | Copy provider honors the workspace's `.gitignore` (root + nested, deeper rules and `!` re-includes win) — ignored cache/artifact trees are never walked |
+| `maxSnapshotFiles` | `100000` | Per-snapshot walk budget in files; exceeding it skips the snapshot with a loud warning instead of stalling the tool call |
+| `snapshotTimeoutMs` | `180000` | Per-snapshot walk wall-clock budget in milliseconds; same skip-with-warning semantics |
 | `autoCheckpoint.enabled` | `true` | Automatic interval snapshots on `step/start` |
 | `autoCheckpoint.intervalMinutes` | `0` | Interval; `0` = every step |
+| `mutationCheckpoint.enabled` | `true` | Pre-mutation safety net snapshot throttle switch |
+| `mutationCheckpoint.minIntervalMinutes` | `2` | Minimum interval (minutes) between mutation snapshots per workspace (`0` = every mutation step) |
 | `workspaceRestore` | `restore` | Workspace rollback: `restore` (safe overwrite) · `reset-hard` (CC-style, opt-in) |
 | `diffRenderer` | `pairwise` | Settings-page diff renderer: `pairwise` (line-level text) · `side-by-side` (per-file two-column) |
 | `selectiveRestore` | `true` | Per-file selective restore (`/rewind … --files`) and the panel's per-file checkbox + size total |

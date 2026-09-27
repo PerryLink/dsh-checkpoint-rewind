@@ -306,6 +306,8 @@ describe('git provider（scripted runner）', () => {
       ['clean', '-fd'],
       ['clean', '-xdf'],
       ['stash', 'apply'],
+      ['gc'],
+      ['gc', '--aggressive'],
       ['stash', 'pop'],
       ['stash', 'drop'],
       ['restore', '--source=x', '.'],
@@ -313,7 +315,7 @@ describe('git provider（scripted runner）', () => {
       ['rm', '-rf', '.'],
     ]
     for (const args of banned) {
-      assert.throws(() => assertSafe(args), /refuses to run forbidden git verb|only runs "git stash create"|only runs worktree-only|only runs "git reset --hard <snapshot-ref>"/)
+      assert.throws(() => assertSafe(args), /refuses to run forbidden git verb|only runs "git stash create"|only runs worktree-only|only runs "git reset --hard <snapshot-ref>"|only runs "git gc --prune=<date>"/)
     }
   })
 
@@ -337,10 +339,36 @@ describe('git provider（scripted runner）', () => {
       ['ls-files', '--others', '--exclude-standard'],
       ['restore', '--source=abc123', '--worktree', '--', 'a.txt'],
       ['reset', '--hard', SHA],
+      ['gc', '--prune=7.days.ago'],
+      ['count-objects'],
     ]
     for (const args of allowed) {
       assert.doesNotThrow(() => assertSafe(args))
     }
+  })
+
+  it('maybeGc：loose objects 超阈值时执行 git gc --prune=7.days.ago', async () => {
+    const { run, calls } = scriptedGit({
+      'count-objects': { code: 0, stdout: '5200 objects, 12345 kilobytes\n', stderr: '' },
+      'gc --prune=7.days.ago': { code: 0, stdout: '', stderr: '' },
+    })
+    const provider = makeGitProvider({ gitBin: 'git', run })
+    const ran = await provider.maybeGc(workspace)
+    assert.equal(ran, true)
+    assert.deepEqual(calls, [
+      ['count-objects'],
+      ['gc', '--prune=7.days.ago'],
+    ])
+  })
+
+  it('maybeGc：loose objects 未超阈值时跳过 gc', async () => {
+    const { run, calls } = scriptedGit({
+      'count-objects': { code: 0, stdout: '120 objects, 345 kilobytes\n', stderr: '' },
+    })
+    const provider = makeGitProvider({ gitBin: 'git', run })
+    const ran = await provider.maybeGc(workspace)
+    assert.equal(ran, false)
+    assert.deepEqual(calls, [['count-objects']])
   })
 
   it('resetHard：git reset --hard <快照提交> 并报告遗留（未跟踪文件保留）', async () => {

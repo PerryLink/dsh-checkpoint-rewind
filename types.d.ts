@@ -188,6 +188,11 @@ export interface CheckpointConfig {
     enabled?: boolean
     intervalMinutes?: number
   }
+  /** 变更安全网节流：tools/pre-execute 与 fs/*-intent 检查；minIntervalMinutes 节流；enabled=false 关闭。 */
+  mutationCheckpoint?: {
+    enabled?: boolean
+    minIntervalMinutes?: number
+  }
   /**
    * 工作区回滚实现：restore（默认安全覆盖，绝不删除检查点后新建的文件）·
    * reset-hard（CC 对标：git reset --hard <快照提交>，默认关，需显式开启）。

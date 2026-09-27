@@ -172,8 +172,14 @@ export function probeIgnorableAppend() {
  * @property {number} [listLimit] /rewind 无参列出的最近检查点数（默认 10）。
  * @property {'warn'|'require'|'off'} [preRewindCheckpoint] 回退前的保护检查点策略（默认 warn）。
  * @property {boolean} [verifyByHash] copy provider 内容哈希校验（默认 false）。
+ * @property {boolean} [respectGitignore] copy provider 读取工作区 .gitignore（默认 true；
+ *   巨型被忽略目录（缓存/产物）不进入快照遍历）。
+ * @property {number} [maxSnapshotFiles] 单次快照遍历的文件数预算（默认 100000；超限跳过快照并告警）。
+ * @property {number} [snapshotTimeoutMs] 单次快照遍历的墙钟预算毫秒（默认 180000；超限跳过快照并告警）。
  * @property {{enabled: boolean, intervalMinutes: number}} [autoCheckpoint]
  *   自动间隔快照：step/start 时检查；intervalMinutes=0 每步；enabled=false 关闭（默认开、每步）。
+ * @property {{enabled: boolean, minIntervalMinutes: number}} [mutationCheckpoint]
+ *   变更安全网节流：tools/pre-execute 与 fs/*-intent 检查；minIntervalMinutes 节流；enabled=false 关闭。
  * @property {'restore'|'reset-hard'} [workspaceRestore] 工作区回滚实现（默认 restore 安全覆盖；
  *   reset-hard = git reset --hard <快照提交>，CC 对标，默认关）。
  * @property {'pairwise'|'side-by-side'} [diffRenderer] 设置页两两 diff 的渲染器（默认 pairwise
@@ -249,9 +255,16 @@ export function resolveConfig(config = {}) {
     listLimit: readConfigField(raw.listLimit) ?? DEFAULTS.LIST_LIMIT,
     preRewindCheckpoint: readConfigField(raw.preRewindCheckpoint) ?? DEFAULTS.PRE_REWIND_CHECKPOINT,
     verifyByHash: readConfigField(raw.verifyByHash) ?? DEFAULTS.VERIFY_BY_HASH,
+    respectGitignore: readConfigField(raw.respectGitignore) ?? DEFAULTS.RESPECT_GITIGNORE,
+    maxSnapshotFiles: readConfigField(raw.maxSnapshotFiles) ?? DEFAULTS.MAX_SNAPSHOT_FILES,
+    snapshotTimeoutMs: readConfigField(raw.snapshotTimeoutMs) ?? DEFAULTS.SNAPSHOT_TIMEOUT_MS,
     autoCheckpoint: {
       enabled: readConfigField(raw.autoCheckpoint?.enabled) ?? DEFAULTS.AUTO_CHECKPOINT_ENABLED,
       intervalMinutes: readConfigField(raw.autoCheckpoint?.intervalMinutes) ?? DEFAULTS.AUTO_CHECKPOINT_INTERVAL_MINUTES,
+    },
+    mutationCheckpoint: {
+      enabled: readConfigField(raw.mutationCheckpoint?.enabled) ?? DEFAULTS.MUTATION_CHECKPOINT_ENABLED,
+      minIntervalMinutes: readConfigField(raw.mutationCheckpoint?.minIntervalMinutes) ?? DEFAULTS.MUTATION_CHECKPOINT_MIN_INTERVAL_MINUTES,
     },
     workspaceRestore: readConfigField(raw.workspaceRestore) ?? DEFAULTS.WORKSPACE_RESTORE,
     diffRenderer: readConfigField(raw.diffRenderer) ?? DEFAULTS.DIFF_RENDERER,
@@ -293,6 +306,15 @@ export function resolveConfig(config = {}) {
   if (typeof resolved.verifyByHash !== 'boolean') {
     throw badConfig('verifyByHash must be a boolean')
   }
+  if (typeof resolved.respectGitignore !== 'boolean') {
+    throw badConfig('respectGitignore must be a boolean')
+  }
+  if (!Number.isInteger(resolved.maxSnapshotFiles) || resolved.maxSnapshotFiles < LIMITS.MIN_MAX_SNAPSHOT_FILES) {
+    throw badConfig(`maxSnapshotFiles must be an integer ≥ ${LIMITS.MIN_MAX_SNAPSHOT_FILES}`)
+  }
+  if (!Number.isInteger(resolved.snapshotTimeoutMs) || resolved.snapshotTimeoutMs < LIMITS.MIN_SNAPSHOT_TIMEOUT_MS) {
+    throw badConfig(`snapshotTimeoutMs must be an integer ≥ ${LIMITS.MIN_SNAPSHOT_TIMEOUT_MS}`)
+  }
   if (typeof resolved.autoCheckpoint.enabled !== 'boolean') {
     throw badConfig('autoCheckpoint.enabled must be a boolean')
   }
@@ -300,6 +322,15 @@ export function resolveConfig(config = {}) {
     || resolved.autoCheckpoint.intervalMinutes < LIMITS.MIN_AUTO_INTERVAL_MINUTES
     || resolved.autoCheckpoint.intervalMinutes > LIMITS.MAX_AUTO_INTERVAL_MINUTES) {
     throw badConfig(`autoCheckpoint.intervalMinutes must be an integer in [${LIMITS.MIN_AUTO_INTERVAL_MINUTES}, ${LIMITS.MAX_AUTO_INTERVAL_MINUTES}] (0 = every step)`)
+  }
+  if (typeof resolved.mutationCheckpoint.enabled !== 'boolean') {
+    throw badConfig('mutationCheckpoint.enabled must be a boolean')
+  }
+  if (typeof resolved.mutationCheckpoint.minIntervalMinutes !== 'number'
+    || Number.isNaN(resolved.mutationCheckpoint.minIntervalMinutes)
+    || resolved.mutationCheckpoint.minIntervalMinutes < LIMITS.MIN_MUTATION_INTERVAL_MINUTES
+    || resolved.mutationCheckpoint.minIntervalMinutes > LIMITS.MAX_MUTATION_INTERVAL_MINUTES) {
+    throw badConfig(`mutationCheckpoint.minIntervalMinutes must be a number in [${LIMITS.MIN_MUTATION_INTERVAL_MINUTES}, ${LIMITS.MAX_MUTATION_INTERVAL_MINUTES}]`)
   }
   if (typeof resolved.promptSection !== 'boolean' || typeof resolved.checkpointTool !== 'boolean') {
     throw badConfig('promptSection and checkpointTool must be booleans')
@@ -410,6 +441,9 @@ export async function apply(ctx, config = {}) {
     snapshotDir: getSnapshotDir,
     excludeGlobs: () => getLive().excludeGlobs,
     verifyByHash: () => getLive().verifyByHash,
+    respectGitignore: () => getLive().respectGitignore,
+    maxSnapshotFiles: () => getLive().maxSnapshotFiles,
+    snapshotTimeoutMs: () => getLive().snapshotTimeoutMs,
   }))
   ctx.effect(() => () => {
     unregGit()
@@ -494,6 +528,46 @@ export async function apply(ctx, config = {}) {
     return state
   }
 
+  // --- 在飞捕获的中止注册表：会话回合取消/中断（turn/end aborted|interrupted，
+  // 旧宿主行为 cancelled）或宿主卸载（agent/disposed）时中止其快照遍历——快照遍历
+  // 可能远比一次工具调用贵（大工作区全量拷贝的事故），agent.cancel 必须能解脱在飞瀑布。
+  /** @type {Map<string, AbortController>} */
+  const captureAborts = new Map()
+  /**
+   * 中止某会话的在飞捕获（id 缺失时无操作）。
+   * @param {string|undefined} sessionId - 会话 id。
+   * @param {unknown} reason - 中止原因（透传给 AbortController）。
+   */
+  const abortCapturesFor = (sessionId, reason) => {
+    if (sessionId === undefined) return
+    const controller = captureAborts.get(sessionId)
+    if (controller === undefined) return
+    captureAborts.delete(sessionId)
+    controller.abort(reason)
+  }
+  /**
+   * 注册某会话的在飞捕获控制器（同会话串行捕获：同一时刻至多一个在飞控制器）。
+   * @param {string} sessionId - 会话 id。
+   * @returns {AbortController} 该会话的捕获控制器。
+   */
+  const registerCaptureAbort = (sessionId) => {
+    // 同会话串行捕获：同一时刻至多一个在飞控制器；后到的快照共享窗口去重。
+    const controller = new AbortController()
+    captureAborts.set(sessionId, controller)
+    return controller
+  }
+  /**
+   * 释放某会话的捕获控制器（只释放仍是当前控制器的那一个）。
+   * @param {string} sessionId - 会话 id。
+   * @param {AbortController} controller - 注册时返回的控制器。
+   */
+  const releaseCaptureAbort = (sessionId, controller) => {
+    if (captureAborts.get(sessionId) === controller) captureAborts.delete(sessionId)
+  }
+  ctx.on('agent/disposed', ({ agent }) => {
+    abortCapturesFor(agent?.session?.id, 'agent disposed')
+  })
+
   // --- 会话事件：turn/step 跟踪 + 自动间隔快照 + 边界补记 + turn 结束清理。
   ctx.on('session/event', (session, event) => {
     switch (event.type) {
@@ -520,6 +594,12 @@ export async function apply(ctx, config = {}) {
         const state = ensureState(session)
         state.turn = undefined
         state.step = undefined
+        // turn 取消/中断时中止在飞捕获：0.1.7 的 reason 词汇是 aborted|interrupted，
+        // 旧宿主行（0.1.5/0.1.6）用 cancelled——按字符串比较，两代宿主都认得。
+        const reasonKind = /** @type {string | undefined} */ (event.data?.reason?.kind)
+        if (reasonKind === 'cancelled' || reasonKind === 'aborted' || reasonKind === 'interrupted') {
+          abortCapturesFor(session.id, `turn ${reasonKind}`)
+        }
         if (getLive().pruneOnTurnEnd) pruneAll(session, PRUNE_REASONS.TURN_END)
         break
       }
@@ -608,10 +688,11 @@ export async function apply(ctx, config = {}) {
 
   /**
    * 统一捕获：工作区快照 + 三态记录落盘。返回 {record}（成功）/ {deduped}
-   * （与上一检查点内容一致）/ {failed: message}（已警告）。绝不抛出。
+   * （与上一检查点内容一致）/ {failed: message}（已警告；中止/超限时分别附带
+   * aborted/budgetExceeded 标记供调用方区分）。绝不抛出。
    * @param {import('@deepseek-ai/dsh-session').Session} session - 会话。
    * @param {{kind: import('./types.d.ts').CheckpointRecord['kind'], triggerTool: string, note?: string, retryWithoutBaseline?: boolean}} opts - 捕获参数。
-   * @returns {Promise<{record?: import('./types.d.ts').CheckpointRecord, deduped?: boolean, detail?: string, failed?: string}|undefined>} 捕获结果；会话无 cwd 时为 undefined。
+   * @returns {Promise<{record?: import('./types.d.ts').CheckpointRecord, deduped?: boolean, detail?: string, failed?: string, aborted?: boolean, budgetExceeded?: boolean}|undefined>} 捕获结果；会话无 cwd 时为 undefined。
    */
   async function captureCheckpoint(session, opts) {
     const cwd = session.header?.cwd
@@ -631,18 +712,25 @@ export async function apply(ctx, config = {}) {
       const provider = await registry.resolve(getLive().provider, { cwd, key: workspaceKeyOf(cwd) })
       const previous = latestRecordFor(table, session.id, cwd)
       const previousRef = previous !== undefined && previous.provider === provider.name ? previous.ref : undefined
+      const abortController = registerCaptureAbort(session.id)
       let result
       try {
         result = await provider.snapshot(
           { cwd, key: workspaceKeyOf(cwd) },
-          { triggerTool: opts.triggerTool, previousRef },
+          { triggerTool: opts.triggerTool, previousRef, signal: abortController.signal },
         )
       } catch (error) {
+        // 中止与预算超限不重试：这是明确的快速失败语义（中止来源是用户/宿主，
+        // 超限说明工作区超出预算，重捕无基线也只会再次超限）。
+        const code = /** @type {{code?: unknown}} */ (error)?.code
+        if (code === 'SNAPSHOT_ABORTED' || code === 'SNAPSHOT_BUDGET_EXCEEDED') throw error
         // 保护检查点不能依赖上一检查点的存储完整性（去重基线不可读时整条
         // 捕获会失败）：退化为无基线重捕，保证回退仍可撤回。
         if (opts.retryWithoutBaseline !== true || previousRef === undefined) throw error
         logger.warn(`checkpoint dedup baseline unreadable (${messageOf(error)}), capturing without dedup`)
-        result = await provider.snapshot({ cwd, key: workspaceKeyOf(cwd) }, { triggerTool: opts.triggerTool })
+        result = await provider.snapshot({ cwd, key: workspaceKeyOf(cwd) }, { triggerTool: opts.triggerTool, signal: abortController.signal })
+      } finally {
+        releaseCaptureAbort(session.id, abortController)
       }
       if (result === null) {
         logger.debug(`checkpoint deduped: workspace unchanged (trigger ${opts.triggerTool})`)
@@ -680,6 +768,15 @@ export async function apply(ctx, config = {}) {
       await pruneAll(session)
       return { record }
     } catch (error) {
+      const code = /** @type {{code?: unknown}} */ (error)?.code
+      if (code === 'SNAPSHOT_ABORTED') {
+        warn(`checkpoint capture aborted (trigger ${opts.triggerTool}): ${messageOf(error)}`)
+        return { failed: messageOf(error), aborted: true }
+      }
+      if (code === 'SNAPSHOT_BUDGET_EXCEEDED') {
+        warn(`checkpoint skipped: snapshot budget exceeded (trigger ${opts.triggerTool}): ${messageOf(error)} — shrink the walk via .gitignore/excludeGlobs, or raise maxSnapshotFiles/snapshotTimeoutMs in the checkpoint-rewind settings`)
+        return { failed: messageOf(error), budgetExceeded: true }
+      }
       warn(`checkpoint capture failed (trigger ${opts.triggerTool}): ${messageOf(error)}`)
       return { failed: messageOf(error) }
     }
@@ -724,17 +821,31 @@ export async function apply(ctx, config = {}) {
     return typeof detail === 'string' && detail.length > 0 ? `${base}\n${detail}` : base
   }
 
+  // --- 每工作区变更安全网节流状态（workspaceKeyOf(cwd) → 上次变更快照毫秒时间戳）。
+  const lastMutationByWorkspace = new Map()
+
   /**
    * 变更前快照（安全网）：每 (session, turn, step) 最多一次；并发意图共享
-   * 同一次捕获。失败只记日志，绝不阻断工具执行（快照是安全网，不是策略）。
+   * 同一次捕获。检查 mutationCheckpoint.enabled 与 minIntervalMinutes 节流。
+   * 失败只记日志，绝不阻断工具执行（快照是安全网，不是策略）。
    * @param {import('@deepseek-ai/dsh-session').Session|null|undefined} session - 会话。
    * @param {string} triggerTool - 触发工具名。
    * @returns {Promise<void>} 完成（含失败）。
    */
   async function snapshotForMutation(session, triggerTool) {
     if (session === null || session === undefined) return
+    const mutation = liveConfig.mutationCheckpoint
+    if (mutation?.enabled !== true) return
     const pos = currentStepOf(session)
     if (pos === undefined) return // 不在开放步骤内：没有可关联的边界。
+    const cwd = session.header?.cwd
+    const wsKey = workspaceKeyOf(cwd)
+    const now = Date.now()
+    const lastAt = wsKey ? lastMutationByWorkspace.get(wsKey) : undefined
+    if (mutation.minIntervalMinutes > 0 && lastAt !== undefined
+      && now - lastAt < mutation.minIntervalMinutes * 60000) {
+      return
+    }
     const state = ensureState(session)
     const windowKey = `${pos.turn}:${pos.step}`
     if (state.snapshotKey === windowKey) return
@@ -744,7 +855,10 @@ export async function apply(ctx, config = {}) {
     }
     const run = (async () => {
       try {
-        await captureCheckpoint(session, { kind: CHECKPOINT_KINDS.MUTATION, triggerTool })
+        const result = await captureCheckpoint(session, { kind: CHECKPOINT_KINDS.MUTATION, triggerTool })
+        if (result !== undefined && result?.failed === undefined && wsKey) {
+          lastMutationByWorkspace.set(wsKey, Date.now())
+        }
       } finally {
         state.inFlight = undefined
         state.snapshotKey = windowKey
@@ -889,6 +1003,13 @@ export async function apply(ctx, config = {}) {
       const eventReason = reason ?? (plan.byRule.maxSnapshots.length > 0 ? PRUNE_REASONS.MAX_SNAPSHOTS : PRUNE_REASONS.MAX_SNAPSHOT_BYTES)
       appendEvent(triggerSession, SESSION_EVENTS.PRUNE, { ids: plan.ids, reason: eventReason })
       logger.info(`pruned ${plan.ids.length} checkpoint(s) (${eventReason})`)
+      const cwd = triggerSession?.header?.cwd
+      if (typeof cwd === 'string' && cwd.length > 0) {
+        const gitProvider = registry.get(PROVIDERS.GIT)
+        if (gitProvider && typeof gitProvider.maybeGc === 'function') {
+          void gitProvider.maybeGc({ cwd, key: workspaceKeyOf(cwd) }).catch(() => {})
+        }
+      }
     }).catch(error => warn(`checkpoint prune failed: ${messageOf(error)}`))
   }
 
