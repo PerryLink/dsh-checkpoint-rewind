@@ -116,10 +116,10 @@ export async function mountPlugin(opts = {}) {
     autoCheckpoint: { enabled: false },
     mutationCheckpoint: { minIntervalMinutes: 0 },
     ...opts.config,
-    ...(opts.config?.mutationCheckpoint !== undefined ? {
+    ...(/** @type {{mutationCheckpoint?: {minIntervalMinutes?: number}}} */ (opts.config)?.mutationCheckpoint !== undefined ? {
       mutationCheckpoint: {
         minIntervalMinutes: 0,
-        ...opts.config.mutationCheckpoint,
+        .../** @type {{mutationCheckpoint?: object}} */ (opts.config)?.mutationCheckpoint,
       },
     } : {}),
   }

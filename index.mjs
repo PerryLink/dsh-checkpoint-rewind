@@ -528,22 +528,39 @@ export async function apply(ctx, config = {}) {
     return state
   }
 
-  // --- 在飞捕获的中止注册表：会话回合取消/中断（turn/end cancelled|interrupted）
-  // 或宿主卸载（agent/disposed）时中止其快照遍历——快照遍历可能远比一次工具
-  // 调用贵（大工作区全量拷贝的事故），agent.cancel 必须能解脱在飞瀑布。
+  // --- 在飞捕获的中止注册表：会话回合取消/中断（turn/end aborted|interrupted，
+  // 旧宿主行为 cancelled）或宿主卸载（agent/disposed）时中止其快照遍历——快照遍历
+  // 可能远比一次工具调用贵（大工作区全量拷贝的事故），agent.cancel 必须能解脱在飞瀑布。
+  /** @type {Map<string, AbortController>} */
   const captureAborts = new Map()
+  /**
+   * 中止某会话的在飞捕获（id 缺失时无操作）。
+   * @param {string|undefined} sessionId - 会话 id。
+   * @param {unknown} reason - 中止原因（透传给 AbortController）。
+   */
   const abortCapturesFor = (sessionId, reason) => {
+    if (sessionId === undefined) return
     const controller = captureAborts.get(sessionId)
     if (controller === undefined) return
     captureAborts.delete(sessionId)
     controller.abort(reason)
   }
+  /**
+   * 注册某会话的在飞捕获控制器（同会话串行捕获：同一时刻至多一个在飞控制器）。
+   * @param {string} sessionId - 会话 id。
+   * @returns {AbortController} 该会话的捕获控制器。
+   */
   const registerCaptureAbort = (sessionId) => {
     // 同会话串行捕获：同一时刻至多一个在飞控制器；后到的快照共享窗口去重。
     const controller = new AbortController()
     captureAborts.set(sessionId, controller)
     return controller
   }
+  /**
+   * 释放某会话的捕获控制器（只释放仍是当前控制器的那一个）。
+   * @param {string} sessionId - 会话 id。
+   * @param {AbortController} controller - 注册时返回的控制器。
+   */
   const releaseCaptureAbort = (sessionId, controller) => {
     if (captureAborts.get(sessionId) === controller) captureAborts.delete(sessionId)
   }
@@ -577,8 +594,10 @@ export async function apply(ctx, config = {}) {
         const state = ensureState(session)
         state.turn = undefined
         state.step = undefined
-        const reasonKind = event.data?.reason?.kind
-        if (reasonKind === 'cancelled' || reasonKind === 'interrupted') {
+        // turn 取消/中断时中止在飞捕获：0.1.7 的 reason 词汇是 aborted|interrupted，
+        // 旧宿主行（0.1.5/0.1.6）用 cancelled——按字符串比较，两代宿主都认得。
+        const reasonKind = /** @type {string | undefined} */ (event.data?.reason?.kind)
+        if (reasonKind === 'cancelled' || reasonKind === 'aborted' || reasonKind === 'interrupted') {
           abortCapturesFor(session.id, `turn ${reasonKind}`)
         }
         if (getLive().pruneOnTurnEnd) pruneAll(session, PRUNE_REASONS.TURN_END)
@@ -669,10 +688,11 @@ export async function apply(ctx, config = {}) {
 
   /**
    * 统一捕获：工作区快照 + 三态记录落盘。返回 {record}（成功）/ {deduped}
-   * （与上一检查点内容一致）/ {failed: message}（已警告）。绝不抛出。
+   * （与上一检查点内容一致）/ {failed: message}（已警告；中止/超限时分别附带
+   * aborted/budgetExceeded 标记供调用方区分）。绝不抛出。
    * @param {import('@deepseek-ai/dsh-session').Session} session - 会话。
    * @param {{kind: import('./types.d.ts').CheckpointRecord['kind'], triggerTool: string, note?: string, retryWithoutBaseline?: boolean}} opts - 捕获参数。
-   * @returns {Promise<{record?: import('./types.d.ts').CheckpointRecord, deduped?: boolean, detail?: string, failed?: string}|undefined>} 捕获结果；会话无 cwd 时为 undefined。
+   * @returns {Promise<{record?: import('./types.d.ts').CheckpointRecord, deduped?: boolean, detail?: string, failed?: string, aborted?: boolean, budgetExceeded?: boolean}|undefined>} 捕获结果；会话无 cwd 时为 undefined。
    */
   async function captureCheckpoint(session, opts) {
     const cwd = session.header?.cwd
@@ -702,7 +722,8 @@ export async function apply(ctx, config = {}) {
       } catch (error) {
         // 中止与预算超限不重试：这是明确的快速失败语义（中止来源是用户/宿主，
         // 超限说明工作区超出预算，重捕无基线也只会再次超限）。
-        if (error?.code === 'SNAPSHOT_ABORTED' || error?.code === 'SNAPSHOT_BUDGET_EXCEEDED') throw error
+        const code = /** @type {{code?: unknown}} */ (error)?.code
+        if (code === 'SNAPSHOT_ABORTED' || code === 'SNAPSHOT_BUDGET_EXCEEDED') throw error
         // 保护检查点不能依赖上一检查点的存储完整性（去重基线不可读时整条
         // 捕获会失败）：退化为无基线重捕，保证回退仍可撤回。
         if (opts.retryWithoutBaseline !== true || previousRef === undefined) throw error
@@ -747,11 +768,12 @@ export async function apply(ctx, config = {}) {
       await pruneAll(session)
       return { record }
     } catch (error) {
-      if (error?.code === 'SNAPSHOT_ABORTED') {
+      const code = /** @type {{code?: unknown}} */ (error)?.code
+      if (code === 'SNAPSHOT_ABORTED') {
         warn(`checkpoint capture aborted (trigger ${opts.triggerTool}): ${messageOf(error)}`)
         return { failed: messageOf(error), aborted: true }
       }
-      if (error?.code === 'SNAPSHOT_BUDGET_EXCEEDED') {
+      if (code === 'SNAPSHOT_BUDGET_EXCEEDED') {
         warn(`checkpoint skipped: snapshot budget exceeded (trigger ${opts.triggerTool}): ${messageOf(error)} — shrink the walk via .gitignore/excludeGlobs, or raise maxSnapshotFiles/snapshotTimeoutMs in the checkpoint-rewind settings`)
         return { failed: messageOf(error), budgetExceeded: true }
       }
