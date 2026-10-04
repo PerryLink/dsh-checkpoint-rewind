@@ -6,6 +6,8 @@ this project versions with [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.19] - 2026-10-04
+
 
 ### Changed
 
