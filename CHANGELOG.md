@@ -6,7 +6,7 @@ this project versions with [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
-## [0.6.21] - undefined
+## [0.6.21] - 2026-10-05
 
 undefined
 
