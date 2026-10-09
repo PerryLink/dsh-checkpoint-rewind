@@ -34,6 +34,20 @@
 
 *English:* part of a 40+ plugin family for DeepSeek Harness. If it is useful, **a star helps the next person find it** — nothing is gated behind it.
 
+## What is dsh-checkpoint-rewind?
+
+एकीकृत DeepSeek Harness चेकपॉइंट — सत्र + वर्कस्पेस + कॉन्फ़िग तीन-अवस्था स्नैपशॉट, एक-चरण रोलबैक के साथ।
+
+Claude Code Checkpoints का समतुल्य, क्षमता-सीम (capability-seam) प्लगइन के रूप में बनाया गया: हर बदलाव से पहले कैप्चर करें, एक अनुमोदित कमांड से तीनों अवस्थाओं में से किसी को भी बहाल करें।
+
+![dsh-checkpoint-rewind का टर्मिनल डेमो: dsh-checkpoint-rewind — /rewind lists checkpoints, then a read-only preview](https://raw.githubusercontent.com/PerryLink/dsh-checkpoint-rewind/main/docs/assets/dsh-checkpoint-rewind-demo.png)
+
+## Comparison
+
+![dsh-checkpoint-rewind का मापा गया तुलना चार्ट](https://raw.githubusercontent.com/PerryLink/dsh-checkpoint-rewind/main/docs/assets/dsh-checkpoint-rewind-evidence.png)
+
+Capabilities out of 2 (restores files? / rewinds the session?) · counted from the README comparison table
+
 ## अनुकूलता
 
 | सतह | स्थिति |
@@ -68,8 +82,12 @@
 ## त्वरित शुरुआत
 
 ```sh
+dsh plugin --profile web add github:PerryLink/dsh-checkpoint-rewind
+```
+
+```sh
 # 1. अपने प्रोफ़ाइल में बंडल इंस्टॉल करें
-dsh plugin --profile web add "github:PerryLink/dsh-checkpoint-rewind#main"
+dsh plugin --profile web add github:PerryLink/dsh-checkpoint-rewind
 
 # या npm से (प्रकाशित रिलीज़)
 dsh plugin --profile web add dsh-checkpoint-rewind
@@ -119,7 +137,7 @@ run "/rewind <id>" to restore files and fork the session from that checkpoint
 
 ## इंस्टॉल और अनइंस्टॉल
 
-- **git चैनल** (नवीनतम `main`): `dsh plugin --profile web add "github:PerryLink/dsh-checkpoint-rewind#main"` — शुद्ध ESM, कोई `prepare` या `allowBuilds` चरण नहीं।
+- **git चैनल** (नवीनतम `main`): `dsh plugin --profile web add github:PerryLink/dsh-checkpoint-rewind` — शुद्ध ESM, कोई `prepare` या `allowBuilds` चरण नहीं।
 - **npm चैनल** (प्रकाशित रिलीज़): `dsh plugin --profile web add dsh-checkpoint-rewind`।
 - **tarball चैनल**: इस रेपो में `npm pack`, फिर `dsh plugin --profile web add ./dsh-checkpoint-rewind-<version>.tgz`।
 - **स्टोरेज स्टैक** (चेकपॉइंट के लिए आवश्यक, माउंट के लिए वैकल्पिक): `@deepseek-ai/dsh-storage` + `@deepseek-ai/dsh-storage-json` (कॉन्फ़िग `root`) + `@deepseek-ai/dsh-storage-domain` (कॉन्फ़िग `backend: json`) — त्वरित शुरुआत देखें; इसके बिना भी प्लगइन माउंट होता है और हर कमांड समाधान बताता है।

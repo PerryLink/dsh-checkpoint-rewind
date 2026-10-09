@@ -38,6 +38,20 @@
 *English:* part of a 40+ plugin family for DeepSeek Harness. If it is useful, **a star helps the next person find it** — nothing is gated behind it.
 
 
+## What is dsh-checkpoint-rewind?
+
+Unified DeepSeek Harness checkpoints — session + workspace + config three-state snapshots with one-shot rollback.
+
+The Claude Code Checkpoints equivalent, built as a capability-seam plugin: capture before every mutation, restore any of the three states with one approved command.
+
+![Terminal demo of dsh-checkpoint-rewind: dsh-checkpoint-rewind — /rewind lists checkpoints, then a read-only preview](https://raw.githubusercontent.com/PerryLink/dsh-checkpoint-rewind/main/docs/assets/dsh-checkpoint-rewind-demo.png)
+
+## Comparison
+
+![Measured comparison chart for dsh-checkpoint-rewind](https://raw.githubusercontent.com/PerryLink/dsh-checkpoint-rewind/main/docs/assets/dsh-checkpoint-rewind-evidence.png)
+
+Capabilities out of 2 (restores files? / rewinds the session?) · counted from the README comparison table
+
 ## Compatibility
 
 | Surface | Status |
@@ -72,8 +86,12 @@ The difference in one sentence: **dsh-checkpoint-rewind captures the *workspace 
 ## Quick start
 
 ```sh
+dsh plugin --profile web add github:PerryLink/dsh-checkpoint-rewind
+```
+
+```sh
 # 1. install the bundle into your profile
-dsh plugin --profile web add "github:PerryLink/dsh-checkpoint-rewind#main"
+dsh plugin --profile web add github:PerryLink/dsh-checkpoint-rewind
 
 # or from npm (published releases)
 dsh plugin --profile web add dsh-checkpoint-rewind
@@ -124,7 +142,7 @@ Address a checkpoint by its unique id prefix, by step number, or by `latest`:
 
 ## Install & uninstall
 
-- **git channel** (latest `main`): `dsh plugin --profile web add "github:PerryLink/dsh-checkpoint-rewind#main"` — pure ESM, no `prepare` or `allowBuilds` step.
+- **git channel** (latest `main`): `dsh plugin --profile web add github:PerryLink/dsh-checkpoint-rewind` — pure ESM, no `prepare` or `allowBuilds` step.
 - **npm channel** (published releases): `dsh plugin --profile web add dsh-checkpoint-rewind`.
 - **tarball channel**: `npm pack` in this repo, then `dsh plugin --profile web add ./dsh-checkpoint-rewind-<version>.tgz`.
 - **storage stack** (required for checkpoints, optional for mounting): `@deepseek-ai/dsh-storage` + `@deepseek-ai/dsh-storage-json` (config `root`) + `@deepseek-ai/dsh-storage-domain` (config `backend: json`) — see Quick start; the plugin still mounts without them and every command explains the fix.

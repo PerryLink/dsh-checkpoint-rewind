@@ -34,6 +34,20 @@ Este plugin forma parte de la [familia de plugins DSH](https://github.com/PerryL
 
 *English:* part of a 40+ plugin family for DeepSeek Harness. If it is useful, **a star helps the next person find it** — nothing is gated behind it.
 
+## What is dsh-checkpoint-rewind?
+
+Checkpoints unificados de DeepSeek Harness: instantáneas de tres estados — sesión + workspace + configuración — con reversión de un solo paso.
+
+El equivalente a los Checkpoints de Claude Code, construido como plugin de costura de capacidad (capability-seam): captura antes de cada mutación y restaura cualquiera de los tres estados con un único comando aprobado.
+
+![Demostración de terminal de dsh-checkpoint-rewind: dsh-checkpoint-rewind — /rewind lists checkpoints, then a read-only preview](https://raw.githubusercontent.com/PerryLink/dsh-checkpoint-rewind/main/docs/assets/dsh-checkpoint-rewind-demo.png)
+
+## Comparison
+
+![Gráfico comparativo medido de dsh-checkpoint-rewind](https://raw.githubusercontent.com/PerryLink/dsh-checkpoint-rewind/main/docs/assets/dsh-checkpoint-rewind-evidence.png)
+
+Capabilities out of 2 (restores files? / rewinds the session?) · counted from the README comparison table
+
 ## Compatibilidad
 
 | Superficie | Estado |
@@ -68,8 +82,12 @@ La diferencia en una frase: **dsh-checkpoint-rewind captura el *estado del works
 ## Inicio rápido
 
 ```sh
+dsh plugin --profile web add github:PerryLink/dsh-checkpoint-rewind
+```
+
+```sh
 # 1. instala el bundle en tu perfil
-dsh plugin --profile web add "github:PerryLink/dsh-checkpoint-rewind#main"
+dsh plugin --profile web add github:PerryLink/dsh-checkpoint-rewind
 
 # o desde npm (versiones publicadas)
 dsh plugin --profile web add dsh-checkpoint-rewind
@@ -119,7 +137,7 @@ Dirígete a un checkpoint por su prefijo de id único, por número de paso o por
 
 ## Instalación y desinstalación
 
-- **Canal git** (último `main`): `dsh plugin --profile web add "github:PerryLink/dsh-checkpoint-rewind#main"` — ESM puro, sin paso de `prepare` ni `allowBuilds`.
+- **Canal git** (último `main`): `dsh plugin --profile web add github:PerryLink/dsh-checkpoint-rewind` — ESM puro, sin paso de `prepare` ni `allowBuilds`.
 - **Canal npm** (versiones publicadas): `dsh plugin --profile web add dsh-checkpoint-rewind`.
 - **Canal tarball**: `npm pack` en este repo y luego `dsh plugin --profile web add ./dsh-checkpoint-rewind-<version>.tgz`.
 - **Pila de almacenamiento** (necesaria para los checkpoints, opcional para montar): `@deepseek-ai/dsh-storage` + `@deepseek-ai/dsh-storage-json` (config `root`) + `@deepseek-ai/dsh-storage-domain` (config `backend: json`) — ver Inicio rápido; el plugin se monta igualmente sin ella y cada comando explica la solución.

@@ -36,6 +36,20 @@
 
 *English:* part of a 40+ plugin family for DeepSeek Harness. If it is useful, **a star helps the next person find it** — nothing is gated behind it.
 
+## What is dsh-checkpoint-rewind?
+
+统一的 DeepSeek Harness 检查点 —— 会话 + 工作区 + 配置三态快照，一键回滚。
+
+Claude Code Checkpoints 的等价物，作为能力接缝（capability-seam）插件实现：每次变更前捕获，用一条经批准的命令恢复三种状态中的任意一个。
+
+![dsh-checkpoint-rewind 终端演示：dsh-checkpoint-rewind — /rewind lists checkpoints, then a read-only preview](https://raw.githubusercontent.com/PerryLink/dsh-checkpoint-rewind/main/docs/assets/dsh-checkpoint-rewind-demo.png)
+
+## Comparison
+
+![dsh-checkpoint-rewind 的实测对比柱状图](https://raw.githubusercontent.com/PerryLink/dsh-checkpoint-rewind/main/docs/assets/dsh-checkpoint-rewind-evidence.png)
+
+Capabilities out of 2 (restores files? / rewinds the session?) · counted from the README comparison table
+
 ## 兼容性
 
 | 方面 | 状态 |
@@ -70,8 +84,12 @@
 ## 快速开始
 
 ```sh
+dsh plugin --profile web add github:PerryLink/dsh-checkpoint-rewind
+```
+
+```sh
 # 1. 将 bundle 安装到你的 profile
-dsh plugin --profile web add "github:PerryLink/dsh-checkpoint-rewind#main"
+dsh plugin --profile web add github:PerryLink/dsh-checkpoint-rewind
 
 # 或从 npm 安装（已发布版本）
 dsh plugin --profile web add dsh-checkpoint-rewind
@@ -121,7 +139,7 @@ run "/rewind <id>" to restore files and fork the session from that checkpoint
 
 ## 安装与卸载
 
-- **git 渠道**（最新 `main`）：`dsh plugin --profile web add "github:PerryLink/dsh-checkpoint-rewind#main"` —— 纯 ESM，无需 `prepare` 或 `allowBuilds` 步骤。
+- **git 渠道**（最新 `main`）：`dsh plugin --profile web add github:PerryLink/dsh-checkpoint-rewind` —— 纯 ESM，无需 `prepare` 或 `allowBuilds` 步骤。
 - **npm 渠道**（已发布版本）：`dsh plugin --profile web add dsh-checkpoint-rewind`。
 - **tarball 渠道**：在本仓库执行 `npm pack`，然后 `dsh plugin --profile web add ./dsh-checkpoint-rewind-<version>.tgz`。
 - **存储栈**（检查点必需，挂载不必需）：`@deepseek-ai/dsh-storage` + `@deepseek-ai/dsh-storage-json`（配置 `root`）+ `@deepseek-ai/dsh-storage-domain`（配置 `backend: json`）——见快速开始；未组合时插件仍可挂载，每条命令都会说明修复方法。
