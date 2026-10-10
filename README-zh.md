@@ -44,6 +44,10 @@ Claude Code Checkpoints 的等价物，作为能力接缝（capability-seam）�
 
 ![dsh-checkpoint-rewind 终端演示：dsh-checkpoint-rewind — /rewind lists checkpoints, then a read-only preview](https://raw.githubusercontent.com/PerryLink/dsh-checkpoint-rewind/main/docs/assets/dsh-checkpoint-rewind-demo.png)
 
+![Animated terminal demo of dsh-checkpoint-rewind](https://raw.githubusercontent.com/PerryLink/dsh-checkpoint-rewind/main/docs/assets/dsh-checkpoint-rewind-demo.gif)
+
+*同一次运行，动图版。*
+
 ## Comparison
 
 ![dsh-checkpoint-rewind 的实测对比柱状图](https://raw.githubusercontent.com/PerryLink/dsh-checkpoint-rewind/main/docs/assets/dsh-checkpoint-rewind-evidence.png)

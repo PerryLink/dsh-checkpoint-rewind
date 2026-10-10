@@ -42,6 +42,10 @@ Claude Code Checkpoints का समतुल्य, क्षमता-सी�
 
 ![dsh-checkpoint-rewind का टर्मिनल डेमो: dsh-checkpoint-rewind — /rewind lists checkpoints, then a read-only preview](https://raw.githubusercontent.com/PerryLink/dsh-checkpoint-rewind/main/docs/assets/dsh-checkpoint-rewind-demo.png)
 
+![Animated terminal demo of dsh-checkpoint-rewind](https://raw.githubusercontent.com/PerryLink/dsh-checkpoint-rewind/main/docs/assets/dsh-checkpoint-rewind-demo.gif)
+
+*वही रन, एनिमेटेड।*
+
 ## Comparison
 
 ![dsh-checkpoint-rewind का मापा गया तुलना चार्ट](https://raw.githubusercontent.com/PerryLink/dsh-checkpoint-rewind/main/docs/assets/dsh-checkpoint-rewind-evidence.png)
