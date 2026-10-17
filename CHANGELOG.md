@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.6.28] - 2026-10-18
+
+### Fixed
+
+- **Capture has a bounded budget (default 120 s, issue #36).** `captureCheckpoint` races `provider.snapshot` against `captureTimeoutMs`, aborts the provider signal on timeout, returns a structured failure, and never leaves the command blocked for the whole copy. `captureTimeoutMs` is validated and exposed in settings.
+
 ## [0.6.27] - 2026-10-18
 
 ### Fixed

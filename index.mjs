@@ -171,6 +171,7 @@ export function probeIgnorableAppend() {
  * @property {string} [snapshotDir] copy provider 快照根目录；空 = $DSH_HOME/dsh-checkpoint-rewind。
  * @property {number} [maxSnapshots] 每会话保留的检查点上限（默认 50；有界存储·数量界）。
  * @property {number} [maxSnapshotBytes] 全部检查点增量字节总配额（默认 512 MiB；有界存储·大小界；软配额，每会话最新一条总是保留）。
+ * @property {number} [captureTimeoutMs] 单次快照捕获预算（默认 120000；超时返回 failed 并中止可中止的 provider）。
  * @property {boolean} [pruneOnTurnEnd] turn 结束时执行配额清理（默认 true）。
  * @property {string[]} [mutationTools] tools/pre-execute 上视为变更型的工具名。
  * @property {string[]} [excludeGlobs] copy provider 遍历排除的目录/文件名。
@@ -248,6 +249,7 @@ export function resolveConfig(config = {}) {
     snapshotDir: readConfigField(raw.snapshotDir) ?? DEFAULTS.SNAPSHOT_DIR,
     maxSnapshots: readConfigField(raw.maxSnapshots) ?? DEFAULTS.MAX_SNAPSHOTS,
     maxSnapshotBytes: readConfigField(raw.maxSnapshotBytes) ?? DEFAULTS.MAX_SNAPSHOT_BYTES,
+    captureTimeoutMs: readConfigField(raw.captureTimeoutMs) ?? DEFAULTS.CAPTURE_TIMEOUT_MS,
     pruneOnTurnEnd: readConfigField(raw.pruneOnTurnEnd) ?? DEFAULTS.PRUNE_ON_TURN_END,
     mutationTools: readConfigField(raw.mutationTools) ?? [...DEFAULTS.MUTATION_TOOLS],
     excludeGlobs: readConfigField(raw.excludeGlobs) ?? [...DEFAULTS.EXCLUDE_GLOBS],
@@ -292,6 +294,9 @@ export function resolveConfig(config = {}) {
   }
   if (!Number.isFinite(resolved.maxSnapshotBytes) || resolved.maxSnapshotBytes < LIMITS.MIN_MAX_SNAPSHOT_BYTES) {
     throw badConfig(`maxSnapshotBytes must be ≥ ${LIMITS.MIN_MAX_SNAPSHOT_BYTES}`)
+  }
+  if (!Number.isInteger(resolved.captureTimeoutMs) || resolved.captureTimeoutMs < LIMITS.MIN_CAPTURE_TIMEOUT_MS) {
+    throw badConfig(`captureTimeoutMs must be an integer ≥ ${LIMITS.MIN_CAPTURE_TIMEOUT_MS}`)
   }
   if (!Number.isInteger(resolved.listLimit) || resolved.listLimit < LIMITS.MIN_LIST_LIMIT || resolved.listLimit > LIMITS.MAX_LIST_LIMIT) {
     throw badConfig(`listLimit must be an integer in [${LIMITS.MIN_LIST_LIMIT}, ${LIMITS.MAX_LIST_LIMIT}]`)
@@ -725,17 +730,34 @@ export async function apply(ctx, config = {}) {
       const previous = latestRecordFor(table, session.id, cwd)
       const previousRef = previous !== undefined && previous.provider === provider.name ? previous.ref : undefined
       let result
+      const controller = new AbortController()
+      let timedOut = false
+      let timer
+      const captureTimeoutMs = getLive().captureTimeoutMs ?? DEFAULTS.CAPTURE_TIMEOUT_MS
+      const timeout = new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          timedOut = true
+          controller.abort()
+          reject(new Error(`checkpoint capture timed out after ${captureTimeoutMs} ms`))
+        }, captureTimeoutMs)
+      })
       try {
-        result = await provider.snapshot(
-          { cwd, key: workspaceKeyOf(cwd) },
-          { triggerTool: opts.triggerTool, previousRef },
-        )
+        result = await Promise.race([
+          provider.snapshot(
+            { cwd, key: workspaceKeyOf(cwd) },
+            { triggerTool: opts.triggerTool, previousRef, signal: controller.signal },
+          ),
+          timeout,
+        ])
       } catch (error) {
+        if (timedOut) throw error
         // 保护检查点不能依赖上一检查点的存储完整性（去重基线不可读时整条
         // 捕获会失败）：退化为无基线重捕，保证回退仍可撤回。
         if (opts.retryWithoutBaseline !== true || previousRef === undefined) throw error
         logger.warn(`checkpoint dedup baseline unreadable (${messageOf(error)}), capturing without dedup`)
         result = await provider.snapshot({ cwd, key: workspaceKeyOf(cwd) }, { triggerTool: opts.triggerTool })
+      } finally {
+        if (timer !== undefined) clearTimeout(timer)
       }
       if (result === null) {
         logger.debug(`checkpoint deduped: workspace unchanged (trigger ${opts.triggerTool})`)
