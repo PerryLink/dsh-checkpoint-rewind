@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.6.26] - 2026-10-18
+
+### Fixed
+
+- **Snapshot commits are pinned under `refs/dsh-checkpoints/<sha>` (issue #24).** `git stash create` / `commit-tree` produce unreferenced commits, so `git gc --prune` could make `/rewind` fail later with an unrestorable object. `snapshot()` now creates a ref and `discard()` removes only that ref; the commit follows normal gc afterwards. `update-ref` is in the provider verb whitelist.
+
 ## [0.6.25] - 2026-10-17
 
 ### Fixed

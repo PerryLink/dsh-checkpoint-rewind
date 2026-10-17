@@ -26,7 +26,7 @@ function scriptedGit(script) {
   const run = async (args) => {
     calls.push(args)
     const key = args.join(' ')
-    const entry = script[key] ?? script[args[0]]
+    const entry = script[key] ?? script[args[0]] ?? (args[0] === 'update-ref' ? { code: 0, stdout: '', stderr: '' } : undefined)
     if (entry === undefined) throw new Error(`unscripted git ${key}`)
     if (entry instanceof Error) throw entry
     return entry
@@ -291,11 +291,12 @@ describe('git provider（scripted runner）', () => {
     }
   })
 
-  it('discard：git 侧 no-op（对象留给 gc）', async () => {
+  it('discard：只删除 pin，非法 ref 仍拒绝', async () => {
     const { run, calls } = scriptedGit({})
     const provider = makeGitProvider({ gitBin: 'git', run })
-    await provider.discard(workspace, 'abc123')
-    assert.equal(calls.length, 0)
+    await provider.discard(workspace, SHA)
+    assert.deepEqual(calls, [['update-ref', '-d', `refs/dsh-checkpoints/${SHA}`]])
+    await assert.rejects(provider.discard(workspace, 'abc123'), /not a valid git object id/)
   })
 
   it('安全白名单：clean/危险 stash 子命令（除 create）/restore 不带 --worktree/非法 reset 一律拒绝', () => {
@@ -561,3 +562,19 @@ describe('git provider（真实 git，能力检测）', () => {
     assert.equal(await provider.verifyObjectExists(workspace, '1111111111111111111111111111111111111111'), false)
   })
 })
+
+  it('snapshot pins the commit under refs/dsh-checkpoints and discard removes the pin', async () => {
+    const { run, calls } = scriptedGit({
+      'stash create': { code: 0, stdout: `${SHA}\n`, stderr: '' },
+      [`diff --quiet ${SHA2} ${SHA} --`]: { code: 1, stdout: '', stderr: '' },
+      [`rev-parse ${SHA}^`]: { code: 0, stdout: `${SHA2}\n`, stderr: '' },
+      [`diff-tree --name-only -r ${SHA2} ${SHA}`]: { code: 0, stdout: '', stderr: '' },
+      [`rev-parse ${SHA}^{tree}`]: { code: 0, stdout: `${SHA2}\n`, stderr: '' },
+    })
+    const provider = makeGitProvider({ gitBin: 'git', run })
+    const result = await provider.snapshot(workspace, { triggerTool: 'bash' })
+    assert.ok(result)
+    assert.ok(calls.some(args => args.join(' ') === `update-ref refs/dsh-checkpoints/${SHA} ${SHA}`))
+    await provider.discard(workspace, SHA)
+    assert.ok(calls.some(args => args.join(' ') === `update-ref -d refs/dsh-checkpoints/${SHA}`))
+  })
