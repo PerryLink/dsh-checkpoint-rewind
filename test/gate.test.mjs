@@ -258,3 +258,10 @@ describe('会话事件自适应门', () => {
     assert.equal(warnings.length, 1)
   })
 })
+
+  it('times out a hung userQuestions ask and fails closed', async () => {
+    const questions = { ask: () => new Promise(() => {}) }
+    const verdict = await confirmRewind({ ...deps({ get: () => questions }, 'userQuestions'), confirmTimeoutMs: 20 }, agentInTurn(), signal)
+    assert.equal(verdict.allowed, false)
+    assert.match(verdict.reason ?? '', /timed out/u)
+  })

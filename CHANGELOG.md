@@ -1,8 +1,47 @@
 # Changelog
 
+## [0.6.25] - 2026-10-17
+
+### Fixed
+
+- **A hung `userQuestions` confirmation no longer blocks `/rewind` forever (issue #29).** The ask races a bounded timeout (default 60 s); timeout fails closed and leaves the checkpoint intact. The timeout is test-overridable and covered by a 20 ms regression.
+- Compatibility: `engines.dsh` -> `>=0.2.1-0 <0.3.0`; devDependencies to `0.2.1-rc.2`; add `@deepseek-ai/dsh-working-directory`.
+
 All notable changes to dsh-checkpoint-rewind are documented here. The
 format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 this project versions with [SemVer](https://semver.org/).
+
+## [Unreleased]
+
+### Added
+
+- **Bounded session short numbers: `/rewind 3` now means the checkpoint numbered 3.** Checkpoint
+  ids are 36-char UUIDs, so a digits-only address used to fall into the id-prefix matcher: with the
+  default `maxSnapshots: 50` a `/rewind 3` hit "not found" about 96% of the time, and whenever some
+  UUID did start with `3` it silently resolved to that *wrong* checkpoint. Every capture now stores
+  a `short` number on the record, allocated from a per-session counter (scope = `sessionId`) that is
+  **monotonic and never reused**: quota pruning and `/rewind clear` / `clear --all` delete records
+  without freeing a number, because the counter lives in the `checkpoints` domain's global slot
+  (records are authoritative, the slot is the never-reset watermark). The slot needed no domain
+  version bump — `descriptorOf` now reports `hasGlobal`, and both storage backends read a medium with
+  no global as "never written", so existing v1/v2 media open unchanged. On a host whose
+  storage-domain predates the slot the plugin degrades to "highest stored number + 1" and warns
+  loudly once. Digits-only input is never prefix-matched, so a number either hits exactly or fails
+  loudly.
+- `/rewind list brief` — one line per checkpoint, newest first, led by its number for phones and
+  bridges (e.g. `#12 · [auto] · turn 3 step 2 · 8 files · 900 B · 2 min ago`).
+- Records written before this change (no number field) are numbered in creation order the first time
+  the session is listed, previewed or rewound, and the assignment is persisted; new checkpoints
+  continue after it. Id-prefix addressing keeps working for them.
+
+### Changed
+
+- The detailed `/rewind list` output keeps its exact per-checkpoint format (8-char id first, same
+  fields in the same order) and gains one footer line pointing at `list brief`; capture results,
+  the confirm summary, `diff` headers and the guard line now show the short number alongside the id.
+- `checkpointRecordSchema` (domain v2) gains optional `short`; the v1 compatibility superset accepts
+  it too, so old and new records keep sharing one medium.
+
 
 ## [0.6.24] - 2026-10-10
 
