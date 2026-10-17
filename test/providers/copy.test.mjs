@@ -480,3 +480,10 @@ describe('copy provider', () => {
     assert.ok(manifest3.id, 'snapshot written to dynamic snapshot directory')
   })
 })
+
+  it('refuses a first copy that would exceed maxSnapshotBytes before committing', async () => {
+    const cwd = await fs.mkdtemp(path.join(os.tmpdir(), 'copy-cap-'))
+    await fs.writeFile(path.join(cwd, 'big.bin'), 'x'.repeat(64))
+    const provider = makeCopyProvider({ snapshotDir: await fs.mkdtemp(path.join(os.tmpdir(), 'copy-cap-snap-')), excludeGlobs: [], maxSnapshotBytes: 16 })
+    await assert.rejects(provider.snapshot({ cwd, key: cwd }, { triggerTool: 'bash' }), /exceed maxSnapshotBytes/u)
+  })

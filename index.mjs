@@ -72,13 +72,19 @@ import {
 import { workspaceKeyOf, resolveSnapshotDir } from './lib/workspace.mjs'
 import { checkpointsDomainSpec, checkpointsDomainSpecV1 } from './lib/domain.mjs'
 import {
+  addressOf,
+  formatCheckpointBriefList,
   formatCheckpointDiff,
   formatCheckpointList,
   formatPreviewResult,
   formatRewindSummary,
+  isNumericAddress,
+  isShortNumber,
   nearestCheckpointAtOrBefore,
   parseCheckpointInput,
   parseRewindInput,
+  parseShortNumber,
+  planShortNumbers,
   prunePlan,
   resolveRecordByPrefix,
   sortOldestFirst,
@@ -410,6 +416,7 @@ export async function apply(ctx, config = {}) {
     snapshotDir: getSnapshotDir,
     excludeGlobs: () => getLive().excludeGlobs,
     verifyByHash: () => getLive().verifyByHash,
+    maxSnapshotBytes: () => getLive().maxSnapshotBytes,
   }))
   ctx.effect(() => () => {
     unregGit()
@@ -431,6 +438,9 @@ export async function apply(ctx, config = {}) {
   // 组合指引（与 dsh-checkpoint-diff 对 sessionQuery 的惰性 getter 处理一致）。
   /** @type {Promise<import('@deepseek-ai/dsh-storage-domain').KvTable<string, import('./lib/checkpoints.mjs').CheckpointRecord>> | undefined} */
   let tablePromise
+  /** 已打开的领域句柄（短号计数的 global 槽从这里取；打开前为 undefined）。 */
+  /** @type {any} */
+  let openedDomain
   const getTablePromise = () => {
     if (tablePromise !== undefined) return tablePromise
     const storageDomain = ctx.get('storageDomain')
@@ -445,6 +455,7 @@ export async function apply(ctx, config = {}) {
           for (const spec of [checkpointsDomainSpec, checkpointsDomainSpecV1]) {
             try {
               const domain = await storageDomain.open(spec)
+              openedDomain = domain
               ctx.effect(() => () => { void domain.close() }, `${PLUGIN_NAME}.domain.close`)
               if (spec === checkpointsDomainSpecV1) {
                 logger.warn('checkpoints medium is domain v1 (rewind 0.4.x era): opened in compatibility mode — existing records stay readable and new records use the v2 shape; the storage layer has no automatic migration, so the medium keeps its v1 header until it is recreated')
@@ -473,6 +484,88 @@ export async function apply(ctx, config = {}) {
     const run = ops.then(fn, fn)
     ops = run.then(() => undefined, () => undefined)
     return run
+  }
+
+  // --- 每会话短号（/rewind <number> 的精确寻址目标）：单调、持久、永不复用。
+  // 分配结果写在记录自身的 short 字段上（prune 掉旧记录也不会撞号），计数水位
+  // 另存于领域 global 槽（clear/clear --all 删表记录却删不到它，因此新号继续
+  // 递增）。两者互为兜底：水位丢失时退回"现存记录最大号"，记录被清空时由水位
+  // 兜住。作用域 = 会话（sessionId）：每个会话独立编号、会话内全局唯一（工作区
+  // 是寻址面的子集，见 mineFor）。
+  /** @type {boolean} */
+  let warnedNoCounterSlot = false
+  /**
+   * 领域 global 槽句柄（老宿主/老后端的 spec 不含 global 时返回 undefined）。
+   * @returns {{get: () => {shortCounters?: Record<string, number>}, set: (value: object) => Promise<void>}|undefined} global 句柄或 undefined。
+   */
+  const shortCounterSlot = () => {
+    const domain = openedDomain
+    if (domain === undefined) return undefined
+    try {
+      return domain.global
+    } catch {
+      // 老宿主的 DomainImpl 对未声明 global 的 spec 抛 "declares no global"。
+      return undefined
+    }
+  }
+
+  /**
+   * 该会话已持久化的短号高水位（0 = 尚无）。
+   * @param {string} sessionId - 会话 id。
+   * @returns {number} 高水位。
+   */
+  const shortWatermarkOf = (sessionId) => {
+    const slot = shortCounterSlot()
+    if (slot === undefined) {
+      if (!warnedNoCounterSlot) {
+        warnedNoCounterSlot = true
+        warn('storage domain has no global slot (older host row): checkpoint short numbers fall back to the highest stored number and can restart after /rewind clear')
+      }
+      return 0
+    }
+    const value = slot.get()?.shortCounters?.[sessionId]
+    return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : 0
+  }
+
+  /**
+   * 抬高该会话的短号水位（只增不减；水位是防复用兜底，记录上的 short 是权威）。
+   * @param {string} sessionId - 会话 id。
+   * @param {number} value - 新的水位。
+   * @returns {Promise<void>} 完成。
+   */
+  const raiseShortWatermark = async (sessionId, value) => {
+    const slot = shortCounterSlot()
+    if (slot === undefined) return
+    const current = slot.get() ?? {}
+    const counters = { ...current.shortCounters }
+    const existing = counters[sessionId]
+    if (Number.isInteger(existing) && existing >= value) return
+    counters[sessionId] = value
+    await slot.set({ ...current, shortCounters: counters })
+  }
+
+  /**
+   * 短号对账（旧记录兼容 + 分配前置）：给该会话没有 short 字段的记录按创建序
+   * （time, seq）补号并持久化，起点 = max(水位, 现存最大号)，绝不撞号、绝不回收。
+   * 幂等：全部记录都有号时零写入。直接写表（不排 schedule——本函数在已排空的
+   * 命令路径、或已在 schedule 作业内的捕获路径里被调用，再排链会自锁）。
+   * @param {import('@deepseek-ai/dsh-storage-domain').KvTable<string, import('./lib/checkpoints.mjs').CheckpointRecord>} table - 检查点表。
+   * @param {string} sessionId - 会话 id。
+   * @returns {Promise<number>} 对账后的高水位。
+   */
+  async function ensureShortNumbers(table, sessionId) {
+    const mine = [...table.entries()]
+      .filter(([, record]) => record.sessionId === sessionId)
+      .map(([, record]) => record)
+    const watermark = shortWatermarkOf(sessionId)
+    const plan = planShortNumbers(mine, watermark)
+    for (const assignment of plan.assignments) {
+      const current = table.get(assignment.id)
+      if (current === undefined) continue
+      await table.put(assignment.id, { ...current, short: assignment.short })
+    }
+    if (plan.high !== watermark) await raiseShortWatermark(sessionId, plan.high)
+    return plan.high
   }
 
   // --- 每会话运行时状态（turn/step 跟踪 + 每步去重窗 + 捕获互斥 + 自动间隔时钟）。
@@ -652,8 +745,8 @@ export async function apply(ctx, config = {}) {
       const note = typeof opts.note === 'string' && opts.note.trim().length > 0
         ? opts.note.trim().slice(0, LIMITS.MAX_NOTE_LENGTH)
         : undefined
-      const record = {
-        id: randomUUID(),
+      const id = randomUUID()
+      const fields = {
         sessionId: session.id,
         cwd,
         seq: cursor,
@@ -671,12 +764,20 @@ export async function apply(ctx, config = {}) {
         ...(note === undefined ? {} : { note }),
         ...(typeof boundary === 'number' ? { sessionBoundary: boundary } : {}),
       }
-      await schedule(() => table.put(record.id, record))
+      // 短号分配与记录落盘放在同一个 schedule 作业里：计数水的读-改-写绝不能被
+      // 并发捕获（自动快照与变更安全网各有一条链）交错，否则两条记录会同号。
+      const record = await schedule(async () => {
+        const short = (await ensureShortNumbers(table, session.id)) + 1
+        const withShort = { id, short, ...fields }
+        await table.put(id, withShort)
+        await raiseShortWatermark(session.id, short)
+        return withShort
+      })
       if (record.bytes > getLive().maxSnapshotBytes) {
         warn(`checkpoint ${record.id} alone exceeds maxSnapshotBytes (${record.bytes} > ${getLive().maxSnapshotBytes}); the per-session newest-retained floor keeps it, older checkpoints will be pruned`)
       }
       appendEvent(session, SESSION_EVENTS.SNAPSHOT, record)
-      logger.info(`checkpoint ${record.id} captured (${record.kind}, ${record.provider}, turn ${record.turn} step ${record.step}, cursor seq ${record.seq}, ${record.files} files, ${record.bytes} bytes, trigger ${record.triggerTool})`)
+      logger.info(`checkpoint #${record.short} ${record.id} captured (${record.kind}, ${record.provider}, turn ${record.turn} step ${record.step}, cursor seq ${record.seq}, ${record.files} files, ${record.bytes} bytes, trigger ${record.triggerTool})`)
       await pruneAll(session)
       return { record }
     } catch (error) {
@@ -709,7 +810,7 @@ export async function apply(ctx, config = {}) {
       logger.debug(`checkpoint dedup hint: untracked scan failed (${messageOf(error)})`)
     }
     if (previous !== undefined && previous.triggerTool === 'auto') {
-      lines.push(`the latest checkpoint (#${String(previous.id).slice(0, 8)}, auto, seq ${previous.seq}) already records this exact workspace state`)
+      lines.push(`the latest checkpoint (#${addressOf(previous)}, auto, seq ${previous.seq}) already records this exact workspace state`)
     }
     return lines.join('\n')
   }
@@ -967,7 +1068,7 @@ export async function apply(ctx, config = {}) {
   ctx.commands.register({
     name: COMMAND_NAME,
     description: 'List checkpoints, compare two, or restore the workspace files, session context, and/or plugin config to one (Claude Code Checkpoints equivalent).',
-    input: { hint: '[workspace|session|config|all] <id-prefix | step <N> | latest> | diff <a> <b> | preview <target> | clear' },
+    input: { hint: '[workspace|session|config|all] <id-prefix | number | step <N> | latest> | diff <a> <b> | preview <target> | list [brief] | clear' },
     async handler(invocation) {
       return handleRewind(invocation)
     },
@@ -1013,12 +1114,12 @@ export async function apply(ctx, config = {}) {
             const record = result.record
             if (record === undefined) return 'checkpoint: capture produced no record'
             return [
-              `checkpoint: captured #${record.id}`,
+              `checkpoint: captured #${record.short} (id ${record.id})`,
               `kind: manual · provider: ${record.provider} · turn ${record.turn} step ${record.step}`,
               `session cursor: seq ${record.seq} · workspace tree: ${record.tree ?? 'n/a (copy)'}`,
               `config snapshot: ${Object.keys(record.config ?? {}).length} key(s)`,
               ...(record.note !== undefined ? [`note: ${record.note}`] : []),
-              'restore with /rewind <id> (all three states) or /rewind workspace|session|config <id>',
+              `restore with /rewind ${record.short} (all three states) or /rewind workspace|session|config ${record.short}`,
             ].join('\n')
           },
           presentCall: (args) => ({ card: 'generic', title: `Capture a manual checkpoint${typeof args?.note === 'string' && args.note.length > 0 ? ` (“${args.note}”)` : ''}` }),
@@ -1031,13 +1132,20 @@ export async function apply(ctx, config = {}) {
   })
 
   /**
-   * 本会话本工作区的检查点记录。
+   * 本会话本工作区的检查点记录（读取前先与短号对账：升级后的第一次
+   * `/rewind 3` 必须能命中升级前就已存在的快照）。
    * @param {import('@deepseek-ai/dsh-session').Session} session - 会话。
    * @param {string} cwd - 已校验的工作区。
    * @returns {Promise<import('./types.d.ts').CheckpointRecord[]>} 记录数组。
    */
   async function mineFor(session, cwd) {
     const table = await getTablePromise()
+    try {
+      await ensureShortNumbers(table, session.id)
+    } catch (error) {
+      // 补号失败不阻断列表/寻址（id 前缀寻址仍然可用），但绝不静默。
+      warn(`checkpoint short numbers could not be reconciled (records without one are addressable by id only): ${messageOf(error)}`)
+    }
     return [...table.entries()]
       .filter(([, record]) => record.sessionId === session.id && workspaceKeyOf(record.cwd) === workspaceKeyOf(cwd))
       .map(([, record]) => record)
@@ -1147,7 +1255,7 @@ export async function apply(ctx, config = {}) {
     if (parsed.kind !== 'latest' && parsed.kind !== 'step' && parsed.kind !== 'id') {
       return {
         kind: 'error',
-        text: `rewind: ${parsed.kind === 'invalid' ? parsed.message : 'usage: /rewind preview <id-prefix | step <N> | latest>'}`,
+        text: `rewind: ${parsed.kind === 'invalid' ? parsed.message : 'usage: /rewind preview <id-prefix | number | step <N> | latest>'}`,
       }
     }
     const hit = resolveRewindTarget(mine, session, parsed)
@@ -1398,7 +1506,13 @@ export async function apply(ctx, config = {}) {
     }
     if (parsed.kind === 'list') {
       const newest = sortOldestFirst(mine).slice(-getLive().listLimit)
-      return { kind: 'success', text: formatCheckpointList(newest, { now: Date.now(), total: mine.length, command: 'rewind' }) }
+      const renderOpts = { now: Date.now(), total: mine.length, command: 'rewind' }
+      return {
+        kind: 'success',
+        text: parsed.brief === true
+          ? formatCheckpointBriefList(newest, renderOpts)
+          : formatCheckpointList(newest, renderOpts),
+      }
     }
     if (parsed.kind === 'clear') {
       return handleClear(mine, session, agent, signal, parsed.all)
@@ -1421,7 +1535,7 @@ export async function apply(ctx, config = {}) {
         return { kind: 'error', text: `rewind: ${inner.message}` }
       }
       if (inner.kind !== 'id' && inner.kind !== 'latest' && inner.kind !== 'step') {
-        return { kind: 'error', text: 'rewind: usage: /rewind [workspace|session|config|all] <id-prefix | step <N> | latest>' }
+        return { kind: 'error', text: 'rewind: usage: /rewind [workspace|session|config|all] <id-prefix | number | step <N> | latest>' }
       }
       const hit = resolveRewindTarget(mine, session, inner)
       if ('error' in hit) return { kind: 'error', text: hit.error }
@@ -1509,7 +1623,7 @@ export async function apply(ctx, config = {}) {
       logger.warn(`pre-rewind guard checkpoint failed (continuing without reversibility): ${message}`)
     }
     const guardLine = guard?.record !== undefined
-      ? `\nrewind guard: ${guard.record.id} (run "/rewind ${guard.record.id.slice(0, 8)}" to undo this rewind)`
+      ? `\nrewind guard: ${guard.record.id} (checkpoint #${addressOf(guard.record)}; run "/rewind ${addressOf(guard.record)}" to undo this rewind)`
       : ''
 
     // 阶段 1：工作区恢复（restore 安全覆盖 / reset-hard CC 对标）。
@@ -1680,12 +1794,12 @@ export async function apply(ctx, config = {}) {
     return {
       kind: 'success',
       text: [
-        `checkpoint: captured #${record.id}`,
+        `checkpoint: captured #${record.short} (id ${record.id})`,
         `kind: manual · provider: ${record.provider} · turn ${record.turn} step ${record.step}`,
         `session cursor: seq ${record.seq} · workspace tree: ${record.tree ?? 'n/a (copy)'}`,
         `config snapshot: ${Object.keys(record.config ?? {}).length} key(s)`,
         ...(record.note !== undefined ? [`note: ${record.note}`] : []),
-        'restore with /rewind <id> (all three states) or /rewind workspace|session|config <id>',
+        `restore with /rewind ${record.short} (all three states) or /rewind workspace|session|config ${record.short}`,
       ].join('\n'),
     }
   }
@@ -1743,8 +1857,14 @@ export {
   parseRewindInput,
   parseCheckpointInput,
   resolveRecordByPrefix,
+  planShortNumbers,
+  isShortNumber,
+  isNumericAddress,
+  parseShortNumber,
+  addressOf,
   stepEndSeqOf,
   formatCheckpointList,
+  formatCheckpointBriefList,
   formatCheckpointDiff,
   formatPreviewResult,
   formatRewindSummary,

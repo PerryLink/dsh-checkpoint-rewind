@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.6.27] - 2026-10-18
+
+### Fixed
+
+- **A first copy snapshot that would exceed `maxSnapshotBytes` is refused before it commits.** The copy provider counts the bytes it is about to materialize and throws with the exact size; the `.tmp` directory is never renamed into a checkpoint. This turns the old "copy 27 GB then prune it" path into a bounded failure (issue #35).
+
 ## [0.6.26] - 2026-10-18
 
 ### Fixed
