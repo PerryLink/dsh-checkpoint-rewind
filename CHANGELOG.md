@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.6.29] - 2026-10-18
+
+### Changed
+
+- Add a 1280×720 hero and a 960×540, 4-second terminal GIF rendered from the build output; `screenshots.json` and `capture.json` describe it.
+
 ## [0.6.28] - 2026-10-18
 
 ### Fixed

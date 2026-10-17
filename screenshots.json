@@ -1,6 +1,14 @@
-{
-  "screenshots": [
-    "docs/assets/dsh-checkpoint-rewind-demo.png",
-    "docs/assets/dsh-checkpoint-rewind-evidence.png"
-  ]
-}
+[
+  {
+    "path": "docs/assets/dsh-checkpoint-rewind-hero.png",
+    "kind": "hero",
+    "alt": "dsh-checkpoint-rewind build output",
+    "caption": "Real dsh-checkpoint-rewind build."
+  },
+  {
+    "path": "docs/assets/dsh-checkpoint-rewind-demo.gif",
+    "kind": "demo",
+    "alt": "Animated dsh-checkpoint-rewind terminal session",
+    "caption": "The same run, assembled line by line."
+  }
+]

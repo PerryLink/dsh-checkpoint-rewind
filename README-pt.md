@@ -40,7 +40,7 @@ Checkpoints unificados do DeepSeek Harness — instantâneos de três estados (s
 
 O equivalente aos Checkpoints do Claude Code, construído como plugin de costura de capacidade (capability-seam): capture antes de cada mutação, restaure qualquer um dos três estados com um único comando aprovado.
 
-![Demonstração de terminal do dsh-checkpoint-rewind: dsh-checkpoint-rewind — /rewind lists checkpoints, then a read-only preview](https://raw.githubusercontent.com/PerryLink/dsh-checkpoint-rewind/main/docs/assets/dsh-checkpoint-rewind-demo.png)
+![Demonstração de terminal do dsh-checkpoint-rewind: dsh-checkpoint-rewind — /rewind lists checkpoints, then a read-only preview](https://raw.githubusercontent.com/PerryLink/dsh-checkpoint-rewind/main/docs/assets/dsh-checkpoint-rewind-hero.png)
 
 ![Animated terminal demo of dsh-checkpoint-rewind](https://raw.githubusercontent.com/PerryLink/dsh-checkpoint-rewind/main/docs/assets/dsh-checkpoint-rewind-demo.gif)
 
@@ -116,7 +116,7 @@ Os checkpoints persistem pelo serviço `storageDomain`. O plugin monta sem ele e
         backend: json
 ```
 
-O pacote é ESM puro sem etapa de build — `index.mjs` e `lib/` são os artefatos enviados. As mutações do workspace agora criam checkpoints automaticamente; execute `/rewind` para listá-los:
+O pacote é ESM puro sem etapa de build — `index.mjs` e `lib/` são os artefatos enviados. As mutações do workspace agora criam checkpoints automaticamente; execute `/rewind` para listá-los (ou `/rewind list brief` para entradas de uma linha com o número da sessão):
 
 ```text
 rewind: 3 checkpoints (newest last):
@@ -126,16 +126,27 @@ rewind: 3 checkpoints (newest last):
 run "/rewind <id>" to restore files and fork the session from that checkpoint
 ```
 
-Enderece um checkpoint pelo prefixo de id único, pelo número do passo ou por `latest`:
+Enderece um checkpoint pelo **número da sessão** (o número curto e limitado mostrado por `/rewind list brief`), pelo prefixo de id único, pelo número do passo ou por `latest`:
 
 ```text
-/rewind b2c3d4e5
+/rewind list brief        # uma linha por checkpoint, numerada, mais recente primeiro
+/rewind 3                 # o checkpoint número 3 DESTA sessão (acerto exato, nunca difuso)
+/rewind preview 3         # somente leitura: mostra quais arquivos mudariam, não toca nada
+/rewind b2c3d4e5          # o prefixo de id único (o id de 8 caracteres) continua funcionando igual
 /rewind step 2
 /rewind latest
-/rewind preview b2c3d4e5   # somente leitura: mostra quais arquivos mudariam, não toca nada
+/rewind workspace 3 --files src/a.ts,src/b.ts   # restauração seletiva: só estes arquivos (com aprovação)
 /rewind clear              # exclusão confirmada dos checkpoints desta sessão (arquivos intactos)
 /rewind clear --all        # exclusão confirmada em TODAS as sessões e workspaces (arquivos intactos)
 ```
+
+### Números de sessão (ids curtos limitados)
+
+- **Cada checkpoint recebe um número ao ser criado**, começando em `1`. `/rewind 3` resolve esse número **exatamente**: dígitos nunca são tratados como prefixo de id, então `/rewind 3` não pode cair no checkpoint cujo UUID começa com `3`.
+- **Escopo: por sessão** (`sessionId`). Cada sessão numera seus próprios checkpoints; um número é único dentro da sua sessão, e `/rewind <número>` resolve apenas contra os checkpoints da sessão (e workspace) atual.
+- **Monotônico e nunca reutilizado.** A poda por cota (`maxSnapshots`) e `/rewind clear` / `/rewind clear --all` apagam registros mas nunca liberam um número: após um clear o próximo checkpoint continua da marca alta anterior (depois de `#1 #2 #3` e um `clear`, o próximo é `#4`, não `#1`). O número é gravado no próprio registro e o contador vive no slot global do domínio, então apagar registros não pode reiniciá-lo.
+- **Checkpoints antigos são numerados no primeiro contato.** Registros gravados antes deste recurso (sem campo de número) são numerados em ordem de criação na primeira vez que a sessão é listada ou revertida, e essa numeração é persistida; os novos continuam depois dela. Nada é pulado nem reatribuído, e o endereçamento por prefixo de id continua funcionando para eles.
+- `/rewind list` (a lista detalhada) não muda: continua imprimindo o id de 8 caracteres por linha e sua última linha aponta para `/rewind list brief` para ver os números.
 
 `preview` resolve pelo mesmo endereçamento e imprime o impacto sem pedir confirmação nem escrever nada.
 
@@ -191,7 +202,7 @@ Todos os ajustes são campos Schemastery `Config` (alteráveis no cordis.yml). N
 
 | Superfície | Tipo | Notas |
 |---|---|---|
-| `/rewind` | comando | `[workspace\|session\|config\|all] <id-prefix\|step <N>\|latest>` · `diff <a> <b>` · `preview <target>` · `clear [--all]` |
+| `/rewind` | comando | `[workspace\|session\|config\|all] <number\|id-prefix\|step <N>\|latest>` · `list [brief]` · `diff <a> <b>` · `preview <target>` · `clear [--all]` |
 | `/checkpoint` | comando | `[note <text>\|list\|diff <a> <b>]` — captura um checkpoint manual |
 | `checkpoint` | ferramenta | Captura um checkpoint manual com nota opcional |
 | `fs/write-intent` · `fs/edit-intent` · `tools/pre-execute` | listeners | Captura pré-mutação (prepend pass-through; nunca rouba a vaga de política) |
@@ -251,6 +262,10 @@ O plugin retorna o id da nova sessão no resultado do comando (`session: <id>`) 
 
 **Posso desfazer uma reversão?** Sim — toda reversão aprovada captura primeiro um checkpoint de guarda do estado pré-reversão; o resultado imprime `rewind guard: <id>`, e `/rewind <guard-id>` restaura esse estado.
 
+**Como endereço os checkpoints?** Pelo **número da sessão** (`/rewind 3` — veja `/rewind list brief`; por sessão, monotônico, nunca reutilizado), pelo prefixo de id único (o id de 8 caracteres da lista continua funcionando), por `/rewind step <N>` e por `/rewind latest`. `/rewind clear` apaga os checkpoints desta sessão e `/rewind clear --all` apaga os de todas as sessões e workspaces (arquivos intactos) — nenhum dos dois reinicia a numeração. `/rewind preview <target>` usa o mesmo endereçamento para mostrar o impacto sem mudar nada.
+
+**Por que o número continua subindo depois de um clear?** Porque um número é um endereço, não uma posição: reutilizar `#1` para outro checkpoint após um clear redirecionaria em silêncio tudo que mencionasse `#1`. O contador é persistido no slot global do domínio `checkpoints` e cada registro guarda o próprio número, então podar e limpar apagam instantâneos sem reciclar ids.
+
 
 **O que o `preview` faz — e o que não faz?** Ele resolve o checkpoint e executa uma comparação somente leitura: quais arquivos seriam sobrescritos (ou recriados), quais já coincidem e quais arquivos criados após o checkpoint seriam deixados no lugar. Ele nunca pergunta, nunca escreve, nunca bifurca e não registra nenhum evento `checkpoint/rewind` — a porta de aprovação só roda em um `/rewind <id>` real.
 
@@ -261,7 +276,7 @@ Uma execução real de integração headless montada (`npm run test:integration`
 ## Permissões e dados
 
 - **Permissões**: o manifesto do workshop declara `workspace:read`, `workspace:write`, `git:read`, `git:write`, `snapshot-storage:write`, `session-log:read`, `settings:write` e `network:none`.
-- **Dados**: os registros de checkpoint vivem no domínio de armazenamento `checkpoints` (linhas SQLite ou um arquivo JSON); os instantâneos de cópia vivem sob `snapshotDir`. Totalmente local — sem rede, sem credenciais. O domínio é aberto em versão dupla: mídias da era 0.4.x (domínio v1) são abertas em modo de compatibilidade que mantém os registros antigos legíveis e grava as novas capturas no formato v2 — atualizar o plugin nunca órfã uma mídia existente.
+- **Dados**: os registros de checkpoint vivem no domínio de armazenamento `checkpoints` (linhas SQLite ou um arquivo JSON); os instantâneos de cópia vivem sob `snapshotDir`. O **slot global** do domínio guarda os contadores de números curtos por sessão, por isso apagar registros (`prune`, `clear`, `clear --all`) nunca recicla um número. Totalmente local — sem rede, sem credenciais. O domínio é aberto em versão dupla: mídias da era 0.4.x (domínio v1) são abertas em modo de compatibilidade que mantém os registros antigos legíveis e grava as novas capturas no formato v2 — atualizar o plugin nunca órfã uma mídia existente.
 - **Log de sessão**: os eventos `checkpoint/*` são anexados pela porta adaptativa; a cadeia de auditoria autoritativa é `command/run` + `command/done` mais o domínio durável.
 
 ## Limites de segurança

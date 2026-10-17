@@ -42,7 +42,7 @@
 
 Claude Code Checkpoints 的等价物，作为能力接缝（capability-seam）插件实现：每次变更前捕获，用一条经批准的命令恢复三种状态中的任意一个。
 
-![dsh-checkpoint-rewind 终端演示：dsh-checkpoint-rewind — /rewind lists checkpoints, then a read-only preview](https://raw.githubusercontent.com/PerryLink/dsh-checkpoint-rewind/main/docs/assets/dsh-checkpoint-rewind-demo.png)
+![dsh-checkpoint-rewind 终端演示：dsh-checkpoint-rewind — /rewind lists checkpoints, then a read-only preview](https://raw.githubusercontent.com/PerryLink/dsh-checkpoint-rewind/main/docs/assets/dsh-checkpoint-rewind-hero.png)
 
 ![Animated terminal demo of dsh-checkpoint-rewind](https://raw.githubusercontent.com/PerryLink/dsh-checkpoint-rewind/main/docs/assets/dsh-checkpoint-rewind-demo.gif)
 
@@ -118,7 +118,7 @@ dsh --profile web --dump-config | grep -A4 'id: checkpoint-rewind'
         backend: json
 ```
 
-该包是纯 ESM，无构建步骤——`index.mjs` 与 `lib/` 即发布产物。工作区变更现在会自动创建检查点；运行 `/rewind` 列出它们：
+该包是纯 ESM，无构建步骤——`index.mjs` 与 `lib/` 即发布产物。工作区变更现在会自动创建检查点；运行 `/rewind` 列出它们（或 `/rewind list brief` 获取逐行带会话短号的单行列表）：
 
 ```text
 rewind: 3 checkpoints (newest last):
@@ -128,16 +128,27 @@ rewind: 3 checkpoints (newest last):
 run "/rewind <id>" to restore files and fork the session from that checkpoint
 ```
 
-通过唯一 id 前缀、步骤号或 `latest` 来定位检查点：
+通过**会话短号**（`/rewind list brief` 显示的有界短号）、唯一 id 前缀、步骤号或 `latest` 来定位检查点：
 
 ```text
-/rewind b2c3d4e5
+/rewind list brief        # 每个检查点一行、带短号、最新在前
+/rewind 3                 # 本会话中短号为 3 的检查点（精确命中，绝不做模糊匹配）
+/rewind preview 3         # 只读：显示哪些文件会变化，不触碰任何内容
+/rewind b2c3d4e5          # 唯一 id 前缀（列表里的 8 位 id）与以前完全一样可用
 /rewind step 2
 /rewind latest
-/rewind preview b2c3d4e5   # 只读：显示哪些文件会变化，不触碰任何内容
+/rewind workspace 3 --files src/a.ts,src/b.ts   # 选择性恢复：只恢复这些文件（经批准门）
 /rewind clear              # 确认删除本会话的检查点（文件不受影响）
 /rewind clear --all        # 确认删除所有会话与工作区的检查点（文件不受影响）
 ```
+
+### 会话短号（有界短号）
+
+- **每个检查点在创建时就分到一个短号**，从 `1` 开始。`/rewind 3` **精确**解析该短号——数字永远不会被当作 id 前缀，因此 `/rewind 3` 不可能落到某个恰好以 `3` 开头的 UUID 上。
+- **作用域：每会话**（`sessionId`）。每个会话各自编号，短号在其会话内唯一；`/rewind <短号>` 只在当前会话（与工作区）的检查点里解析。
+- **单调且永不复用。** 配额修剪（`maxSnapshots`）与 `/rewind clear` / `/rewind clear --all` 只删除记录、绝不释放短号：clear 之后的下一个检查点接着此前的水位继续（`#1 #2 #3` 之后 clear，下一个是 `#4` 而不是 `#1`）。短号写在记录本身，计数器存在存储域的 global 槽里，所以删记录不可能把它清零。
+- **旧检查点在首次触达时补号。** 本功能之前写入的记录（没有短号字段）会在该会话第一次被列出或回退时按创建序补号，并持久化；新检查点接在其后。既不跳号也不改号，id 前缀寻址照旧可用。
+- `/rewind list`（详细列表）保持不变：每行仍打印 8 位 id，并在最后一行指向 `/rewind list brief` 以查看短号。
 
 `preview` 使用相同的定位方式解析并打印影响，不请求确认，也不写入任何内容。
 
@@ -193,7 +204,7 @@ run "/rewind <id>" to restore files and fork the session from that checkpoint
 
 | 界面 | 类型 | 说明 |
 |---|---|---|
-| `/rewind` | 命令 | `[workspace\|session\|config\|all] <id-prefix\|step <N>\|latest>` · `diff <a> <b>` · `preview <target>` · `clear [--all]` |
+| `/rewind` | 命令 | `[workspace\|session\|config\|all] <number\|id-prefix\|step <N>\|latest>` · `list [brief]` · `diff <a> <b>` · `preview <target>` · `clear [--all]` |
 | `/checkpoint` | 命令 | `[note <text>\|list\|diff <a> <b>]` —— 捕获手动检查点 |
 | `checkpoint` | 工具 | 捕获带可选备注的手动检查点 |
 | `fs/write-intent` · `fs/edit-intent` · `tools/pre-execute` | 监听器 | 变更前捕获（prepend 直通；绝不抢占策略槽） |
@@ -253,6 +264,10 @@ capture ── fs/write-intent · fs/edit-intent · tools/pre-execute (prepend, 
 
 **能撤销一次回滚吗？** 能——每次经批准的回滚都会先捕获回滚前状态的守护检查点；结果会打印 `rewind guard: <id>`，`/rewind <guard-id>` 会恢复该状态。
 
+**如何定位检查点？** 用**会话短号**（`/rewind 3`，见 `/rewind list brief`；每会话独立、单调、永不复用）、唯一 id 前缀（列表里的 8 位 id 仍然可用）、`/rewind step <N>`、`/rewind latest`。`/rewind clear` 删除本会话的检查点，`/rewind clear --all` 删除所有会话与工作区的检查点（文件不受影响）——两者都不会让编号复位。`/rewind preview <target>` 使用相同的定位方式来查看影响。
+
+**为什么 clear 之后编号还继续往上走？** 因为短号是地址而不是位置：clear 之后把 `#1` 重新分配给另一个检查点，会让任何提到过 `#1` 的地方被静默改指。计数器持久在 `checkpoints` 存储域的 global 槽里，每条记录也各自记住自己的短号，因此修剪与清空只删快照、不回收 id。
+
 
 **`preview` 做什么——又不做什么？** 它解析检查点，然后运行只读比较：哪些文件会被覆盖（或重建）、哪些已经一致、以及检查点之后创建的哪些文件会原样保留。它从不提示、从不写入、从不 fork，也不记录 `checkpoint/rewind` 事件——批准门只在真正的 `/rewind <id>` 上运行。
 
@@ -263,7 +278,7 @@ capture ── fs/write-intent · fs/edit-intent · tools/pre-execute (prepend, 
 ## 权限与数据
 
 - **权限**：workshop 清单声明 `workspace:read`、`workspace:write`、`git:read`、`git:write`、`snapshot-storage:write`、`session-log:read`、`settings:write` 与 `network:none`。
-- **数据**：检查点记录位于 `checkpoints` 存储域（SQLite 行或 JSON 文件）；copy 快照位于 `snapshotDir`。完全本地——无网络、无凭据。存储域按双版本打开：0.4.x 时代的介质（域 v1）以兼容模式打开，旧记录保持可读、新捕获按 v2 形状落盘——升级插件永远不会遗弃既有介质。
+- **数据**：检查点记录位于 `checkpoints` 存储域（SQLite 行或 JSON 文件）；copy 快照位于 `snapshotDir`。存储域的 **global 槽**保存每会话短号计数器，所以删除记录（`prune`、`clear`、`clear --all`）绝不会回收短号。完全本地——无网络、无凭据。存储域按双版本打开：0.4.x 时代的介质（域 v1）以兼容模式打开，旧记录保持可读、新捕获按 v2 形状落盘——升级插件永远不会遗弃既有介质。
 - **会话日志**：`checkpoint/*` 事件经自适应门追加；权威审计链是 `command/run` + `command/done` 加上持久化领域。
 
 ## 安全边界

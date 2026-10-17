@@ -44,7 +44,7 @@ Unified DeepSeek Harness checkpoints — session + workspace + config three-stat
 
 The Claude Code Checkpoints equivalent, built as a capability-seam plugin: capture before every mutation, restore any of the three states with one approved command.
 
-![Terminal demo of dsh-checkpoint-rewind: dsh-checkpoint-rewind — /rewind lists checkpoints, then a read-only preview](https://raw.githubusercontent.com/PerryLink/dsh-checkpoint-rewind/main/docs/assets/dsh-checkpoint-rewind-demo.png)
+![Terminal demo of dsh-checkpoint-rewind: dsh-checkpoint-rewind — /rewind lists checkpoints, then a read-only preview](https://raw.githubusercontent.com/PerryLink/dsh-checkpoint-rewind/main/docs/assets/dsh-checkpoint-rewind-hero.png)
 
 ![Animated terminal demo of dsh-checkpoint-rewind](https://raw.githubusercontent.com/PerryLink/dsh-checkpoint-rewind/main/docs/assets/dsh-checkpoint-rewind-demo.gif)
 
@@ -120,7 +120,7 @@ Checkpoints persist through the `storageDomain` service. The plugin mounts witho
         backend: json
 ```
 
-The package is pure ESM with no build step — `index.mjs` and `lib/` are the shipped artifacts. Workspace mutations now create checkpoints automatically; run `/rewind` to list them:
+The package is pure ESM with no build step — `index.mjs` and `lib/` are the shipped artifacts. Workspace mutations now create checkpoints automatically; run `/rewind` to list them (or `/rewind list brief` for one-line entries carrying each checkpoint's session number):
 
 ```text
 rewind: 3 checkpoints (newest last):
@@ -130,17 +130,27 @@ rewind: 3 checkpoints (newest last):
 run "/rewind <id>" to restore files and fork the session from that checkpoint
 ```
 
-Address a checkpoint by its unique id prefix, by step number, or by `latest`:
+Address a checkpoint by its **session number** (the bounded short number shown by `/rewind list brief`), by unique id prefix, by step number, or by `latest`:
 
 ```text
-/rewind b2c3d4e5
+/rewind list brief        # one line per checkpoint, numbered, newest first
+/rewind 3                 # the checkpoint numbered 3 in THIS session (exact hit, never a fuzzy match)
+/rewind preview 3         # read-only: show which files would change, touch nothing
+/rewind b2c3d4e5          # unique id prefix (the 8-char id in the list) works exactly as before
 /rewind step 2
 /rewind latest
-/rewind preview b2c3d4e5   # read-only: show which files would change, touch nothing
-/rewind workspace b2c3d4e5 --files src/a.ts,src/b.ts   # selective restore: only these files (approval-gated)
+/rewind workspace 3 --files src/a.ts,src/b.ts   # selective restore: only these files (approval-gated)
 /rewind clear              # confirmed deletion of this session's checkpoints (files untouched)
 /rewind clear --all        # confirmed deletion across ALL sessions and workspaces (files untouched)
 ```
+
+### Session numbers (bounded short ids)
+
+- **Every checkpoint gets a number when it is created**, starting at `1`. `/rewind 3` resolves that number **exactly** — digits are never treated as an id prefix, so `/rewind 3` can never land on the checkpoint whose UUID happens to start with `3`.
+- **Scope: per session** (`sessionId`). Each session numbers its own checkpoints; a number is unique inside its session, and `/rewind <number>` resolves against the checkpoints of the current session (and workspace) only.
+- **Monotonic and never reused.** Quota pruning (`maxSnapshots`) and `/rewind clear` / `/rewind clear --all` delete records but never free a number: after a clear the next checkpoint continues from the previous high-water mark (so after `#1 #2 #3` and a `clear`, the next one is `#4`, not `#1`). The number is stored on the record itself and the counter lives in the domain's global slot, so deleting records cannot reset it.
+- **Older checkpoints are numbered on first sight.** Records written before this feature (no number field) are numbered in creation order the first time the session is listed or rewound, and that numbering is persisted; brand-new checkpoints continue after it. Nothing is skipped or reassigned, and id-prefix addressing keeps working for them.
+- `/rewind list` (the detailed list) is unchanged: it still prints the 8-char id per line and its last line points at `/rewind list brief` for the numbers.
 
 `preview` resolves through the same addressing and prints the impact without asking for confirmation or writing anything. `--files` restores only the named files through the same approval-gated transaction (unknown paths fail closed; it is incompatible with `workspaceRestore: reset-hard` and disabled when `selectiveRestore: false`).
 
@@ -196,7 +206,7 @@ All tunables are Schemastery `Config` fields (changeable from cordis.yml). Nothi
 
 | Surface | Kind | Notes |
 |---|---|---|
-| `/rewind` | command | `[workspace\|session\|config\|all] <id-prefix\|step <N>\|latest>` · `diff <a> <b>` · `preview <target>` · `clear [--all]` |
+| `/rewind` | command | `[workspace\|session\|config\|all] <number\|id-prefix\|step <N>\|latest>` · `list [brief]` · `diff <a> <b>` · `preview <target>` · `clear [--all]` |
 | `/checkpoint` | command | `[note <text>\|list\|diff <a> <b>]` — capture a manual checkpoint |
 | `checkpoint` | tool | Capture a manual checkpoint with an optional note |
 | `fs/write-intent` · `fs/edit-intent` · `tools/pre-execute` | listeners | Pre-mutation capture (prepend pass-through; never steals the policy slot) |
@@ -256,7 +266,9 @@ The plugin returns the new session id in the command result (`session: <id>`) an
 
 **Can I undo a rewind?** Yes — every approved rewind captures a guard checkpoint of the pre-rewind state first; the result prints `rewind guard: <id>`, and `/rewind <guard-id>` restores that state.
 
-**How do I address checkpoints?** Unique id prefix (the 8-char short id in the list works), `/rewind step <N>`, `/rewind latest`, `/rewind clear` deletes this session's checkpoints, and `/rewind clear --all` deletes checkpoints across all sessions and workspaces (files untouched). `/rewind preview <target>` uses the same addressing to show the impact without changing anything.
+**How do I address checkpoints?** The **session number** (`/rewind 3` — see `/rewind list brief`; per session, monotonic, never reused), the unique id prefix (the 8-char short id in the list still works), `/rewind step <N>`, and `/rewind latest`. `/rewind clear` deletes this session's checkpoints, and `/rewind clear --all` deletes checkpoints across all sessions and workspaces (files untouched) — neither one resets the numbering. `/rewind preview <target>` uses the same addressing to show the impact without changing anything.
+
+**Why does the number keep counting up after a clear?** Because a number is an address, not a position: reusing `#1` for a different checkpoint after a clear would silently repoint anything that mentioned `#1`. The counter is persisted in the `checkpoints` domain (global slot) and each record stores its own number, so pruning and clearing delete snapshots without recycling ids.
 
 **What does `preview` do — and not do?** It resolves the checkpoint, then runs a read-only comparison: which files would be overwritten (or recreated), which already match, and which files created after the checkpoint would be left in place. It never prompts, never writes, never forks, and records no `checkpoint/rewind` event — the approval gate only runs on a real `/rewind <id>`.
 
@@ -267,7 +279,7 @@ A real assembled-headless integration run (`npm run test:integration`) drives th
 ## Permissions & data
 
 - **Permissions**: the workshop manifest declares `workspace:read`, `workspace:write`, `git:read`, `git:write`, `snapshot-storage:write`, `session-log:read`, `settings:write`, and `network:none`.
-- **Data**: checkpoint records live in the `checkpoints` storage domain (SQLite rows or a JSON file); copy snapshots live under `snapshotDir`. Fully local — no network, no credentials. The domain is opened dual-version: 0.4.x-era media (domain v1) are opened in a compatibility mode that keeps old records readable and stores new captures in the v2 shape, so upgrading the plugin never orphans an existing medium.
+- **Data**: checkpoint records live in the `checkpoints` storage domain (SQLite rows or a JSON file); copy snapshots live under `snapshotDir`. The domain's **global slot** holds the per-session short-number counters, which is why deleting records (`prune`, `clear`, `clear --all`) can never recycle a number. Fully local — no network, no credentials. The domain is opened dual-version: 0.4.x-era media (domain v1) are opened in a compatibility mode that keeps old records readable and stores new captures in the v2 shape, so upgrading the plugin never orphans an existing medium.
 - **Session log**: `checkpoint/*` events are appended through the adaptive gate; the authoritative audit chain is `command/run` + `command/done` plus the durable domain.
 
 ## Security boundaries
