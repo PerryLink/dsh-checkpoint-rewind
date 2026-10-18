@@ -21,6 +21,11 @@
 
 [English](README.md) · [简体中文](README-zh.md) · [Español](README-es.md) · [Português](README-pt.md) · [हिन्दी](README-hi.md)
 
+```sh
+dsh plugin --profile <name> add dsh-checkpoint-rewind
+```
+
+
 </div>
 
 ---
@@ -28,6 +33,14 @@
 **📖 इकोसिस्टम नॉलेज बेस** — मापे गए आँकड़े, मार्केटिंग नहीं: [डेवलपमेंट गाइड · चयन डेटा · रखरखाव मानदंड](https://perrylink.github.io/dsh-plugin-guide/)।
 
 <!-- star-cta -->
+## इंस्टॉल और अनइंस्टॉल
+
+- **git चैनल** (नवीनतम `main`): `dsh plugin --profile web add github:PerryLink/dsh-checkpoint-rewind` — शुद्ध ESM, कोई `prepare` या `allowBuilds` चरण नहीं।
+- **npm चैनल** (प्रकाशित रिलीज़): `dsh plugin --profile web add dsh-checkpoint-rewind`।
+- **tarball चैनल**: इस रेपो में `npm pack`, फिर `dsh plugin --profile web add ./dsh-checkpoint-rewind-<version>.tgz`।
+- **स्टोरेज स्टैक** (चेकपॉइंट के लिए आवश्यक, माउंट के लिए वैकल्पिक): `@deepseek-ai/dsh-storage` + `@deepseek-ai/dsh-storage-json` (कॉन्फ़िग `root`) + `@deepseek-ai/dsh-storage-domain` (कॉन्फ़िग `backend: json`) — त्वरित शुरुआत देखें; इसके बिना भी प्लगइन माउंट होता है और हर कमांड समाधान बताता है।
+- **अनइंस्टॉल**: `dsh plugin --profile web remove dsh-checkpoint-rewind` — स्नैपशॉट फ़ाइलें तब तक रहती हैं जब तक आप `$DSH_HOME/dsh-checkpoint-rewind` नहीं हटाते; git ऑब्जेक्ट गार्बेज-कलेक्ट हो जाते हैं।
+
 ## ⭐ 如果它帮到了你
 
 यह प्लगइन [DSH प्लगइन परिवार](https://github.com/PerryLink) का हिस्सा है (40+ प्लगइन, सभी Apache-2.0)। अगर यह उपयोगी लगे, तो **एक स्टार दें** — इससे कोई सुविधा अनलॉक नहीं होती, पर अगला व्यक्ति इसे खोज में आसानी से पा लेता है।
@@ -149,14 +162,6 @@ run "/rewind <id>" to restore files and fork the session from that checkpoint
 - `/rewind list` (विस्तृत सूची) अपरिवर्तित है: हर पंक्ति पर 8-अक्षर id छपता है और अंतिम पंक्ति नंबरों के लिए `/rewind list brief` की ओर इशारा करती है।
 
 `preview` उसी संबोधन से हल होता है और बिना पुष्टि माँगे या कुछ लिखे प्रभाव प्रिंट करता है।
-
-## इंस्टॉल और अनइंस्टॉल
-
-- **git चैनल** (नवीनतम `main`): `dsh plugin --profile web add github:PerryLink/dsh-checkpoint-rewind` — शुद्ध ESM, कोई `prepare` या `allowBuilds` चरण नहीं।
-- **npm चैनल** (प्रकाशित रिलीज़): `dsh plugin --profile web add dsh-checkpoint-rewind`।
-- **tarball चैनल**: इस रेपो में `npm pack`, फिर `dsh plugin --profile web add ./dsh-checkpoint-rewind-<version>.tgz`।
-- **स्टोरेज स्टैक** (चेकपॉइंट के लिए आवश्यक, माउंट के लिए वैकल्पिक): `@deepseek-ai/dsh-storage` + `@deepseek-ai/dsh-storage-json` (कॉन्फ़िग `root`) + `@deepseek-ai/dsh-storage-domain` (कॉन्फ़िग `backend: json`) — त्वरित शुरुआत देखें; इसके बिना भी प्लगइन माउंट होता है और हर कमांड समाधान बताता है।
-- **अनइंस्टॉल**: `dsh plugin --profile web remove dsh-checkpoint-rewind` — स्नैपशॉट फ़ाइलें तब तक रहती हैं जब तक आप `$DSH_HOME/dsh-checkpoint-rewind` नहीं हटाते; git ऑब्जेक्ट गार्बेज-कलेक्ट हो जाते हैं।
 
 ## कॉन्फ़िगरेशन
 
