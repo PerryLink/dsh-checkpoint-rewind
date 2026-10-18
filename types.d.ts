@@ -11,6 +11,14 @@ import type { ContextFormed } from '@deepseek-ai/dsh-llm'
  */
 export interface CheckpointRecord {
   id: string
+  /**
+   * 每会话短号（正整数，从 1 起；`/rewind 3` 的精确寻址目标）。
+   * 单调、永不复用：prune 与 `/rewind clear` 都不回收号（高水位持久在
+   * 'checkpoints' 领域的 global 槽里）。0.6.24 及更早写入的记录没有该字段，
+   * 首次被本会话任何 /rewind、/checkpoint list 或捕获触达时按创建序补号并
+   * 持久化（见 planShortNumbers）。
+   */
+  short?: number
   sessionId: string
   cwd: string
   /** 会话事件游标：捕获时会话日志 seq。 */
@@ -116,6 +124,8 @@ declare module '@deepseek-ai/dsh-session' {
  */
 export interface CheckpointWireRecord {
   id: string
+  /** 每会话短号（`/rewind <number>` 的寻址目标；旧事件载荷可能缺失）。 */
+  short?: number
   turn: number
   step: number
   time: number
@@ -133,17 +143,38 @@ export interface CheckpointWireRecord {
   preCheckpointId?: string
 }
 
+/**
+ * `checkpoints` 会话投影的**整个 wire 值**：一行有界状态串，例如
+ *
+ * ```text
+ * cp:7 | #1-7 | last #7 [manual] t3s2 | sess t2s4 | rw:restored
+ * ```
+ *
+ * 它是字符串而不是对象，这是被渲染器逼出来的：一条检查点的紧凑 JSON 即使一个
+ * 可选字段都不带、短号也没有，也要 151 码元（36 字符 UUID 是 id 下限），而微信桥
+ * 把每个投影值渲染成一行并在 120 码元处截断 —— 也就是说对象（列表）形态对**任何**
+ * 真实值都必然被劈断。格式与预算由 `lib/projection.mjs` 的
+ * `renderCheckpointsLine` / `CHECKPOINTS_LINE_MAX` 独家持有。
+ */
+export type CheckpointsView = string
+
 declare module '@deepseek-ai/dsh-session-projection' {
   interface SessionProjectionMap {
     /**
-     * Web UI 检查点条的全量列表值（最新在尾）。
+     * Web UI 检查点条 / 手机桥 `/status` 的整值：一行有界状态串
+     * （`cp:<n> | #<lo>-<hi> | last #<short> [<kind>] t<turn>s<step>
+     * [| sess t<turn>s<step>] [| rw:<outcome>]`）。
      * 折叠 checkpoint/snapshot|bound|prune|rewind 事件得到；宿主未收录该词汇
-     * 且不支持 ignorable 信封时恒为空列表（见 README「会话事件」）。
+     * 且不支持 ignorable 信封时恒为 `cp:0`（见 README「会话事件」）。
      */
-    checkpoints: Array<CheckpointWireRecord>
+    checkpoints: CheckpointsView
   }
   interface SessionProjectionStateMap {
-    /** 检查点折叠状态：id → wire 记录（持久缓存前置条件 = 普通 JSON）。 */
+    /**
+     * 检查点折叠状态：id → wire 记录（持久缓存前置条件 = 普通 JSON）。
+     * ⚠️ 状态形状与 wire 值解耦：wire 换成单行字符串**不动**这份状态，因此
+     * `stateVersion` 保持 0、旧持久行无需迁移（见 lib/projection.mjs 的推导）。
+     */
     checkpoints: Record<string, CheckpointWireRecord>
   }
 }

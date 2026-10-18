@@ -21,8 +21,8 @@ import { checkpointsDomainSpec } from '../../lib/domain.mjs'
 /**
  * 构造 mock 存储领域 facility（'checkpoints' 单表内存实现）。
  * 返回的 `records` 是权威记录 Map（测试直接断言）。
- * @param {{mediumVersion?: number}} [opts] - 介质版本注入。
- * @returns {{facility: {open: (spec: {name: string, version: number}) => Promise<object>}, records: Map<string, object>, opened: object[], specVersions: number[]}}
+ * @param {{mediumVersion?: number, seedGlobal?: {shortCounters?: Record<string, number>}}} [opts] - 介质版本注入 + 初始 global 槽。
+ * @returns {{facility: {open: (spec: {name: string, version: number}) => Promise<object>}, records: Map<string, object>, opened: object[], specVersions: number[], globalOf: () => {shortCounters?: Record<string, number>} | null}}
  */
 export function makeDomainFacility(opts = {}) {
   const { mediumVersion } = opts
@@ -37,6 +37,10 @@ export function makeDomainFacility(opts = {}) {
   const specVersions = []
   // 已存在介质的版本；undefined = 新介质（首个 spec 创建并盖章）。
   let sealedVersion = mediumVersion
+  // 领域 global 槽（每会话短号计数水位）：与真后端同语义——介质里没有 global
+  // 时读作 spec 的 initial，首次 set 才落盘；clear 删表记录不动它。
+  /** @type {{shortCounters?: Record<string, number>} | null} */
+  let globalValue = opts.seedGlobal ?? null
   /** @param {Map<string, object>} map */
   const makeTable = (map) => ({
     get: (/** @type {string} */ key) => map.get(key),
@@ -52,7 +56,7 @@ export function makeDomainFacility(opts = {}) {
     size: () => map.size,
   })
   const facility = {
-    /** @param {{name: string, version: number}} spec */
+    /** @param {{name: string, version: number, global?: object, tables?: Record<string, unknown>}} spec */
     async open(spec) {
       if (spec.name !== checkpointsDomainSpec.name) throw new Error(`unexpected domain ${spec.name}`)
       if (sealedVersion !== undefined && spec.version !== sealedVersion) {
@@ -67,6 +71,13 @@ export function makeDomainFacility(opts = {}) {
       const domain = {
         name: spec.name,
         table: (/** @type {string} */ name) => makeTable(map),
+        // 未声明 global 的 spec 与真 DomainImpl 一样没有可用句柄（老宿主行模拟）。
+        ...(spec.global === undefined ? {} : {
+          global: {
+            get: () => globalValue ?? globalValueOf(spec),
+            set: async (/** @type {object} */ value) => { globalValue = value },
+          },
+        }),
         close: async () => {},
       }
       opened.push(domain)
@@ -74,13 +85,18 @@ export function makeDomainFacility(opts = {}) {
       return domain
     },
   }
-  return { facility, records, opened, specVersions }
+  return { facility, records, opened, specVersions, globalOf: () => globalValue }
+}
+
+/** @param {{global?: {initial?: object}}} spec */
+function globalValueOf(spec) {
+  return spec.global?.initial ?? null
 }
 
 /**
  * 组装完整测试上下文。
- * @param {{config?: object, userQuestions?: unknown, approval?: unknown, tools?: unknown, systemPrompt?: unknown, settings?: unknown, storageDomain?: boolean | 'late', cwd?: string, sessionId?: string, mediumVersion?: number, seedRecords?: Record<string, object>}} [opts] - 组装选项。
- * @returns {Promise<{root: Context, dispose: () => Promise<void>, records: Map<string, object>, opened: object[], specVersions: number[], agent: any, session: import('@deepseek-ai/dsh-session').Session, makeSession: (cwd?: string) => {session: any, agent: any}}>}
+ * @param {{config?: object, userQuestions?: unknown, approval?: unknown, tools?: unknown, systemPrompt?: unknown, settings?: unknown, storageDomain?: boolean | 'late', cwd?: string, sessionId?: string, mediumVersion?: number, seedGlobal?: {shortCounters?: Record<string, number>}, seedRecords?: Record<string, object>}} [opts] - 组装选项。
+ * @returns {Promise<{root: Context, dispose: () => Promise<void>, records: Map<string, object>, opened: object[], specVersions: number[], globalOf: () => {shortCounters?: Record<string, number>} | null, agent: any, session: import('@deepseek-ai/dsh-session').Session, makeSession: (cwd?: string) => {session: any, agent: any}}>}
  */
 export async function mountPlugin(opts = {}) {
   const root = new Context()
@@ -90,7 +106,7 @@ export async function mountPlugin(opts = {}) {
   const mount = async (plugin, config) => {
     fibers.push(await root.plugin(plugin, config))
   }
-  const { facility, records, opened, specVersions } = makeDomainFacility({ mediumVersion: opts.mediumVersion })
+  const { facility, records, opened, specVersions, globalOf } = makeDomainFacility({ mediumVersion: opts.mediumVersion, seedGlobal: opts.seedGlobal })
   // 预置介质记录（v1/v2 形状均可；测试直接放进权威 Map，open 后立即可见）。
   for (const [key, record] of Object.entries(opts.seedRecords ?? {})) {
     records.set(key, record)
@@ -134,6 +150,7 @@ export async function mountPlugin(opts = {}) {
     records,
     opened,
     specVersions,
+    globalOf,
     agent,
     session,
     makeSession: (dir = cwd) => {

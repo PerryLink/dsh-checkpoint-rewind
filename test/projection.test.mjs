@@ -3,6 +3,9 @@
 // 真注册表测试用合成事件直接 append 到真实 Session（绕过自适应门，因为
 // 投影单元本就只消费事件、不生产事件），证明宿主收录词汇后 UI 检查点条
 // 无需改插件即被填充。
+//
+// 折叠状态 = id → wire 记录的普通 JSON 对象；**wire 值** = 插件自算的一行有界
+// 字符串（格式与预算见 lib/projection.mjs 与 test/projection-line.test.mjs）。
 
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
@@ -58,19 +61,25 @@ describe('checkpoints 投影单元（纯折叠）', () => {
   it('snapshot 添加记录；bound 补 stepEndSeq；rewind 记 outcome；prune 删除', () => {
     let state = initCheckpointsProjection()
     state = applyCheckpointsProjection(state, snapshotEvent(record({ kind: 'manual', tree: null, note: '发布前', sessionBoundary: 9 })))
-    assert.deepEqual(viewCheckpointsProjection(state), [{
-      id: 'cp-1', turn: 1, step: 1, time: 1000, provider: 'copy', triggerTool: 'bash', files: 2, bytes: 4096,
-      kind: 'manual', note: '发布前', seq: 10, sessionBoundary: 9,
-    }])
+    assert.deepEqual(state, {
+      'cp-1': {
+        id: 'cp-1', turn: 1, step: 1, time: 1000, provider: 'copy', triggerTool: 'bash', files: 2, bytes: 4096,
+        kind: 'manual', note: '发布前', seq: 10, sessionBoundary: 9,
+      },
+    })
+    // 无短号的旧记录：地址位写 `#?`，但记录本身照常可回退。
+    assert.equal(viewCheckpointsProjection(state), 'cp:1 | #? | last #? [manual] t1s1 | sess t1s1')
     state = applyCheckpointsProjection(state, boundStep({ id: 'cp-1', turn: 1, step: 1, stepEndSeq: 12 }))
     state = applyCheckpointsProjection(state, rewind('cp-1', 'restored'))
-    assert.deepEqual(viewCheckpointsProjection(state), [{
+    assert.deepEqual(state['cp-1'], {
       id: 'cp-1', turn: 1, step: 1, time: 1000, provider: 'copy', triggerTool: 'bash', files: 2, bytes: 4096,
       kind: 'manual', note: '发布前', seq: 10, sessionBoundary: 9,
       stepEndSeq: 12, rewindOutcome: 'restored',
-    }])
+    })
+    assert.equal(viewCheckpointsProjection(state), 'cp:1 | #? | last #? [manual] t1s1 | sess t1s1 | rw:restored')
     state = applyCheckpointsProjection(state, prune(['cp-1']))
-    assert.deepEqual(viewCheckpointsProjection(state), [])
+    assert.deepEqual(state, {})
+    assert.equal(viewCheckpointsProjection(state), 'cp:0')
   })
 
   it('未知 id 的 bound/rewind/prune 是安全 no-op', () => {
@@ -85,19 +94,28 @@ describe('checkpoints 投影单元（纯折叠）', () => {
     assert.equal(state, before, '只删未知 id 时原引用返回')
   })
 
-  it('view 按 (time, id) 升序（最新在尾）', () => {
+  it('最新记录驱动 last 段：按 (time, id) 取最大，与插入顺序无关', () => {
     let state = initCheckpointsProjection()
-    state = applyCheckpointsProjection(state, snapshotEvent(record({ id: 'b', time: 2000, turn: 2 })))
-    state = applyCheckpointsProjection(state, snapshotEvent(record({ id: 'a', time: 1000, turn: 1 })))
-    assert.deepEqual(viewCheckpointsProjection(state).map((entry) => entry.id), ['a', 'b'])
+    state = applyCheckpointsProjection(state, snapshotEvent(record({ id: 'b', short: 2, time: 2000, turn: 2, step: 3 })))
+    state = applyCheckpointsProjection(state, snapshotEvent(record({ id: 'a', short: 1, time: 1000, turn: 1, step: 1 })))
+    assert.equal(viewCheckpointsProjection(state), 'cp:2 | #1-2 | last #2 [manual] t2s3')
+    // 同一 time 时按 id 决胜（'a' < 'b' ⇒ b 更新），与插入顺序无关。
+    let tie = initCheckpointsProjection()
+    tie = applyCheckpointsProjection(tie, snapshotEvent(record({ id: 'b', short: 9, time: 5000, turn: 5, step: 5 })))
+    tie = applyCheckpointsProjection(tie, snapshotEvent(record({ id: 'a', short: 8, time: 5000, turn: 4, step: 4 })))
+    assert.equal(viewCheckpointsProjection(tie), 'cp:2 | #8-9 | last #9 [manual] t5s5')
   })
 
-  it('wire schema 校验 view 输出；stateSchema 校验折叠状态', () => {
+  it('wire schema 校验单行 view 输出；列表形态被拒；stateSchema 校验折叠状态', () => {
     let state = initCheckpointsProjection()
     state = applyCheckpointsProjection(state, snapshotEvent(record()))
     const view = viewCheckpointsProjection(state)
+    assert.equal(typeof view, 'string')
     const parsed = checkpointsProjectionDefinition.wire.viewSchema.safeParse(view)
     assert.equal(parsed.success, true)
+    // 旧的列表 wire 形态不再合法：换形状是**故意**的破坏性 wire 变更（折叠状态没变）。
+    assert.equal(checkpointsProjectionDefinition.wire.viewSchema.safeParse([{ id: 'cp-1' }]).success, false)
+    assert.equal(checkpointsProjectionDefinition.wire.viewSchema.safeParse(null).success, false)
     // rc.2 契约：stateSchema 校验持久缓存的内部状态（id → wire 记录）。
     const stateParsed = checkpointsProjectionDefinition.stateSchema.safeParse(state)
     assert.equal(stateParsed.success, true)
@@ -127,11 +145,17 @@ describe('checkpoints 投影单元（真注册表接线）', () => {
     session.append('checkpoint/snapshot', record({ id: 'cp-2', time: 2000, turn: 2, step: 1 }))
 
     const snapshot = root.sessionProjections.snapshot(session)
-    const list = snapshot.values.checkpoints
-    assert.ok(Array.isArray(list), 'checkpoints 键由本单元供给')
-    assert.deepEqual(list.map((entry) => entry.id), ['cp-1', 'cp-2'])
-    assert.equal(list[0].stepEndSeq, 12)
-    assert.equal(list[0].sessionBoundary, 5)
+    const value = snapshot.values.checkpoints
+    assert.equal(typeof value, 'string', 'checkpoints 键由本单元供给，wire 值是单行字符串')
+    assert.equal(value, 'cp:2 | #? | last #? [manual] t2s1 | sess t1s1')
+    // 折叠**状态**形状未变（这正是 stateVersion 保持 0、旧持久行无需迁移的理由）：
+    // checkpoint() 暴露持久行里的 val。
+    const rows = root.sessionProjections.checkpoint(session)
+    /** 折叠状态是宿主投影的私有形状（本仓只断言其字段，不引用宿主类型）——
+     *  故此处显式断言成测试所需的窄形状，避免 `unknown` 索引报 TS7053/TS2322。 */
+    const state = /** @type {Record<string, { stepEndSeq?: number, sessionBoundary?: number }> | undefined} */ (rows.checkpoints?.val)
+    assert.equal(state?.['cp-1']?.stepEndSeq, 12)
+    assert.equal(state?.['cp-1']?.sessionBoundary, 5)
 
     for (const fiber of fibers.reverse()) await fiber.dispose()
   })
