@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.6.30] - 2026-10-19
+
+### Fixed
+
+- **Snapshot commits no longer require a global git identity (issue #33).** `GIT_SPAWN_ENV` now supplies a fixed `dsh-checkpoint <checkpoint@dsh.local>` author/committer, so `git stash create` / `commit-tree` work on a clean machine with no `user.name`/`user.email`; the snapshots remain plugin-owned objects, not the user's commits.
+
 ## [0.6.29] - 2026-10-18
 
 ### Changed

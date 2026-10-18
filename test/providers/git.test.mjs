@@ -281,6 +281,8 @@ describe('git provider（scripted runner）', () => {
   it('子进程环境：终端提示与可选锁关闭（防凭据提示挂起快照链）', () => {
     assert.equal(GIT_SPAWN_ENV.GIT_TERMINAL_PROMPT, '0')
     assert.equal(GIT_SPAWN_ENV.GIT_OPTIONAL_LOCKS, '0')
+    assert.equal(GIT_SPAWN_ENV.GIT_AUTHOR_NAME, 'dsh-checkpoint')
+    assert.equal(GIT_SPAWN_ENV.GIT_COMMITTER_EMAIL, 'checkpoint@dsh.local')
   })
 
   it('ref 格式校验：40/64 位 hex 通过，其余拒绝', () => {
