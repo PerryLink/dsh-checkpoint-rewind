@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.6.31] - 2026-10-19
+
+### Fixed
+
+- **A new session no longer starts with a full copy-provider workspace copy (issue #35).** When the session has no checkpoint of its own, the dedup baseline now falls back to the most recent checkpoint for the same workspace and the same `snapshotDir`, so the copy provider can reuse unchanged files incrementally. A cross-session baseline is still forced to write a record (no dedup skip), and a baseline from a different snapshot directory is ignored.
+
 ## [0.6.30] - 2026-10-19
 
 ### Fixed

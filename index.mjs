@@ -698,6 +698,21 @@ export async function apply(ctx, config = {}) {
   }
 
   /**
+   * 同一工作区最近一条检查点（跨会话）。新会话没有自己的基线时用它做增量
+   * 基线，避免每个会话第一次 capture 都整树复制（issue #35）。
+   * @param {import('@deepseek-ai/dsh-storage-domain').KvTable<string, import('./types.d.ts').CheckpointRecord>} table
+   * @param {string} cwd
+   * @returns {import('./types.d.ts').CheckpointRecord|undefined}
+   */
+  function latestWorkspaceRecordFor(table, cwd, snapshotDir) {
+    const key = workspaceKeyOf(cwd)
+    const all = [...table.entries()]
+      .filter(([, record]) => workspaceKeyOf(record.cwd) === key && (record.config?.snapshotDir ?? '') === snapshotDir)
+      .map(([, record]) => record)
+    return sortOldestFirst(all).at(-1)
+  }
+
+  /**
    * 配置快照（普通 JSON 深拷贝，进入检查点记录）。
    * @param {Required<CheckpointConfig>} config - 有效配置。
    * @returns {Record<string, unknown>} 深拷贝快照。
@@ -727,8 +742,10 @@ export async function apply(ctx, config = {}) {
       const boundary = sessionBoundaryAt(sessionEvents(session), cursor)
       const table = await getTablePromise()
       const provider = await registry.resolve(getLive().provider, { cwd, key: workspaceKeyOf(cwd) })
-      const previous = latestRecordFor(table, session.id, cwd)
+      const ownPrevious = latestRecordFor(table, session.id, cwd)
+      const previous = ownPrevious ?? latestWorkspaceRecordFor(table, cwd, getLive().snapshotDir)
       const previousRef = previous !== undefined && previous.provider === provider.name ? previous.ref : undefined
+      const forceCapture = ownPrevious === undefined && previousRef !== undefined
       let result
       const controller = new AbortController()
       let timedOut = false
@@ -745,7 +762,7 @@ export async function apply(ctx, config = {}) {
         result = await Promise.race([
           provider.snapshot(
             { cwd, key: workspaceKeyOf(cwd) },
-            { triggerTool: opts.triggerTool, previousRef, signal: controller.signal },
+            { triggerTool: opts.triggerTool, previousRef, signal: controller.signal, forceCapture },
           ),
           timeout,
         ])
