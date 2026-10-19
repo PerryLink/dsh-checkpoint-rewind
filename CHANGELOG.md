@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.6.32] - 2026-10-19
+
+### Fixed
+
+- Restore the CI type gate for the 0.6.31 workspace-baseline change: the copy/git provider contexts now declare `forceCapture`, and `latestWorkspaceRecordFor` declares its `snapshotDir` parameter. No runtime behavior change.
+
 ## [0.6.31] - 2026-10-19
 
 ### Fixed

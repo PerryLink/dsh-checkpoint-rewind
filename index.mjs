@@ -702,6 +702,7 @@ export async function apply(ctx, config = {}) {
    * 基线，避免每个会话第一次 capture 都整树复制（issue #35）。
    * @param {import('@deepseek-ai/dsh-storage-domain').KvTable<string, import('./types.d.ts').CheckpointRecord>} table
    * @param {string} cwd
+   * @param {string} snapshotDir
    * @returns {import('./types.d.ts').CheckpointRecord|undefined}
    */
   function latestWorkspaceRecordFor(table, cwd, snapshotDir) {
