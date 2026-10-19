@@ -683,7 +683,7 @@ describe('/rewind preview（只读影响面预览）', () => {
     closeStep(app.session, 1, 1, true)
     const record = (await recordsOf(app.records))[0][1]
     const result = await command(app, `/rewind preview ${record.id.slice(0, 8)}`)
-    assert.equal(result?.result.kind, 'success')
+    assert.equal(result?.result.kind, 'success', `preview returned: ${JSON.stringify(result?.result)}`)
     assert.match(result?.result.text, /rewind preview: checkpoint #/)
     assert.match(result?.result.text, /would overwrite 1 file\(s\):/)
     assert.match(result?.result.text, /a\.txt/)
