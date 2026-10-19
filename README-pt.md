@@ -191,6 +191,22 @@ run "/rewind <id>" to confirm and apply (a guard checkpoint is captured first)
 
 *Observado em `test/checkpoints.test.mjs:289-301; lib/checkpoints.mjs:484-500`*
 
+#### Ramo de falha
+
+**Entrada**
+
+~~~text
+/rewind nope
+~~~
+
+**Saída**
+
+~~~text
+rewind: unknown checkpoint id "nope" (run /rewind to list)
+~~~
+
+*Observado em `plugins/dsh-checkpoint-rewind/lib/errors.mjs:72; plugins/dsh-checkpoint-rewind/index.mjs:1223; plugins/dsh-checkpoint-rewind/test/index.test.mjs:346-350`*
+
 #### Exemplos breves
 
 - `/checkpoint`

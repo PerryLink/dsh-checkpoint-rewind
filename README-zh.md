@@ -193,6 +193,22 @@ run "/rewind <id>" to confirm and apply (a guard checkpoint is captured first)
 
 *来源 `test/checkpoints.test.mjs:289-301; lib/checkpoints.mjs:484-500`*
 
+#### 失败分支
+
+**输入**
+
+~~~text
+/rewind nope
+~~~
+
+**输出**
+
+~~~text
+rewind: unknown checkpoint id "nope" (run /rewind to list)
+~~~
+
+*来源 `plugins/dsh-checkpoint-rewind/lib/errors.mjs:72; plugins/dsh-checkpoint-rewind/index.mjs:1223; plugins/dsh-checkpoint-rewind/test/index.test.mjs:346-350`*
+
 #### 简短示例
 
 - `/checkpoint`
