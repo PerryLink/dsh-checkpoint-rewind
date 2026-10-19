@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.6.33] - 2026-10-19
+
+### Fixed
+
+- **All-digit checkpoint id prefixes are addressable again.** `/rewind` lists `#<8-char id prefix>`; a prefix that happens to be all digits (e.g. `#43333482`) was parsed as a short number and rejected when no short matched. Numeric input now matches a short first, then falls back to the id-prefix branch when the input is at least 6 characters.
+
 ## [0.6.32] - 2026-10-19
 
 ### Fixed
