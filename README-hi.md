@@ -459,6 +459,8 @@ npm run test:integration  # असेंबल्ड-हेडलेस सत�
 | **[dsh-session-pin](https://github.com/PerryLink/dsh-session-pin)** | 🚫 सेवानिवृत्त — रिपॉज़िटरी README देखें |
 | **[dsh-team-rooms](https://github.com/PerryLink/dsh-team-rooms)** | 🚫 सेवानिवृत्त — रिपॉज़िटरी README देखें |
 
-</details>## लाइसेंस
+</details>
+
+## लाइसेंस
 
 [Apache License 2.0](LICENSE) © 2026 dsh-checkpoint-rewind contributors
