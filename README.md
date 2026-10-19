@@ -173,7 +173,26 @@ These are the plugin's real entry points; install once, then call one.
 
 #### Detailed example
 
-- `/rewind`
+**Command**
+
+~~~sh
+/rewind preview cp-9
+~~~
+
+**Output**
+
+~~~text
+rewind preview: checkpoint #cp-9 (provider git, turn 2 step 3)
+restoring it would overwrite 2 file(s):
+  a.txt
+  b.txt
+5 file(s) already match the checkpoint (not touched).
+no files are deleted: 1 file(s) created after the checkpoint would be left in place:
+  new.txt
+run "/rewind <id>" to confirm and apply (a guard checkpoint is captured first)
+~~~
+
+*Observed from `test/checkpoints.test.mjs:289-301; lib/checkpoints.mjs:484-500`*
 
 #### Brief examples
 

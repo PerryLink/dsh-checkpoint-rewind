@@ -170,7 +170,26 @@ São os pontos de entrada reais; instale e chame um.
 
 #### Exemplo detalhado
 
-- `/rewind`
+**Comando**
+
+~~~sh
+/rewind preview cp-9
+~~~
+
+**Saída**
+
+~~~text
+rewind preview: checkpoint #cp-9 (provider git, turn 2 step 3)
+restoring it would overwrite 2 file(s):
+  a.txt
+  b.txt
+5 file(s) already match the checkpoint (not touched).
+no files are deleted: 1 file(s) created after the checkpoint would be left in place:
+  new.txt
+run "/rewind <id>" to confirm and apply (a guard checkpoint is captured first)
+~~~
+
+*Observado em `test/checkpoints.test.mjs:289-301; lib/checkpoints.mjs:484-500`*
 
 #### Exemplos breves
 
