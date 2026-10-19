@@ -53,9 +53,10 @@ Checkpoints unificados de DeepSeek Harness: instantáneas de tres estados — se
 
 El equivalente a los Checkpoints de Claude Code, construido como plugin de costura de capacidad (capability-seam): captura antes de cada mutación y restaura cualquiera de los tres estados con un único comando aprobado.
 
-![Demostración de terminal de dsh-checkpoint-rewind: dsh-checkpoint-rewind — /rewind lists checkpoints, then a read-only preview](https://raw.githubusercontent.com/PerryLink/dsh-checkpoint-rewind/main/docs/assets/dsh-checkpoint-rewind-hero.png)
+![Diagrama de flujo de dsh-checkpoint-rewind: instalar → abrir panel → actuar.](docs/assets/dsh-checkpoint-rewind-flow.svg)
 
-![Animated terminal demo of dsh-checkpoint-rewind](https://raw.githubusercontent.com/PerryLink/dsh-checkpoint-rewind/main/docs/assets/dsh-checkpoint-rewind-demo.gif)
+*Resumen del flujo: instalar → abrir panel → actuar. Los ejemplos siguientes usan la superficie de comandos real.*
+
 
 *La misma ejecución, animada.*
 
@@ -162,6 +163,19 @@ Dirígete a un checkpoint por su **número de sesión** (el número corto y acot
 - `/rewind list` (la lista detallada) no cambia: sigue imprimiendo el id de 8 caracteres por línea y su última línea remite a `/rewind list brief` para los números.
 
 `preview` se resuelve con el mismo direccionamiento e imprime el impacto sin pedir confirmación ni escribir nada.
+
+### Ejemplos
+
+Son los puntos de entrada reales; instala y llama a uno.
+
+#### Ejemplo detallado
+
+- `/rewind`
+
+#### Ejemplos breves
+
+- `/checkpoint`
+- `/rewind preview`
 
 ## Configuración
 

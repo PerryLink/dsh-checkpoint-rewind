@@ -57,11 +57,11 @@ Unified DeepSeek Harness checkpoints — session + workspace + config three-stat
 
 The Claude Code Checkpoints equivalent, built as a capability-seam plugin: capture before every mutation, restore any of the three states with one approved command.
 
-![Terminal demo of dsh-checkpoint-rewind: dsh-checkpoint-rewind — /rewind lists checkpoints, then a read-only preview](https://raw.githubusercontent.com/PerryLink/dsh-checkpoint-rewind/main/docs/assets/dsh-checkpoint-rewind-hero.png)
+![Workflow diagram for dsh-checkpoint-rewind: install → open panel → act.](docs/assets/dsh-checkpoint-rewind-flow.svg)
 
-![Animated terminal demo of dsh-checkpoint-rewind](https://raw.githubusercontent.com/PerryLink/dsh-checkpoint-rewind/main/docs/assets/dsh-checkpoint-rewind-demo.gif)
+*Workflow overview: install → open panel → act. The examples below use the real command surface.*
 
-*The same run, animated.*
+
 
 ## Comparison
 
@@ -166,6 +166,19 @@ Address a checkpoint by its **session number** (the bounded short number shown b
 - `/rewind list` (the detailed list) is unchanged: it still prints the 8-char id per line and its last line points at `/rewind list brief` for the numbers.
 
 `preview` resolves through the same addressing and prints the impact without asking for confirmation or writing anything. `--files` restores only the named files through the same approval-gated transaction (unknown paths fail closed; it is incompatible with `workspaceRestore: reset-hard` and disabled when `selectiveRestore: false`).
+
+### Examples
+
+These are the plugin's real entry points; install once, then call one.
+
+#### Detailed example
+
+- `/rewind`
+
+#### Brief examples
+
+- `/checkpoint`
+- `/rewind preview`
 
 ## Configuration
 

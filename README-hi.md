@@ -53,9 +53,10 @@ dsh plugin --profile <name> add dsh-checkpoint-rewind
 
 Claude Code Checkpoints का समतुल्य, क्षमता-सीम (capability-seam) प्लगइन के रूप में बनाया गया: हर बदलाव से पहले कैप्चर करें, एक अनुमोदित कमांड से तीनों अवस्थाओं में से किसी को भी बहाल करें।
 
-![dsh-checkpoint-rewind का टर्मिनल डेमो: dsh-checkpoint-rewind — /rewind lists checkpoints, then a read-only preview](https://raw.githubusercontent.com/PerryLink/dsh-checkpoint-rewind/main/docs/assets/dsh-checkpoint-rewind-hero.png)
+![dsh-checkpoint-rewind कार्यप्रवाह आरेख: इंस्टॉल → पैनल खोलें → कार्य।](docs/assets/dsh-checkpoint-rewind-flow.svg)
 
-![Animated terminal demo of dsh-checkpoint-rewind](https://raw.githubusercontent.com/PerryLink/dsh-checkpoint-rewind/main/docs/assets/dsh-checkpoint-rewind-demo.gif)
+*कार्यप्रवाह: इंस्टॉल → पैनल खोलें → कार्य। नीचे के उदाहरण वास्तविक कमांड सतह का उपयोग करते हैं।*
+
 
 *वही रन, एनिमेटेड।*
 
@@ -162,6 +163,19 @@ run "/rewind <id>" to restore files and fork the session from that checkpoint
 - `/rewind list` (विस्तृत सूची) अपरिवर्तित है: हर पंक्ति पर 8-अक्षर id छपता है और अंतिम पंक्ति नंबरों के लिए `/rewind list brief` की ओर इशारा करती है।
 
 `preview` उसी संबोधन से हल होता है और बिना पुष्टि माँगे या कुछ लिखे प्रभाव प्रिंट करता है।
+
+### उदाहरण
+
+ये वास्तविक प्रवेश बिंदु हैं; इंस्टॉल के बाद एक चलाएँ।
+
+#### विस्तृत उदाहरण
+
+- `/rewind`
+
+#### संक्षिप्त उदाहरण
+
+- `/checkpoint`
+- `/rewind preview`
 
 ## कॉन्फ़िगरेशन
 

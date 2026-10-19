@@ -47,9 +47,10 @@ dsh plugin --profile <name> add dsh-checkpoint-rewind
 
 Claude Code Checkpoints 的等价物，作为能力接缝（capability-seam）插件实现：每次变更前捕获，用一条经批准的命令恢复三种状态中的任意一个。
 
-![dsh-checkpoint-rewind 终端演示：dsh-checkpoint-rewind — /rewind lists checkpoints, then a read-only preview](https://raw.githubusercontent.com/PerryLink/dsh-checkpoint-rewind/main/docs/assets/dsh-checkpoint-rewind-hero.png)
+![dsh-checkpoint-rewind 工作流图：安装 → 打开面板 → 操作。](docs/assets/dsh-checkpoint-rewind-flow.svg)
 
-![Animated terminal demo of dsh-checkpoint-rewind](https://raw.githubusercontent.com/PerryLink/dsh-checkpoint-rewind/main/docs/assets/dsh-checkpoint-rewind-demo.gif)
+*工作流概览：安装 → 打开面板 → 操作。下面的示例使用实际命令面。*
+
 
 *同一次运行，动图版。*
 
@@ -164,6 +165,19 @@ run "/rewind <id>" to restore files and fork the session from that checkpoint
 - **tarball 渠道**：在本仓库执行 `npm pack`，然后 `dsh plugin --profile web add ./dsh-checkpoint-rewind-<version>.tgz`。
 - **存储栈**（检查点必需，挂载不必需）：`@deepseek-ai/dsh-storage` + `@deepseek-ai/dsh-storage-json`（配置 `root`）+ `@deepseek-ai/dsh-storage-domain`（配置 `backend: json`）——见快速开始；未组合时插件仍可挂载，每条命令都会说明修复方法。
 - **卸载**：`dsh plugin --profile web remove dsh-checkpoint-rewind` —— 快照文件保留，直到你删除 `$DSH_HOME/dsh-checkpoint-rewind`；git 对象会被垃圾回收。
+
+### 示例
+
+以下为插件真实入口；安装后调用一个即可。
+
+#### 详细示例
+
+- `/rewind`
+
+#### 简短示例
+
+- `/checkpoint`
+- `/rewind preview`
 
 ## 配置
 

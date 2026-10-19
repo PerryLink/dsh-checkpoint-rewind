@@ -45,9 +45,10 @@ Checkpoints unificados do DeepSeek Harness — instantâneos de três estados (s
 
 O equivalente aos Checkpoints do Claude Code, construído como plugin de costura de capacidade (capability-seam): capture antes de cada mutação, restaure qualquer um dos três estados com um único comando aprovado.
 
-![Demonstração de terminal do dsh-checkpoint-rewind: dsh-checkpoint-rewind — /rewind lists checkpoints, then a read-only preview](https://raw.githubusercontent.com/PerryLink/dsh-checkpoint-rewind/main/docs/assets/dsh-checkpoint-rewind-hero.png)
+![Diagrama de fluxo de dsh-checkpoint-rewind: instalar → abrir painel → agir.](docs/assets/dsh-checkpoint-rewind-flow.svg)
 
-![Animated terminal demo of dsh-checkpoint-rewind](https://raw.githubusercontent.com/PerryLink/dsh-checkpoint-rewind/main/docs/assets/dsh-checkpoint-rewind-demo.gif)
+*Visão geral do fluxo: instalar → abrir painel → agir. Os exemplos abaixo usam a superfície real de comandos.*
+
 
 *A mesma execução, animada.*
 
@@ -162,6 +163,19 @@ Enderece um checkpoint pelo **número da sessão** (o número curto e limitado m
 - **Canal tarball**: `npm pack` neste repo e depois `dsh plugin --profile web add ./dsh-checkpoint-rewind-<version>.tgz`.
 - **Pilha de armazenamento** (necessária para checkpoints, opcional para montar): `@deepseek-ai/dsh-storage` + `@deepseek-ai/dsh-storage-json` (config `root`) + `@deepseek-ai/dsh-storage-domain` (config `backend: json`) — veja Início rápido; o plugin monta mesmo sem ela e cada comando explica a correção.
 - **Desinstalar**: `dsh plugin --profile web remove dsh-checkpoint-rewind` — os arquivos de instantâneo permanecem até você excluir `$DSH_HOME/dsh-checkpoint-rewind`; os objetos git são coletados pelo garbage collector.
+
+### Exemplos
+
+São os pontos de entrada reais; instale e chame um.
+
+#### Exemplo detalhado
+
+- `/rewind`
+
+#### Exemplos breves
+
+- `/checkpoint`
+- `/rewind preview`
 
 ## Configuração
 
