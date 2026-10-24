@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.6.34] - 2026-10-24
+
+### Fixed
+
+- **Ignore dependabot's `zod` bump until the host packages move past 4.4.3.** The npm-minor-patch group pulled `zod@4.6.7`; with the host's `4.4.3` still present, the two `ZodType` identities made `tsc` fail with TS2589/TS2322 in `index.mjs` and `lib/domain.mjs`. The runtime dependency is already pinned to `4.4.3`; the dependabot ignore keeps the grouped PR from re-proposing it.
+
 ## [0.6.33] - 2026-10-19
 
 ### Fixed
