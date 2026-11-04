@@ -60,7 +60,12 @@
         "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-settings"
       ]
-    }
+    },
+    "capabilities": [
+      "fs:read",
+      "sessions:read"
+    ],
+    "labels": []
   },
   "dshWorkshop": {
     "schema": "omdsh-workshop-package/v1",
