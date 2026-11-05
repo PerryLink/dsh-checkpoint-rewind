@@ -1,185 +1,128 @@
 <div align="center">
 
-# ⏪ dsh-checkpoint-rewind
-- **1024 store channel**: `npm i -g dsh1024` once, then `dsh1024 plugin --profile web add dsh-checkpoint-rewind` (counts toward the [deepseek1024.com](https://deepseek1024.com) install ranking).
-[![Gitee](https://img.shields.io/badge/Gitee-mirror-c71d23?logo=gitee)](https://gitee.com/perrylink/dsh-checkpoint-rewind)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/dsh-checkpoint-rewind-flow-dark.svg">
+  <img src="docs/assets/dsh-checkpoint-rewind-flow-light.svg" width="100%" alt="dsh-checkpoint-rewind 流程：fs/write-intent、tools/pre-execute 触发捕获 → git/copy provider → checkpoints 存储域；/rewind → 确认门 → 守护检查点 → 工作区 / 配置 / SessionStore.fork">
+</picture>
+
+# dsh-checkpoint-rewind
+
+**把「回到第 N 步」变成一条命令——工作区、配置、会话三态检查点，经确认后一次回滚。**
+
+面向 DeepSeek Harness 的 rewind 能力接缝插件：每次变更前用无副作用的 git 原语捕获工作区，回退时先守护、再恢复文件、再恢复配置、最后 fork 会话——原会话历史一行不丢。
+
+[安装](#三步上手) · [配置](#配置) · [FAQ](#faq) · [简体中文](README.md) · [English](README.en.md) · [Español](README.es.md) · [Português](README.pt.md) · [हिन्दी](README.hi.md)
+
+[![License](https://img.shields.io/badge/license-Apache--2.0-3366CC?style=flat-square&labelColor=2B3245)](LICENSE)
+[![DSH](https://img.shields.io/badge/DSH-%E2%89%A50.2.1%20%3C0.3.0-4B67B4?style=flat-square&labelColor=2B3245)](#兼容性)
+[![npm](https://img.shields.io/npm/v/dsh-checkpoint-rewind?style=flat-square&labelColor=2B3245&color=CB3837)](https://www.npmjs.com/package/dsh-checkpoint-rewind)
+[![CI](https://img.shields.io/github/actions/workflow/status/PerryLink/dsh-checkpoint-rewind/ci.yml?branch=main&label=CI&style=flat-square&labelColor=2B3245)](https://github.com/PerryLink/dsh-checkpoint-rewind/actions/workflows/ci.yml)
+[![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-339933?style=flat-square&labelColor=2B3245)](#兼容性)
+
+[![Stars](https://img.shields.io/github/stars/PerryLink/dsh-checkpoint-rewind?style=flat-square&labelColor=2B3245)](https://github.com/PerryLink/dsh-checkpoint-rewind/stargazers)
+[![npm downloads](https://img.shields.io/npm/dm/dsh-checkpoint-rewind?style=flat-square&labelColor=2B3245&color=CB3837)](https://www.npmjs.com/package/dsh-checkpoint-rewind)
 [![dshfind](https://dshfind.com/api/badge/PerryLink/dsh-checkpoint-rewind?metric=downloads)](https://dshfind.com/plugins/PerryLink/dsh-checkpoint-rewind?ref=badge)
-[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/PerryLink/dsh-checkpoint-rewind/badge)](https://api.securityscorecards.dev/projects/github.com/PerryLink/dsh-checkpoint-rewind)
-
-**Unified DeepSeek Harness checkpoints — session + workspace + config three-state snapshots with one-shot rollback.**
-
-*The Claude Code Checkpoints equivalent, built as a capability-seam plugin: capture before every mutation, restore any of the three states with one approved command.*
-
-> **Official repository.** This is the only official repository of dsh-checkpoint-rewind, maintained by PerryLink. Same-name repositories under other accounts are not affiliated.
-
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![DSH plugin](https://img.shields.io/badge/dsh--plugin-✅-green)](https://github.com/topics/dsh-plugin)
-[![dsh-doctor](https://raw.githubusercontent.com/PerryLink/dsh-plugin-doctor/main/badges/PerryLink__dsh-checkpoint-rewind.svg)](https://github.com/PerryLink/dsh-plugin-doctor#verified-徽章)
-[![DSH Market](https://raw.githubusercontent.com/2BingLing/dsh-market/master/assets/readme/badge-listed-en.svg)](https://dsh.market/)
-[![Node](https://img.shields.io/badge/node-%5E22.19%20%7C%7C%20%3E%3D24-brightgreen.svg)](#)
-[![CI](https://img.shields.io/github/actions/workflow/status/PerryLink/dsh-checkpoint-rewind/ci.yml?branch=main&label=CI)](https://github.com/PerryLink/dsh-checkpoint-rewind/actions)
-[![Version](https://img.shields.io/github/v/tag/PerryLink/dsh-checkpoint-rewind?label=version)](https://github.com/PerryLink/dsh-checkpoint-rewind/releases)
-[![npm version](https://img.shields.io/npm/v/dsh-checkpoint-rewind)](https://www.npmjs.com/package/dsh-checkpoint-rewind)
-[![npm downloads](https://img.shields.io/npm/dm/dsh-checkpoint-rewind)](https://www.npmjs.com/package/dsh-checkpoint-rewind)
-
-[English](README.md) · [简体中文](README-zh.md) · [Español](README-es.md) · [Português](README-pt.md) · [हिन्दी](README-hi.md)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/PerryLink/dsh-checkpoint-rewind/badge)](https://securityscorecards.dev/viewer/?uri=github.com/PerryLink/dsh-checkpoint-rewind)
+[![DSH Market](https://img.shields.io/badge/DSH_Market-listed-4B67B4?style=flat-square&labelColor=2B3245)](https://dsh.market/)
+[![Gitee](https://img.shields.io/badge/Gitee-mirror-C71D23?style=flat-square&labelColor=2B3245&logo=gitee)](https://gitee.com/perrylink/dsh-checkpoint-rewind)
 
 ```sh
 dsh plugin --profile <name> add dsh-checkpoint-rewind
 ```
 
-
 </div>
 
----
+<sub>社区插件，与 DeepSeek 官方无关。唯一仓库：<https://github.com/PerryLink/dsh-checkpoint-rewind>（Gitee 为镜像）。</sub>
 
-**📖 Ecosystem knowledge base** — measured data, not marketing: [plugin development guide · plugin-selection data · maintenance criteria](https://perrylink.github.io/dsh-plugin-guide/).
+## 它是什么
 
-<!-- star-cta -->
-## Install & uninstall
+`dsh-checkpoint-rewind` 捕获一个**三态统一检查点**——工作区、会话游标与插件配置——并用一条经批准的命令恢复其中一个或全部。工作区快照优先走无副作用的 git 原语（`stash create` / `commit-tree`），非 git 目录（以及尚无 HEAD 的仓库）自动降级为带硬链接复用的增量 `copy` 快照。会话回退不截断原会话：它从检查点边界 fork 出一个新的子会话，原会话保留完整历史。变更工具执行前、自动间隔、手动 `/checkpoint` 以及每次回退前都会自动捕获；设置页还提供一条带逐行 diff 的检查点时间线。
 
-- **git channel** (latest `main`): `dsh plugin --profile web add github:PerryLink/dsh-checkpoint-rewind` — pure ESM, no `prepare` or `allowBuilds` step.
-- **npm channel** (published releases): `dsh plugin --profile web add dsh-checkpoint-rewind`.
-- **tarball channel**: `npm pack` in this repo, then `dsh plugin --profile web add ./dsh-checkpoint-rewind-<version>.tgz`.
-- **storage stack** (required for checkpoints, optional for mounting): `@deepseek-ai/dsh-storage` + `@deepseek-ai/dsh-storage-json` (config `root`) + `@deepseek-ai/dsh-storage-domain` (config `backend: json`) — see Quick start; the plugin still mounts without them and every command explains the fix.
-- **uninstall**: `dsh plugin --profile web remove dsh-checkpoint-rewind` — snapshot files stay until you delete `$DSH_HOME/dsh-checkpoint-rewind`; git objects are garbage-collected.
+## 三步上手
 
-## ⭐ 如果它帮到了你
+1. **安装**（三选一）：
 
-这个插件是 [DSH 插件家族](https://github.com/PerryLink)的一员（95 个，全部 Apache-2.0）。如果你在用，**给个 star** —— 它不会解锁任何功能，但会让下一个人在搜索里更容易找到它。
+   ```sh
+   # git 通道（最新 main；等价于 git+https://github.com/PerryLink/dsh-checkpoint-rewind.git）
+   dsh plugin --profile web add github:PerryLink/dsh-checkpoint-rewind
+   # npm 通道（已发布版本）
+   dsh plugin --profile web add dsh-checkpoint-rewind
+   # tarball 通道：本仓库 npm pack 后
+   dsh plugin --profile web add ./dsh-checkpoint-rewind-<version>.tgz
+   ```
 
-*English:* part of a 95 plugin family for DeepSeek Harness. If it is useful, **a star helps the next person find it** — nothing is gated behind it.
+   纯 ESM，无构建步骤——`index.mjs` 与 `lib/` 即发布产物。
 
+2. **最小配置**：组合存储栈（检查点持久化必需），并挂载插件行。未组合存储栈时插件照常挂载、绝不阻塞 profile 启动，只是 checkpoint/rewind 命令会返回结构化错误并指明要补的行：
 
-## What is dsh-checkpoint-rewind?
+   ```yaml
+   - insert:
+       - id: checkpoint-rewind-storage
+         name: '@deepseek-ai/dsh-storage'
+       - id: checkpoint-rewind-storage-json
+         name: '@deepseek-ai/dsh-storage-json'
+         config:
+           root: !!js dshHomePath('checkpoint-rewind/storage')
+       - id: checkpoint-rewind-storage-domain
+         name: '@deepseek-ai/dsh-storage-domain'
+         config:
+           backend: json
+       - id: checkpoint-rewind
+         name: dsh-checkpoint-rewind
+         config:
+           provider: auto
+           confirmVia: auto
+   ```
 
-Unified DeepSeek Harness checkpoints — session + workspace + config three-state snapshots with one-shot rollback.
+3. **验证已生效**：
 
-The Claude Code Checkpoints equivalent, built as a capability-seam plugin: capture before every mutation, restore any of the three states with one approved command.
+   ```sh
+   dsh --profile web --dump-config | grep -A4 'id: checkpoint-rewind'
+   ```
 
-![Workflow diagram for dsh-checkpoint-rewind: install → open panel → act.](docs/assets/dsh-checkpoint-rewind-flow.svg)
+   然后列出检查点；工作区变更会自动创建它们：
 
-*Workflow overview: install → open panel → act. The examples below use the real command surface.*
+   ```text
+   > /rewind list brief
+   rewind: 3 checkpoints (newest last):
+   #a1b2c3d4 · (git) · turn 2 step 1 · 2026-08-14 12:00:01 (3 min ago) · trigger: bash · 4 files · 1.2 MiB
+   #b2c3d4e5 · (git) · turn 2 step 3 · 2026-08-14 12:00:41 · trigger: str_replace_editor · 2 files · 310 KiB
+   #c3d4e5f6 · (copy) · turn 3 step 1 · 2026-08-14 12:01:10 · trigger: write · 1 file · 90 KiB
+   run "/rewind <id>" to restore files and fork the session from that checkpoint
+   ```
 
+**卸载**：`dsh plugin --profile web remove dsh-checkpoint-rewind`——快照文件保留，直到你删除 `$DSH_HOME/dsh-checkpoint-rewind`；git 对象会被垃圾回收。
 
+> 检查点通过 `storageDomain` 服务持久化。已组合该栈的 profile 开箱即用；bare profile 仍可挂载与手动捕获，但存储域打不开时命令会大声失败，绝不静默降级成「没有检查点」。
 
-## Comparison
+## 核心能力
 
-![Measured comparison chart for dsh-checkpoint-rewind](https://raw.githubusercontent.com/PerryLink/dsh-checkpoint-rewind/main/docs/assets/dsh-checkpoint-rewind-evidence.png)
+`dsh-checkpoint-rewind` 在每次变更前留下可回退的三态记录，并把恢复做成固定顺序的事务：
 
-Capabilities out of 2 (restores files? / rewinds the session?) · counted from the README comparison table
+1. **三态记录** —— 每个检查点保存工作区状态（git 树 SHA，或副本清单）、会话事件游标（`seq` + 轮次边界）与配置快照，并按来源标记（`manual` / `auto` / `guard` / `mutation`）。
+2. **四种捕获触发** —— 在每次变更工具执行前（`fs/write-intent`、`fs/edit-intent`、`tools/pre-execute`）、自动间隔（`autoCheckpoint`，默认每步）、手动（`/checkpoint` 与 `checkpoint` 工具）、以及每次回退前的守护检查点。
+3. **git 优先的 provider** —— `git stash create` / `commit-tree` 生成未引用快照对象，绝不触碰工作树、索引或历史；恢复仅限工作树且路径显式。非 git 目录（以及尚无 HEAD 的仓库）降级为带硬链接复用的增量 `copy` provider。
+4. **一键回滚** —— `/rewind workspace|session|config|all <target>` 恢复所选状态；`preview` 是只读影响报告，`diff <a> <b>` 比较两个检查点，`clear` 删除它们（本会话；`clear --all` 覆盖所有会话与工作区）。
+5. **fork 化会话回退** —— 会话回退通过官方 `SessionStore.fork` 原语把事件重放到检查点边界，生成新的子会话（宿主无 fork 或检查点无边界时回落到 `sessions.create` 种子路径）；原会话保留其完整历史。
+6. **设置页时间线** —— `Plugins → Checkpoints` 标签页渲染会话的检查点，并附带两两之间的逐行 diff（`diffRenderer`），支持逐文件选择恢复（`selectiveRestore`）。
 
-## Compatibility
+### 命令与工具面
 
-| Surface | Status |
-|---|---|
-| Harness | DeepSeek Harness `dsh-v0.2.1-alpha.1` (GitHub tag, verified 2026-09-25; npm pin `0.1.7-rc.2`, peers `>=0.1.6-0 <0.2.0 || >=0.1.7-0 <0.2.0`) (adapted 2026-10-04): the host removed `@deepseek-ai/dsh-settings-file` and replaced the `ctx.settings` namespace-registration surface with `SettingsForms`, which projects each Loader entry's `Config` into the Settings form and persists edits on the profile patch — plugin config fields are now declared `volatile()` and read live, strict typert codecs carry only their `create()` factory, and the rewind notice declares its own message-source `kind`. The legacy `settings.register` path is kept for `0.1.5-rc.2`/`0.1.6-alpha.2` hosts. Verified 2026-09-22 against the `dsh-v0.1.7-alpha.1` checkout (typecheck against the alpha.1 type surface + full unit suite + assembled-headless integration). |
-| Node | `^22.19.0 \|\| >=24.0.0` |
-| Platforms | All (host commands + listeners; optional Settings page timeline via the settings capability) |
-| Model | Any (no model calls — snapshots and restores are deterministic) |
+| 界面 | 类型 | 说明 |
+|---|---|---|
+| `/rewind` | 命令 | `[workspace\|session\|config\|all] <number\|id-prefix\|step <N>\|latest>` · `list [brief]` · `diff <a> <b>` · `preview <target>` · `clear [--all]` |
+| `/checkpoint` | 命令 | `[note <text>\|list\|diff <a> <b>]` —— 捕获手动检查点 |
+| `checkpoint` | 工具 | 捕获带可选备注的手动检查点 |
+| `fs/write-intent` · `fs/edit-intent` · `tools/pre-execute` | 监听器 | 变更前捕获（prepend 直通；绝不抢占策略槽） |
+| `session/event` | 监听器 | 轮次/步骤跟踪、自动间隔、边界补记、轮次结束清理 |
+| `checkpoints` 投影 | 会话投影 | 由会话日志折叠出的时间线条 |
+| 设置页时间线 | 客户端 | `Plugins → Checkpoints` 标签页，附两两 diff 与逐文件选择恢复 |
 
-## What you get
+### 示例
 
-`dsh-checkpoint-rewind` captures a **three-state unified checkpoint** — workspace, session cursor, and plugin config — and restores one or all three with a single approved command:
+以下为插件真实入口；安装后调用一个即可。
 
-1. **Three-state record** — every checkpoint stores the workspace state (git tree SHA, or a copy manifest), the session event cursor (`seq` + turn boundary), and a config snapshot, tagged by source (`manual` / `auto` / `guard` / `mutation`).
-2. **Four capture triggers** — before every mutating tool (`fs/write-intent`, `fs/edit-intent`, `tools/pre-execute`), on automatic interval (`autoCheckpoint`, default every step), manually (`/checkpoint` and the `checkpoint` tool), and as a guard before every rewind.
-3. **git-first provider** — `git stash create` / `commit-tree` produce unreferenced snapshot objects that never touch your worktree, index, or history; restore is worktree-only and path-explicit. Non-git directories (and unborn-HEAD repos) degrade to an incremental `copy` provider with hardlink reuse.
-4. **One-shot rollback** — `/rewind workspace|session|config|all <target>` restores the selected states; `preview` is a read-only impact report, `diff <a> <b>` compares two checkpoints, `clear` deletes them (this session; `clear --all` spans all sessions and workspaces).
-5. **Fork-based session rollback** — session rollback replays events up to the checkpoint boundary through the official `SessionStore.fork` primitive into a new child session (falling back to the seeded `sessions.create` path when the host has no fork or the checkpoint has no boundary); the original session keeps its full history.
-6. **Settings page timeline** — the `Plugins → Checkpoints` tab renders the session's checkpoints with pairwise line-level diffs.
-
-## Why another rewind plugin?
-
-| Plugin | What it sells | Restores files? | Rewinds the session? |
-|---|---|---|---|
-| **dsh-checkpoint-rewind** (this) | git-object snapshots + three-state rollback + one-shot restore | ✅ full workspace state | ✅ seed-replay child session |
-| [Anionex/dsh-turn-rewind](https://github.com/Anionex/dsh-turn-rewind) | persistent Change Ledger of per-mutation deltas | ✅ by replaying inverse deltas | ✅ its own ledger model |
-| [LingLambda/dsh-undo](https://github.com/LingLambda/dsh-undo) | pure context rollback to the last completed step | ❌ | ✅ context only |
-| [Mongfayi/dsh-recall](https://github.com/Mongfayi/dsh-recall) | message recall (remove a turn and everything after) | ❌ (explicitly) | ✅ turn removal |
-
-The difference in one sentence: **dsh-checkpoint-rewind captures the *workspace state* with side-effect-free git primitives before each mutation, and makes "back to step N" one approved command — guard checkpoint first, files restored second, config restored third, session replayed fourth, each phase logged.** No delta bookkeeping to drift, no message-level editing (that belongs to a different plugin), no cross-device sync.
-
-## Quick start
-
-```sh
-dsh plugin --profile web add github:PerryLink/dsh-checkpoint-rewind
-```
-
-```sh
-# 1. install the bundle into your profile
-dsh plugin --profile web add github:PerryLink/dsh-checkpoint-rewind
-
-# or from npm (published releases)
-dsh plugin --profile web add dsh-checkpoint-rewind
-
-# 2. restart and verify the row
-dsh --profile web --dump-config | grep -A4 'id: checkpoint-rewind'
-```
-
-Checkpoints persist through the `storageDomain` service. The plugin mounts without it and never blocks profile startup — checkpoint/rewind commands then return a structured error naming the exact rows to add. Compose the storage stack once to enable checkpoints:
-
-```yaml
-- insert:
-    - id: checkpoint-rewind-storage
-      name: '@deepseek-ai/dsh-storage'
-    - id: checkpoint-rewind-storage-json
-      name: '@deepseek-ai/dsh-storage-json'
-      config:
-        root: !!js dshHomePath('checkpoint-rewind/storage')
-    - id: checkpoint-rewind-storage-domain
-      name: '@deepseek-ai/dsh-storage-domain'
-      config:
-        backend: json
-```
-
-The package is pure ESM with no build step — `index.mjs` and `lib/` are the shipped artifacts. Workspace mutations now create checkpoints automatically; run `/rewind` to list them (or `/rewind list brief` for one-line entries carrying each checkpoint's session number):
-
-```text
-rewind: 3 checkpoints (newest last):
-#a1b2c3d4 · (git) · turn 2 step 1 · 2026-08-14 12:00:01 (3 min ago) · trigger: bash · 4 files · 1.2 MiB
-#b2c3d4e5 · (git) · turn 2 step 3 · 2026-08-14 12:00:41 · trigger: str_replace_editor · 2 files · 310 KiB
-#c3d4e5f6 · (copy) · turn 3 step 1 · 2026-08-14 12:01:10 · trigger: write · 1 file · 90 KiB
-run "/rewind <id>" to restore files and fork the session from that checkpoint
-```
-
-Address a checkpoint by its **session number** (the bounded short number shown by `/rewind list brief`), by unique id prefix, by step number, or by `latest`:
-
-```text
-/rewind list brief        # one line per checkpoint, numbered, newest first
-/rewind 3                 # the checkpoint numbered 3 in THIS session (exact hit, never a fuzzy match)
-/rewind preview 3         # read-only: show which files would change, touch nothing
-/rewind b2c3d4e5          # unique id prefix (the 8-char id in the list) works exactly as before
-/rewind step 2
-/rewind latest
-/rewind workspace 3 --files src/a.ts,src/b.ts   # selective restore: only these files (approval-gated)
-/rewind clear              # confirmed deletion of this session's checkpoints (files untouched)
-/rewind clear --all        # confirmed deletion across ALL sessions and workspaces (files untouched)
-```
-
-### Session numbers (bounded short ids)
-
-- **Every checkpoint gets a number when it is created**, starting at `1`. `/rewind 3` resolves that number **exactly** — digits are never treated as an id prefix, so `/rewind 3` can never land on the checkpoint whose UUID happens to start with `3`.
-- **Scope: per session** (`sessionId`). Each session numbers its own checkpoints; a number is unique inside its session, and `/rewind <number>` resolves against the checkpoints of the current session (and workspace) only.
-- **Monotonic and never reused.** Quota pruning (`maxSnapshots`) and `/rewind clear` / `/rewind clear --all` delete records but never free a number: after a clear the next checkpoint continues from the previous high-water mark (so after `#1 #2 #3` and a `clear`, the next one is `#4`, not `#1`). The number is stored on the record itself and the counter lives in the domain's global slot, so deleting records cannot reset it.
-- **Older checkpoints are numbered on first sight.** Records written before this feature (no number field) are numbered in creation order the first time the session is listed or rewound, and that numbering is persisted; brand-new checkpoints continue after it. Nothing is skipped or reassigned, and id-prefix addressing keeps working for them.
-- `/rewind list` (the detailed list) is unchanged: it still prints the 8-char id per line and its last line points at `/rewind list brief` for the numbers.
-
-`preview` resolves through the same addressing and prints the impact without asking for confirmation or writing anything. `--files` restores only the named files through the same approval-gated transaction (unknown paths fail closed; it is incompatible with `workspaceRestore: reset-hard` and disabled when `selectiveRestore: false`).
-
-### Examples
-
-These are the plugin's real entry points; install once, then call one.
-
-#### Detailed example
-
-**Command**
-
-~~~sh
-/rewind preview cp-9
-~~~
-
-**Output**
+**详细示例** —— 命令 `/rewind preview cp-9`，输出：
 
 ~~~text
 rewind preview: checkpoint #cp-9 (provider git, turn 2 step 3)
@@ -194,15 +137,7 @@ run "/rewind <id>" to confirm and apply (a guard checkpoint is captured first)
 
 *Observed from `test/checkpoints.test.mjs:289-301; lib/checkpoints.mjs:484-500`*
 
-#### Failure branch
-
-**Input**
-
-~~~text
-/rewind nope
-~~~
-
-**Output**
+**失败分支** —— 输入 `/rewind nope`，输出：
 
 ~~~text
 rewind: unknown checkpoint id "nope" (run /rewind to list)
@@ -210,75 +145,30 @@ rewind: unknown checkpoint id "nope" (run /rewind to list)
 
 *Observed from `plugins/dsh-checkpoint-rewind/lib/errors.mjs:72; plugins/dsh-checkpoint-rewind/index.mjs:1223; plugins/dsh-checkpoint-rewind/test/index.test.mjs:346-350`*
 
-#### Brief examples
+**简短示例**：`/checkpoint` · `/rewind preview`
 
-- `/checkpoint`
-- `/rewind preview`
+### 会话短号
 
-## Configuration
+- **每个检查点在创建时就分到一个短号**，从 `1` 开始。`/rewind 3` **精确**解析该短号——数字永远不会被当作 id 前缀，因此 `/rewind 3` 不可能落到某个恰好以 `3` 开头的 UUID 上。
+- **作用域：每会话**（`sessionId`）。每个会话各自编号，短号在其会话内唯一；`/rewind <短号>` 只在当前会话（与工作区）的检查点里解析。
+- **单调且永不复用。** 配额修剪（`maxSnapshots`）与 `/rewind clear` / `/rewind clear --all` 只删除记录、绝不释放短号：clear 之后的下一个检查点接着此前的水位继续（`#1 #2 #3` 之后 clear，下一个是 `#4` 而不是 `#1`）。短号写在记录本身，计数器存在存储域的 global 槽里，所以删记录不可能把它清零。
+- **旧检查点在首次触达时补号。** 本功能之前写入的记录（没有短号字段）会在该会话第一次被列出或回退时按创建序补号，并持久化；新检查点接在其后。既不跳号也不改号，id 前缀寻址照旧可用。
+- `/rewind list`（详细列表）保持不变：每行仍打印 8 位 id，并在最后一行指向 `/rewind list brief` 以查看短号。
 
-All tunables are Schemastery `Config` fields (changeable from cordis.yml). Nothing is hardcoded. Provider options (`gitBin`, `snapshotDir`, `excludeGlobs`, `verifyByHash`) are read from the live config at use time, so cordis.yml changes apply without a restart.
+`preview` 使用相同的定位方式解析并打印影响，不请求确认、不写入任何内容。`--files` 经同一套批准门只恢复指定文件（未知路径失败关闭；与 `workspaceRestore: reset-hard` 不兼容，且在 `selectiveRestore: false` 时禁用）。
 
-| Key | Default | Meaning |
-|---|---|---|
-| `enabled` | `true` | Master switch; `false` removes the commands, listeners, and providers entirely |
-| `provider` | `auto` | Snapshot provider: `auto` (git if available, else copy) · `git` · `copy` |
-| `gitBin` | `git` | Git executable path |
-| `snapshotDir` | `$DSH_HOME/dsh-checkpoint-rewind` (fallback `~/.dsh/dsh-checkpoint-rewind` when `$DSH_HOME` is unset) | Root for copy-provider snapshots |
-| `maxSnapshots` | `50` | Checkpoints kept per session (oldest pruned first) |
-| `maxSnapshotBytes` | `536870912` (512 MiB) | Global incremental-byte soft quota (newest per live session always retained) |
-| `pruneOnTurnEnd` | `true` | Run quota pruning when a turn ends |
-| `mutationTools` | `['bash','write','edit','str_replace_editor','pwsh','terminal_send']` | Tools treated as mutating at `tools/pre-execute` |
-| `excludeGlobs` | `['node_modules','.git','.dsh','dist','build']` | Glob patterns skipped by the copy provider |
-| `confirmVia` | `auto` | Confirmation channel: `auto` (userQuestions first) · `userQuestions` · `approval` |
-| `listLimit` | `10` | Checkpoints shown by bare `/rewind` |
-| `preRewindCheckpoint` | `warn` | Guard checkpoint before restore: `warn` · `require` · `off` |
-| `verifyByHash` | `false` | Copy-provider content-hash comparison and restore verification |
-| `autoCheckpoint.enabled` | `true` | Automatic interval snapshots on `step/start` |
-| `autoCheckpoint.intervalMinutes` | `0` | Interval; `0` = every step |
-| `workspaceRestore` | `restore` | Workspace rollback: `restore` (safe overwrite) · `reset-hard` (CC-style, opt-in) |
-| `diffRenderer` | `pairwise` | Settings-page diff renderer: `pairwise` (line-level text) · `side-by-side` (per-file two-column) |
-| `selectiveRestore` | `true` | Per-file selective restore (`/rewind … --files`) and the panel's per-file checkbox + size total |
-| `promptSection` | `true` | Inject a short role-statement prompt section |
-| `checkpointTool` | `true` | Register the `checkpoint` model tool |
+### 为什么还需要另一个 rewind 插件？
 
-```yaml
-- insert:
-    - id: checkpoint-rewind
-      name: dsh-checkpoint-rewind
-      config:
-        provider: auto
-        maxSnapshots: 50
-        maxSnapshotBytes: 536870912
-        pruneOnTurnEnd: true
-        confirmVia: auto
-        preRewindCheckpoint: warn
-```
+| 插件 | 卖点 | 恢复文件？ | 回退会话？ |
+|---|---|---|---|
+| **dsh-checkpoint-rewind**（本插件） | git 对象快照 + 三态回滚 + 一键恢复 | ✅ 完整工作区状态 | ✅ 种子重放子会话 |
+| [Anionex/dsh-turn-rewind](https://github.com/Anionex/dsh-turn-rewind) | 每变更增量的持久 Change Ledger | ✅ 通过重放逆增量 | ✅ 自有 ledger 模型 |
+| [LingLambda/dsh-undo](https://github.com/LingLambda/dsh-undo) | 纯上下文回退到上一步完成 | ❌ | ✅ 仅上下文 |
+| [Mongfayi/dsh-recall](https://github.com/Mongfayi/dsh-recall) | 消息撤回（移除某轮及其后所有内容） | ❌（明确） | ✅ 轮次移除 |
 
-## Tools & surfaces
+一句话区别：**dsh-checkpoint-rewind 在每次变更前用无副作用的 git 原语捕获*工作区状态*，并把「回到第 N 步」变成一条经批准的命令——先守护检查点，再恢复文件，再恢复配置，再重放会话，每一阶段都有日志。** 没有会漂移的增量记账，没有消息级编辑（那属于另一个插件），没有跨设备同步。
 
-| Surface | Kind | Notes |
-|---|---|---|
-| `/rewind` | command | `[workspace\|session\|config\|all] <number\|id-prefix\|step <N>\|latest>` · `list [brief]` · `diff <a> <b>` · `preview <target>` · `clear [--all]` |
-| `/checkpoint` | command | `[note <text>\|list\|diff <a> <b>]` — capture a manual checkpoint |
-| `checkpoint` | tool | Capture a manual checkpoint with an optional note |
-| `fs/write-intent` · `fs/edit-intent` · `tools/pre-execute` | listeners | Pre-mutation capture (prepend pass-through; never steals the policy slot) |
-| `session/event` | listener | Turn/step tracking, auto interval, boundary backfill, turn-end pruning |
-| `checkpoints` projection | session projection | Timeline strip folded from the session log |
-| Settings page timeline | client | `Plugins → Checkpoints` tab with pairwise (`diffRenderer`) diffs and per-file selective restore (`selectiveRestore`) |
-
-## Safety model
-
-- **Git history is untouchable.** The git provider runs only whitelisted side-effect-free primitives — `stash create`, `commit-tree`, `restore --worktree`, `ls-tree`, `diff-tree`, `ls-files`, `status`, `rev-parse`, `cat-file -e` — enforced by a runtime assertion, and object refs are validated as hex ids before being passed to git (a tampered record cannot inject git options). **No `reset --hard` by default, no `clean`, no index/history mutation, ever** (see `workspaceRestore` below).
-- **Overwrite rollback, never deletion.** Restore only overwrites captured files, and the git provider restores **explicit paths** (`git restore … -- .` would delete files `git add`-ed after the checkpoint). Files created after the checkpoint (untracked **or** staged) are *reported* and left in place.
-- **No writes through links, no path traversal.** The copy provider validates checkpoint refs before joining them into snapshot-directory paths, and refuses to restore through a destination (or ancestor) that has become a symbolic link — so a restore can never follow a link out of the workspace.
-- **Restore requires approval.** Overwriting user files always goes through the confirmation seam with `ask` semantics; a missing, throwing, or answering-no answerer **fails closed**. `/rewind preview` is the read-only way to inspect the impact first.
-- **Rewind is reversible.** Before restoring, a guard checkpoint captures the current state; restoring the guard undoes the rewind. `preRewindCheckpoint: require` aborts the rewind when the guard cannot be captured.
-- **Fixed-order transaction.** Guard first, workspace second, config third, session replay fourth; every phase is logged; a failed restore leaves files, checkpoints, and session untouched.
-- **`workspaceRestore: 'reset-hard'` is CC-equivalent and opt-in.** It runs `git reset --hard <snapshot commit>` (branch head moves to the snapshot commit; pre-snapshot history stays recoverable via reflog; untracked files untouched). It is off by default.
-- **Model-visible ⟺ logged.** Everything a user or model sees reconstructs from `command/run` + `command/done` (and, once the host knows them, `checkpoint/*` events) plus the durable `checkpoints` domain.
-
-## How it works
+### 工作原理
 
 ```text
 capture ── fs/write-intent · fs/edit-intent · tools/pre-execute (prepend, pass-through)
@@ -295,141 +185,285 @@ capture ── fs/write-intent · fs/edit-intent · tools/pre-execute (prepend, 
              └─ session:  SessionStore.fork(source, boundary) → new child session (original untouched)
 ```
 
-Full decision record, event vocabulary, and the provider seam contract: [ARCHITECTURE.md](ARCHITECTURE.md).
+完整决策记录、事件词汇表与 provider 接缝契约：[ARCHITECTURE.md](ARCHITECTURE.md)。
 
-## Session events (rc.2 note)
+### 会话事件（rc.2 说明）
 
-The plugin declares `checkpoint/snapshot`, `checkpoint/bound`, `checkpoint/prune`, and `checkpoint/rewind` as log-only `SessionEventMap` members. Harness rc.2 has **no plugin event-registration surface** and `Session.append` does not stamp the `ignorable` envelope (its third argument is surface intent, not options), so appending unknown types would make the session unreadable on reload. The plugin therefore appends through an **adaptive gate**: a runtime probe (on a detached, never-persisted session store) detects whether the host's `append` stamps the `ignorable` envelope — on rc.2 the gate stays closed; on hosts that support it, `checkpoint/*` events are appended with `ignorable: true` automatically. Until then the authoritative audit chain is `command/run` + `command/done` (harness-known) plus the durable `checkpoints` storage domain.
+该插件将 `checkpoint/snapshot`、`checkpoint/bound`、`checkpoint/prune` 与 `checkpoint/rewind` 声明为仅日志的 `SessionEventMap` 成员。Harness rc.2 **没有插件事件注册面**，且 `Session.append` 不会盖章 `ignorable` 信封（其第三个参数是 surface intent 而非选项），因此追加未知类型会让会话在重新加载时无法读取。该插件因此通过**自适应门**追加：运行时探测（在一个分离的、永不持久化的会话存储上）检测宿主的 `append` 是否会盖章 `ignorable` 信封——在 rc.2 上门保持关闭；在支持它的宿主上，`checkpoint/*` 事件会自动以 `ignorable: true` 追加。在那之前，权威审计链是 `command/run` + `command/done`（宿主已知）加上持久化的 `checkpoints` 存储领域。
 
-## Web UI anchor
+### Web UI 锚点
 
-The plugin returns the new session id in the command result (`session: <id>`) and the Web shell can navigate there. The **session-projection unit `checkpoints` is shipped**: whenever `ctx.sessionProjections` exists, the plugin registers the unit via `ctx.inject` (folds `checkpoint/snapshot|bound|prune|rewind` into a whole-value list) — it stays an empty list on rc.2 hosts until a harness build ships the `checkpoint/*` vocabulary or the `ignorable` envelope, then fills in with zero plugin changes.
+插件在命令结果中返回新会话 id（`session: <id>`），Web shell 可以跳转过去。**会话投影单元 `checkpoints` 已随附**：每当 `ctx.sessionProjections` 存在时，插件通过 `ctx.inject` 注册该单元（把 `checkpoint/snapshot|bound|prune|rewind` 折叠成整值列表）——在 rc.2 宿主上它保持空列表，直到某个 harness 版本随附 `checkpoint/*` 词汇表或 `ignorable` 信封，届时零插件改动即可填充。
+
+### 集成验证
+
+一次真实的组装式 headless 集成运行（`npm run test:integration`）驱动完整流程：代理在两个轮次中修改文件，然后 `/rewind preview` 以只读方式查看影响（无确认门、无写入），`/rewind <id>` 恢复文件并把会话重放进新的子会话。该运行断言文件内容、重放后的子上下文、保护检查点，以及检查点之后创建的文件得以保留——覆盖 copy 与 git 两种 provider 流程（git 流程还断言 `HEAD` 与 reflog 未被触碰）。驱动脚本位于 `test/integration/rewind-headless.mjs`。
+
+## 配置
+
+所有可调项都是 Schemastery `Config` 字段（可在 cordis.yml 中修改），没有任何硬编码。provider 选项（`gitBin`、`snapshotDir`、`excludeGlobs`、`verifyByHash`）在使用时从实时配置读取，cordis.yml 的改动无需重启即生效。按 id 覆盖会替换整行——请重述所有需要的键。
+
+最常用键：
+
+| 键 | 默认值 | 含义 |
+|---|---|---|
+| `enabled` | `true` | 总开关；为 `false` 时完全移除命令、监听器与 provider |
+| `provider` | `auto` | 快照 provider：`auto`（有 git 则 git，否则 copy）· `git` · `copy` |
+| `maxSnapshots` | `50` | 每个会话保留的检查点数（最旧优先清理） |
+| `maxSnapshotBytes` | `536870912`（512 MiB） | 全局增量字节软配额（每个存活会话的最新一条总是保留） |
+| `confirmVia` | `auto` | 确认通道：`auto`（优先 userQuestions）· `userQuestions` · `approval` |
+| `preRewindCheckpoint` | `warn` | 恢复前的守护检查点：`warn` · `require` · `off` |
+| `workspaceRestore` | `restore` | 工作区回滚：`restore`（安全覆盖）· `reset-hard`（CC 风格，需显式开启） |
+| `autoCheckpoint.enabled` | `true` | `step/start` 上的自动间隔快照 |
+
+<details>
+<summary>完整配置表（20 个键）</summary>
+
+| 键 | 默认值 | 含义 |
+|---|---|---|
+| `enabled` | `true` | 总开关；为 `false` 时完全移除命令、监听器与 provider |
+| `provider` | `auto` | 快照 provider：`auto`（有 git 则 git，否则 copy）· `git` · `copy` |
+| `gitBin` | `git` | Git 可执行文件路径 |
+| `snapshotDir` | `$DSH_HOME/dsh-checkpoint-rewind`（`$DSH_HOME` 未设置时回退 `~/.dsh/dsh-checkpoint-rewind`） | copy provider 快照根目录 |
+| `maxSnapshots` | `50` | 每个会话保留的检查点数（最旧优先清理） |
+| `maxSnapshotBytes` | `536870912`（512 MiB） | 全局增量字节软配额（每个存活会话的最新一条总是保留） |
+| `pruneOnTurnEnd` | `true` | 轮次结束时执行配额清理 |
+| `mutationTools` | `['bash','write','edit','str_replace_editor','pwsh','terminal_send']` | 在 `tools/pre-execute` 上视为变更型的工具 |
+| `excludeGlobs` | `['node_modules','.git','.dsh','dist','build']` | copy provider 跳过的 glob 模式 |
+| `confirmVia` | `auto` | 确认通道：`auto`（优先 userQuestions）· `userQuestions` · `approval` |
+| `listLimit` | `10` | 无参 `/rewind` 显示的检查点数 |
+| `preRewindCheckpoint` | `warn` | 恢复前的守护检查点：`warn` · `require` · `off` |
+| `verifyByHash` | `false` | copy provider 的内容哈希比对与恢复校验 |
+| `autoCheckpoint.enabled` | `true` | `step/start` 上的自动间隔快照 |
+| `autoCheckpoint.intervalMinutes` | `0` | 间隔；`0` = 每步 |
+| `workspaceRestore` | `restore` | 工作区回滚：`restore`（安全覆盖）· `reset-hard`（CC 风格，需显式开启） |
+| `diffRenderer` | `pairwise` | 设置页差异渲染器：`pairwise`（行级文本）· `side-by-side`（逐文件双栏） |
+| `selectiveRestore` | `true` | 逐文件选择性恢复（`/rewind … --files`）以及面板的逐文件复选框 + 大小合计 |
+| `promptSection` | `true` | 注入一句角色陈述式提示词段落 |
+| `checkpointTool` | `true` | 注册 `checkpoint` 模型工具 |
+
+</details>
+
+profile patch 覆盖示例：
+
+```yaml
+- insert:
+    - id: checkpoint-rewind
+      name: dsh-checkpoint-rewind
+      config:
+        provider: auto
+        maxSnapshots: 50
+        maxSnapshotBytes: 536870912
+        pruneOnTurnEnd: true
+        confirmVia: auto
+        preRewindCheckpoint: warn
+```
 
 ## FAQ
 
-**Does this replace git?** No — it *uses* git where available. In a git repo you get byte-perfect, deduplicated snapshot objects without touching history; in any other directory the copy provider does the same with plain files. Regular commits remain your long-term history.
+<details>
+<summary>这会不会取代 git？</summary>
 
-**Why not `git reset --hard` by default?** Because destroying state is not the job of a safety net. The plugin only creates unreferenced objects and performs worktree-only, path-explicit restores by default, so a bad rewind can never lose history, the index, or files created after the checkpoint. `reset-hard` is available behind `workspaceRestore: 'reset-hard'` for users who explicitly want CC parity.
+不会——在可用时会*使用* git。在 git 仓库中，你得到字节级精确、去重、不触碰历史的快照对象；在任何其他目录中，copy provider 用普通文件实现同样的效果。常规提交仍是你长期的历史。
 
-**How long is a checkpoint restorable?** No ref is held on git-provider snapshots. They're unreferenced `stash create`/`commit-tree` objects by design, and `discard` deletes only the record, leaving the object itself for `git gc`. Two independent things bound how long a checkpoint actually stays restorable: the plugin's own quota pruning (`maxSnapshots`, default 50 kept per session; `maxSnapshotBytes`, a default 512 MiB global soft quota enforced via `pruneAll()` on capture and swept on turn ends), and the host repo's git gc. With git's defaults, unreferenced objects survive until an auto-gc runs, and even then only objects older than `gc.pruneExpire` (2 weeks by default) get pruned. A manual `git gc --prune=now`, an aggressive repack, `filter-repo`, or a fresh clone can drop them immediately. Pruned objects are now detected up front: the git provider probes the snapshot object before restore (`git cat-file -e`) and fails loudly when it is missing instead of silently restoring nothing, and a doctor pass walks every checkpoint record to probe object existence and badge unrestorable ones (`[UNRESTORABLE: object missing]` in the list). The doctor pass is implemented and tested but not yet wired into the restore path (restore does not yet consult the `unrestorable` marking; tracked in discussion #13).
-
-**Can I rewind to a step in the middle of a turn?** File restoration is step-precise (`/rewind step <N>` = nearest snapshot ≤ N). The session replay, however, respects the harness's replay granularity: the child session is seeded up to the checkpoint's turn boundary.
-
-**What happens if nobody can answer the confirmation?** Nothing is touched — the plugin fails closed (`unavailable`/`rejected`), keeps the checkpoint, and returns an explanatory error. With `confirmVia: approval` on rc.2 the message says to mount userQuestions, because approval requires an open turn and commands run between turns.
-
-**Can I undo a rewind?** Yes — every approved rewind captures a guard checkpoint of the pre-rewind state first; the result prints `rewind guard: <id>`, and `/rewind <guard-id>` restores that state.
-
-**How do I address checkpoints?** The **session number** (`/rewind 3` — see `/rewind list brief`; per session, monotonic, never reused), the unique id prefix (the 8-char short id in the list still works), `/rewind step <N>`, and `/rewind latest`. `/rewind clear` deletes this session's checkpoints, and `/rewind clear --all` deletes checkpoints across all sessions and workspaces (files untouched) — neither one resets the numbering. `/rewind preview <target>` uses the same addressing to show the impact without changing anything.
-
-**Why does the number keep counting up after a clear?** Because a number is an address, not a position: reusing `#1` for a different checkpoint after a clear would silently repoint anything that mentioned `#1`. The counter is persisted in the `checkpoints` domain (global slot) and each record stores its own number, so pruning and clearing delete snapshots without recycling ids.
-
-**What does `preview` do — and not do?** It resolves the checkpoint, then runs a read-only comparison: which files would be overwritten (or recreated), which already match, and which files created after the checkpoint would be left in place. It never prompts, never writes, never forks, and records no `checkpoint/rewind` event — the approval gate only runs on a real `/rewind <id>`.
-
-## Demo
-
-A real assembled-headless integration run (`npm run test:integration`) drives the full flow: the agent modifies files across two turns, then `/rewind preview` inspects the impact read-only (no confirmation gate, no writes) and `/rewind <id>` restores the files and replays the session into a new child session. The run asserts the file contents, the replayed child context, the guard checkpoint, and that files created after the checkpoint survive — for both the copy and git provider flows (the git flow also asserts `HEAD` and the reflog are untouched). The driver lives in `test/integration/rewind-headless.mjs`.
-
-## Permissions & data
-
-- **Permissions**: the workshop manifest declares `workspace:read`, `workspace:write`, `git:read`, `git:write`, `snapshot-storage:write`, `session-log:read`, `settings:write`, and `network:none`.
-- **Data**: checkpoint records live in the `checkpoints` storage domain (SQLite rows or a JSON file); copy snapshots live under `snapshotDir`. The domain's **global slot** holds the per-session short-number counters, which is why deleting records (`prune`, `clear`, `clear --all`) can never recycle a number. Fully local — no network, no credentials. The domain is opened dual-version: 0.4.x-era media (domain v1) are opened in a compatibility mode that keeps old records readable and stores new captures in the v2 shape, so upgrading the plugin never orphans an existing medium.
-- **Session log**: `checkpoint/*` events are appended through the adaptive gate; the authoritative audit chain is `command/run` + `command/done` plus the durable domain.
-
-## Security boundaries
-
-- **Git history is untouchable.** Whitelisted side-effect-free primitives; `reset --hard` only behind the opt-in `workspaceRestore: 'reset-hard'` mode. No `git clean`, ever.
-- **Overwrite rollback, never deletion.** Restore overwrites captured files only; files created after the checkpoint are reported and left in place.
-- **No writes through links, no path traversal.** Copy `ref`s are validated as snapshot ids; restore refuses to follow symbolic links out of the workspace.
-- **Restore requires approval.** A missing or denying answerer fails closed.
-- **Rewind is reversible.** A guard checkpoint of the pre-rewind state is captured first.
-
-## Known limitations
-
-- On rc.2, `checkpoint/*` session events are suppressed by the adaptive gate; the audit chain rides `command/run` + `command/done` plus the storage domain until a host ships the vocabulary or the `ignorable` envelope.
-- `confirmVia: approval` needs an open turn, and commands run between turns — mount userQuestions (or set `confirmVia: userQuestions`) on rc.2.
-- Session rollback **forks a new child session** at the checkpoint boundary; it never rewrites or truncates the original session.
-- `workspaceRestore: 'reset-hard'` moves the branch head to the snapshot commit; it is off by default.
-- A checkpoint captured before any closed turn has no replay boundary — session rollback then creates a fresh child session with empty context.
-
-## Troubleshooting
-
-| Symptom | Cause / fix |
-|---|---|
-| `/rewind <id>` says `rewind cancelled: no confirmation answerer` | No userQuestions/approval channel is mounted — the plugin fails closed. Run in the Web UI (or mount a question provider); `confirmVia` selects the channel. |
-| `/rewind <id>` says `approval requires an open turn …` | Commands run between turns and approval needs a turn — mount userQuestions or set `confirmVia: userQuestions`. |
-| `rewind: checkpoint registry unavailable` | The `checkpoints` storage domain could not open. Either the `storageDomain` service is not composed (add the storage stack rows from Quick start: `@deepseek-ai/dsh-storage` + `@deepseek-ai/dsh-storage-json` with config `root` + `@deepseek-ai/dsh-storage-domain` with config `backend: json`) or the backend is erroring; check the harness logs. |
-| A checkpoint lists as `fork: pending (turn not closed)` | Its turn has no `turn/end` yet; files can still be restored, but the session replay waits for the turn to close. |
-| `files restored … but the session was NOT replayed` | The transaction's session phase failed (no closed boundary, or replay rejected). Files stay restored; use the printed `rewind guard: <id>` to undo. |
-| `rewind: aborted — the pre-rewind guard checkpoint could not be captured` | `preRewindCheckpoint: require` refused the rewind because the guard capture failed; fix the storage (or set `warn`/`off`). |
-| A checkpoint lists as `(copy)` even though the directory is a repo | Unborn HEAD (no initial commit): git snapshot primitives require HEAD, so the plugin degrades to `copy` until the first commit. |
-| `MISSING_CREDENTIAL` in headless runs | Unrelated to this plugin: no `DEEPSEEK_API_KEY` is configured for the model provider. |
-| Snapshot storage grows | Pruning runs after every snapshot and at `turn/end` (`pruneOnTurnEnd`); lower `maxSnapshots` / `maxSnapshotBytes`, run `/rewind clear`, or delete `$DSH_HOME/dsh-checkpoint-rewind` after uninstalling. |
-
-## Development
-
-```sh
-npm install               # peer deps: @deepseek-ai/dsh-session@0.1.2-rc.1, schemastery, zod
-npm test                  # node --test test/**/*.test.mjs (provider suites incl.)
-npm run test:integration  # assembled-headless verification (test/integration/)
-```
-
-No build step: pure ESM — `index.mjs`/`lib/` are the published artifacts.
-
-## Interoperability with other DSH plugins
-
-Verified against **DSH `0.2.0-rc.2`** (the runtime this README ships for) and the high-star plugin set surveyed on 2026-10-05.
-
-This plugin **does not interfere** with other plugins, including the widely installed high-star ones:
-
-- **No tool-name collision.** Every tool is namespaced; no bare name owned by a shipped tool or another plugin is registered.
-- **No service-key collision.** It provides no service key at all, so it cannot collide on one.
-- **No slot collision.** It registers no client slot key, so it cannot contend for a `shadows-shipped-ui` seat.
-- **No HTTP route collision.** It registers no `webServer` prefix.
-- **No patch-layer collision.** The bundle patch only `insert`s its own row; it never overrides a built-in row's `config`.
-- **No global mutation.** It does not patch prototypes, rewrite `process.env`, or replace the global fetch dispatcher.
-
-**Shared event listeners are non-interfering by construction.** It observes the ordering-sensitive events `fs/edit-intent`, `fs/write-intent`, `tools/pre-execute` with `ctx.on()` — Cordis's broadcast registration, where every listener runs and none can starve another. **Every listener here delegates through `next()`**, so the chain is never short-circuited, and a mutation is applied to the value `next()` produced rather than returned in its place:
-  - `tools/pre-execute` — also used by `cc-safety-net` (1576★).
-
-Static evidence: `dsh-plugin-doctor` K10–K13 report `pass` for every check on this repository.
-
-## Topics
-
-`deepseek-harness`, `dsh`, `dsh-plugin`, `rewind`, `checkpoint`, `snapshot`, `session-replay`, `session-fork`, `config-restore`, `workspace-safety`, `undo`, `cordis-plugin`
-
-## Contributors
-
-- [@mahirhir](https://github.com/mahirhir) — object-existence doctor probe (#16), liveConfig for snapshotDir/excludeGlobs/verifyByHash (#17), live-session prune scoping (#18), missing-snapshot quota cleanup (#19), dynamic copy-provider config (#20).
-
-- [@PerryLink](https://github.com/PerryLink) — creator and maintainer: the three-state checkpoint model, the git/copy provider seam, the three-phase rewind transaction, the Settings page timeline, docs, CI/CD and releases.
-- [@tmpdot](https://github.com/tmpdot) (rmUnlucky) — v1-medium dual-version compatibility (#8), lazy `storageDomain` resolution (#9), checkpoint dedup reply hints (#10), and the `$DSH_HOME`-unset snapshot-dir bug report (#4).
-- [@shipinliang](https://github.com/shipinliang) — checkpoint panel wire-contract reports: the missing `acceptsUndefined` on the `limit` parameter (#5) and the `#deps` private-field proxy failure (#6).
-- [@hwz1456](https://github.com/hwz1456) — web-profile checkpoint-capture report (#3).
-- [@Andiii208](https://github.com/Andiii208) — `plugin_check` publishing-spec report (#2).
-- [@alexchenzl](https://github.com/alexchenzl) (Ashu) — DSH Directory listing invitation (#7).
-
-## PerryLink DSH Plugin Family
-
-This project is part of the DeepSeek Harness plugin family from [PerryLink](https://github.com/PerryLink). The roster stays collapsed below so every README keeps a short first screen; expand it to see every row and its status.
+</details>
 
 <details>
-<summary>Expand all plugins</summary>
+<summary>为什么默认不使用 `git reset --hard`？</summary>
 
-| Plugin | Status |
+因为破坏状态不是安全网的工作。默认情况下，插件仅创建无引用的对象并执行仅针对工作区、明确指定路径的恢复，因此错误的后退永远不会丢失提交历史、暂存区或在检查点之后创建的文件。对于明确希望与 CC 保持一致的用户，可以在 `workspaceRestore: 'reset-hard'` 选项后使用 `reset-hard`。
+
+</details>
+
+<details>
+<summary>快照的可恢复窗口是多久？</summary>
+
+git-provider 快照不持有任何 ref。它们在设计上是未引用的 `stash create`/`commit-tree` 对象，`discard` 仅删除元数据记录，将底层对象留给 `git gc`。两个独立的机制决定快照实际可恢复的时长：插件自身的配额修剪（`maxSnapshots` 默认每会话保留 50 个；`maxSnapshotBytes` 默认 512 MiB 全局软配额，每次捕获时通过 `pruneAll()` 执行并在轮次结束时扫描清理），以及宿主仓库的 git gc。使用 git 默认配置时，未引用对象会存活至 auto-gc 触发，且仅删除早于 `gc.pruneExpire`（默认 2 周）的对象。手动的 `git gc --prune=now`、激进的 repack、`filter-repo` 或重新克隆会立即删除它们。现在会预先检测已修剪的对象：git provider 在恢复前先用 `git cat-file -e` 探测快照对象，对象缺失时显式失败而不是静默恢复为空；doctor pass 会遍历每条检查点记录探测对象存在性，并把不可恢复的条目标记出来（列表中显示 `[UNRESTORABLE: object missing]`）。doctor pass 已实现并有测试，但尚未接线到恢复路径（restore 尚不读取 `unrestorable` 标记；仍在 discussion #13 跟进）。
+
+</details>
+
+<details>
+<summary>我可以回滚到回合中间的某一步吗？</summary>
+
+文件恢复是精确到单步的（`/rewind step <N>` = ≤ N 的最近快照）。但是，会话重放遵循 Harness 的重放粒度：子会话将从检查点所在的回合边界开始重放。
+
+</details>
+
+<details>
+<summary>如果没人能回答确认会怎样？</summary>
+
+不触碰任何内容——插件失败关闭（`unavailable`/`rejected`），保留检查点，并返回解释性错误。在 rc.2 上使用 `confirmVia: approval` 时，消息会提示挂载 userQuestions，因为 approval 需要开放的轮次，而命令在轮次之间运行。
+
+</details>
+
+<details>
+<summary>能撤销一次回滚吗？</summary>
+
+能——每次经批准的回滚都会先捕获回滚前状态的守护检查点；结果会打印 `rewind guard: <id>`，`/rewind <guard-id>` 会恢复该状态。
+
+</details>
+
+<details>
+<summary>如何定位检查点？</summary>
+
+用**会话短号**（`/rewind 3`，见 `/rewind list brief`；每会话独立、单调、永不复用）、唯一 id 前缀（列表里的 8 位 id 仍然可用）、`/rewind step <N>`、`/rewind latest`。`/rewind clear` 删除本会话的检查点，`/rewind clear --all` 删除所有会话与工作区的检查点（文件不受影响）——两者都不会让编号复位。`/rewind preview <target>` 使用相同的定位方式来查看影响。
+
+</details>
+
+<details>
+<summary>为什么 clear 之后编号还继续往上走？</summary>
+
+因为短号是地址而不是位置：clear 之后把 `#1` 重新分配给另一个检查点，会让任何提到过 `#1` 的地方被静默改指。计数器持久在 `checkpoints` 存储域的 global 槽里，每条记录也各自记住自己的短号，因此修剪与清空只删快照、不回收 id。
+
+</details>
+
+<details>
+<summary>`preview` 做什么——又不做什么？</summary>
+
+它解析检查点，然后运行只读比较：哪些文件会被覆盖（或重建）、哪些已经一致、以及检查点之后创建的哪些文件会原样保留。它从不提示、从不写入、从不 fork，也不记录 `checkpoint/rewind` 事件——批准门只在真正的 `/rewind <id>` 上运行。
+
+</details>
+
+### 故障排查
+
+| 症状 | 原因 / 修复 |
+|---|---|
+| `/rewind <id>` 提示 `rewind cancelled: no confirmation answerer` | 没有挂载 userQuestions/approval 通道——插件失败关闭。请在 Web UI 中运行（或挂载一个提问 provider）；`confirmVia` 选择通道。 |
+| `/rewind <id>` 提示 `approval requires an open turn …` | 命令在轮次之间运行，而 approval 需要轮次——挂载 userQuestions 或设 `confirmVia: userQuestions`。 |
+| `rewind: checkpoint registry unavailable` | `checkpoints` 存储域无法打开。要么 `storageDomain` 服务未组合（按「三步上手」添加存储栈三行：`@deepseek-ai/dsh-storage` + `@deepseek-ai/dsh-storage-json`（配置 `root`）+ `@deepseek-ai/dsh-storage-domain`（配置 `backend: json`）），要么后端本身出错；检查 harness 日志。 |
+| 某检查点显示为 `fork: pending (turn not closed)` | 它的轮次还没有 `turn/end`；文件仍可恢复，但会话重放要等轮次关闭。 |
+| `files restored … but the session was NOT replayed` | 事务的会话阶段失败（没有已关闭边界，或重放被拒）。文件保持已恢复；用打印出的 `rewind guard: <id>` 撤销。 |
+| `rewind: aborted — the pre-rewind guard checkpoint could not be captured` | `preRewindCheckpoint: require` 因守护捕获失败而拒绝回滚；修复存储（或设 `warn`/`off`）。 |
+| 某检查点显示为 `(copy)`，尽管目录是仓库 | 尚无 HEAD（没有初始提交）：git 快照原语需要 HEAD，因此插件在首次提交前降级为 `copy`。 |
+| headless 运行中 `MISSING_CREDENTIAL` | 与本插件无关：模型 provider 未配置 `DEEPSEEK_API_KEY`。 |
+| 快照存储增长 | 每次快照后及 `turn/end`（`pruneOnTurnEnd`）都会清理；调低 `maxSnapshots` / `maxSnapshotBytes`、运行 `/rewind clear`，或卸载后删除 `$DSH_HOME/dsh-checkpoint-rewind`。 |
+
+## 安全边界
+
+- **Git 历史不可触碰。** git provider 只运行白名单内的无副作用原语——`stash create`、`commit-tree`、`restore --worktree`、`ls-tree`、`diff-tree`、`ls-files`、`status`、`rev-parse`、`cat-file -e`——由运行时断言强制，且对象引用在传给 git 前被校验为十六进制 id（被篡改的记录无法注入 git 选项）。**默认绝不 `reset --hard`、绝不 `clean`、绝不改写索引或历史**（见下文 `workspaceRestore`）。
+- **覆盖式回滚，绝不删除。** 恢复只覆盖已捕获的文件，且 git provider 恢复**显式路径**（`git restore … -- .` 会删除检查点之后 `git add` 过的文件）。检查点之后新建的文件（未跟踪**或**已暂存）会被*报告*并原样保留。
+- **不写穿链接、不路径穿越。** copy provider 在将检查点引用拼入快照目录路径前会校验它们，并拒绝通过已变为符号链接的目标（或其祖先）恢复——因此恢复永远不会跟随链接跑出工作区。
+- **恢复必须经批准。** 覆盖用户文件始终经过带 `ask` 语义的确认接缝；缺失、抛错或回答「否」的 answerer **失败关闭**。`/rewind preview` 是先行查看影响的只读方式。
+- **回滚可逆。** 恢复前会先捕获当前状态的守护检查点；恢复该守护检查点即可撤销本次回滚。当无法捕获守护检查点时，`preRewindCheckpoint: require` 会中止回滚。
+- **固定顺序事务。** 先守护、再工作区、再配置、再会话重放；每一阶段都有日志；恢复失败时文件、检查点与会话均保持原样。
+- **`workspaceRestore: 'reset-hard'` 等价于 CC，且需显式开启。** 它运行 `git reset --hard <snapshot commit>`（分支头移动到快照提交；快照前的历史仍可通过 reflog 恢复；未跟踪文件不受影响）。默认关闭。
+- **模型可见 ⟺ 落盘。** 用户或模型看到的一切都能从 `command/run` + `command/done`（以及宿主认识它们之后的 `checkpoint/*` 事件）加上持久化的 `checkpoints` 领域重建。
+- **失败要大声。** 非法配置在加载期抛错；领域打不开、恢复失败、fork 失败都返回结构化错误文本，绝不静默吞掉或截断。
+
+## 权限与数据
+
+- **权限**：workshop 清单声明 `workspace:read`、`workspace:write`、`git:read`、`git:write`、`snapshot-storage:write`、`session-log:read`、`settings:write` 与 `network:none`。
+- **数据**：检查点记录位于 `checkpoints` 存储域（SQLite 行或 JSON 文件）；copy 快照位于 `snapshotDir`。存储域的 **global 槽**保存每会话短号计数器，所以删除记录（`prune`、`clear`、`clear --all`）绝不会回收短号。完全本地——无网络、无凭据。存储域按双版本打开：0.4.x 时代的介质（域 v1）以兼容模式打开，旧记录保持可读、新捕获按 v2 形状落盘——升级插件永远不会遗弃既有介质。
+- **会话日志**：`checkpoint/*` 事件经自适应门追加；权威审计链是 `command/run` + `command/done` 加上持久化领域。
+
+## 已知限制
+
+- 在 rc.2 上，`checkpoint/*` 会话事件被自适应门抑制；在宿主随附该词汇表或 `ignorable` 信封之前，审计链由 `command/run` + `command/done` 加存储领域承担。
+- `confirmVia: approval` 需要开放的轮次，而命令在轮次之间运行——在 rc.2 上请挂载 userQuestions（或设 `confirmVia: userQuestions`）。
+- 会话回退会在检查点边界 **fork 出一个新的子会话**；它绝不改写或截断原会话。
+- `workspaceRestore: 'reset-hard'` 会把分支头移动到快照提交；默认关闭。
+- 在任何已关闭轮次之前捕获的检查点没有重放边界——此时会话回退会创建一个上下文为空的崭新子会话。
+
+## 与其他 DSH 插件的互操作性
+
+已对照 **DSH `0.2.0-rc.2`**（本 README 面向的运行时）与 2026-10-05 实测的高星插件集验证。
+
+本插件**不干扰**其他插件，包括广泛安装的高星插件：
+
+- **无工具名冲突。** 所有工具都带命名空间，不占用任何已被内置工具或其他插件持有的裸名。
+- **无服务键冲突。** 不提供任何服务键，因此不存在服务键冲突。
+- **无 slot 冲突。** 不注册客户端 slot key，因此不参与 `shadows-shipped-ui` 座位争抢。
+- **无 HTTP 路由冲突。** 不注册任何 `webServer` 前缀。
+- **无 patch 层冲突。** 组合包 patch 只 `insert` 自己那一行，从不覆写内置行的 `config`。
+- **无全局改写。** 不改原型、不改写 `process.env`、不替换全局 fetch dispatcher。
+
+**共享事件监听器在构造上就不互相干扰。** 它用 `ctx.on()` 监听顺序敏感事件 `fs/edit-intent`、`fs/write-intent`、`tools/pre-execute` —— Cordis 的**广播**语义：每个监听器都会运行，任何一个都无法饿死其他监听器。**此处每个监听器都通过 `next()` 委托**，因此链条绝不会被短路；改写作用在 `next()` 产出的值上，而不是用它顶替返回：
+
+- `tools/pre-execute` — also used by `cc-safety-net` (1576★).
+
+静态证据：`dsh-plugin-doctor` 的 K10–K13 在本仓全部为 `pass`。
+
+## 兼容性
+
+| 维度 | 状态 |
+|---|---|
+| Harness | DeepSeek Harness `dsh-v0.2.1-alpha.1`（GitHub tag，2026-09-25 已核验；npm 钉号 `0.1.7-rc.2`，peer 依赖范围 `>=0.1.6-0 <0.2.0 \|\| >=0.1.7-0 <0.2.0`）（2026-10-04 已适配）：宿主删除了 `@deepseek-ai/dsh-settings-file`，并把 `ctx.settings` 的命名空间注册面换成 `SettingsForms` —— 它把每个 Loader 条目的 `Config` 投影成设置页表单、编辑落到 profile patch；插件配置字段因此标为 `volatile()` 并按当前值读取，typert strict codec 只保留 `create()` 工厂，回退通知改用自己的消息来源 `kind`。`0.1.5-rc.2`/`0.1.6-alpha.2` 宿主仍走旧的 `settings.register` 路径。2026-09-22 已针对 `dsh-v0.1.7-alpha.1` 检出版核验（alpha.1 类型面 typecheck + 全量单测 + 组装式 headless 集成）。 |
+| Node | `^22.19.0 \|\| >=24.0.0` |
+| 平台 | 全部（宿主命令 + 监听器；通过 settings 能力提供可选设置页时间线） |
+| 模型 | 任意（不调用模型 —— 快照与恢复是确定性的） |
+
+## 生态与质量
+
+- [Gitee 镜像](https://gitee.com/perrylink/dsh-checkpoint-rewind)（同步镜像，以 GitHub 为准）
+- [dshfind 插件页](https://dshfind.com/plugins/PerryLink/dsh-checkpoint-rewind)（安装量与排名）
+- [OpenSSF Scorecard 报告](https://securityscorecards.dev/viewer/?uri=github.com/PerryLink/dsh-checkpoint-rewind)（由 [.github/workflows/scorecard.yml](.github/workflows/scorecard.yml) 驱动）
+- [dsh-plugin-doctor 验证报告](https://github.com/PerryLink/dsh-plugin-doctor#verified-徽章)（K10–K13 全 `pass`）
+- [DSH Market](https://dsh.market/)（已上架）
+- **1024 商店渠道**：先 `npm i -g dsh1024`，再 `dsh1024 plugin --profile web add dsh-checkpoint-rewind`（计入 [deepseek1024.com](https://deepseek1024.com) 安装排行）
+- [生态实测知识库](https://perrylink.github.io/dsh-plugin-guide/)：插件开发指南 · 选型实测数据 · 维护取舍判据
+
+## 开发
+
+```sh
+npm install                # node ^22.19 || >=24；peer 依赖钉 0.2.1-rc.2
+npm test                   # node --test test/**/*.test.mjs（含 provider 套件）
+npm run test:integration   # 组装式 headless 验证（test/integration/）
+npm run check:readmes      # 五语 README 一致性门
+npm run verify:self-contained  # 依赖 spec 均来自 registry
+npm run verify:artifacts   # 发布文件齐全 + index.mjs 可 import
+npm run lint               # oxlint
+```
+
+无构建步骤：纯 ESM——`index.mjs`/`lib/` 即发布产物。配图由 [`scripts/gen-readme-assets.py`](scripts/gen-readme-assets.py) 程序化生成（Python + Pillow，输出深浅两版流程图 SVG），可重复执行。
+
+<details>
+<summary>目录布局</summary>
+
+| 路径 | 作用 |
+|---|---|
+| `index.mjs` | 插件入口（唯一 host 面文件）：provider 注册、事件监听、`/rewind` 命令 |
+| `lib/` | 零 DSH 依赖的纯函数与 provider（`lib/providers/`）；`lib/domain.mjs` 是唯一允许 zod/DSH 包的模块 |
+| `client/` | 设置页时间线（浏览器半） |
+| `cordis.patch.yml` | bundle 声明：`insert` checkpoint-rewind 行 |
+| `test/` | 单测 + `test/integration/` 组装式集成验证 |
+| `docs/assets/` | README 配图（深浅双版 SVG） |
+| `scripts/` | 机械门禁 + README 配图生成脚本 |
+| `ARCHITECTURE.md` | 三角色 seam 架构图与全部设计决策 |
+
+</details>
+
+Topics：`deepseek-harness`, `dsh`, `dsh-plugin`, `rewind`, `checkpoint`, `snapshot`, `session-replay`, `session-fork`, `config-restore`, `workspace-safety`, `undo`, `cordis-plugin`
+
+## 家族与致谢
+
+本项目是 [PerryLink](https://github.com/PerryLink) 维护的 DeepSeek Harness 插件家族成员（全部 Apache-2.0）。如果这个插件帮到了你，**给个 star**——它不解锁任何功能，但会让下一个人更容易找到它。
+
+- [@mahirhir](https://github.com/mahirhir) —— 对象存在性 doctor 探测（#16）、`snapshotDir`/`excludeGlobs`/`verifyByHash` 的 liveConfig（#17）、存活会话的修剪作用域（#18）、缺失快照的配额清理（#19）、copy provider 动态配置（#20）。
+- [@PerryLink](https://github.com/PerryLink) —— 创建者与维护者：三态检查点模型、git/copy provider 接缝、三阶段回滚事务、设置页时间线、文档、CI/CD 与发布。
+- [@tmpdot](https://github.com/tmpdot)（rmUnlucky）—— v1 介质双版本兼容（#8）、惰性 `storageDomain` 解析（#9）、checkpoint 去重回复提示（#10），以及 `$DSH_HOME` 未设置时快照目录回退的 bug 报告（#4）。
+- [@shipinliang](https://github.com/shipinliang) —— checkpoint 面板 wire 契约报告：`limit` 参数缺失 `acceptsUndefined`（#5）与 `#deps` 私有字段代理失败（#6）。
+- [@hwz1456](https://github.com/hwz1456) —— web profile 检查点捕获报告（#3）。
+- [@Andiii208](https://github.com/Andiii208) —— `plugin_check` 发布规范报告（#2）。
+- [@alexchenzl](https://github.com/alexchenzl)（Ashu）—— DSH Directory 收录邀请（#7）。
+
+<details>
+<summary>展开全部插件</summary>
+
+| 插件 | 状态 |
 |---|---|
 | **[dsh-aqua-input-check](https://github.com/PerryLink/dsh-aqua-input-check)** |  |
 | **[dsh-archive-check](https://github.com/PerryLink/dsh-archive-check)** |  |
 | **[dsh-auto-review](https://github.com/PerryLink/dsh-auto-review)** |  |
-| **[dsh-autotier](https://github.com/PerryLink/dsh-autotier)** | 🧊 FROZEN — see the repo README |
+| **[dsh-autotier](https://github.com/PerryLink/dsh-autotier)** | 🧊 已冻结 — 见仓库 README |
 | **[dsh-bid-ca-precheck](https://github.com/PerryLink/dsh-bid-ca-precheck)** |  |
 | **[dsh-bid-qual-check](https://github.com/PerryLink/dsh-bid-qual-check)** |  |
-| **[dsh-cert-mcp](https://github.com/PerryLink/dsh-cert-mcp)** | 🧊 FROZEN — see the repo README |
+| **[dsh-cert-mcp](https://github.com/PerryLink/dsh-cert-mcp)** | 🧊 已冻结 — 见仓库 README |
 | **[dsh-checkpoint-rewind](https://github.com/PerryLink/dsh-checkpoint-rewind)** |  |
 | **[dsh-click](https://github.com/PerryLink/dsh-click)** |  |
 | **[dsh-composer-history](https://github.com/PerryLink/dsh-composer-history)** |  |
 | **[dsh-contract-stance](https://github.com/PerryLink/dsh-contract-stance)** |  |
 | **[dsh-customs-doc-check](https://github.com/PerryLink/dsh-customs-doc-check)** |  |
-| **[dsh-data-quality](https://github.com/PerryLink/dsh-data-quality)** |  |
+| **[dsh-data-quality](https://github.com/PerryLink/dsh-data-quality)** | 🧊 已冻结 — 见仓库 README |
 | **[dsh-demurrage-ledger](https://github.com/PerryLink/dsh-demurrage-ledger)** |  |
 | **[dsh-doublecheck](https://github.com/PerryLink/dsh-doublecheck)** |  |
 | **[dsh-drill-script-check](https://github.com/PerryLink/dsh-drill-script-check)** |  |
@@ -462,7 +496,7 @@ This project is part of the DeepSeek Harness plugin family from [PerryLink](http
 | **[dsh-mask](https://github.com/PerryLink/dsh-mask)** |  |
 | **[dsh-mcp-panel](https://github.com/PerryLink/dsh-mcp-panel)** |  |
 | **[dsh-medrec-qc](https://github.com/PerryLink/dsh-medrec-qc)** |  |
-| **[dsh-memento](https://github.com/PerryLink/dsh-memento)** |  |
+| **[dsh-memento](https://github.com/PerryLink/dsh-memento)** | 🧊 已冻结 — 见仓库 README |
 | **[dsh-nsfc-form-check](https://github.com/PerryLink/dsh-nsfc-form-check)** |  |
 | **[dsh-nurse-record-check](https://github.com/PerryLink/dsh-nurse-record-check)** |  |
 | **[dsh-observe](https://github.com/PerryLink/dsh-observe)** |  |
@@ -474,10 +508,10 @@ This project is part of the DeepSeek Harness plugin family from [PerryLink](http
 | **[dsh-permit-report-check](https://github.com/PerryLink/dsh-permit-report-check)** |  |
 | **[dsh-pipeline-check](https://github.com/PerryLink/dsh-pipeline-check)** |  |
 | **[dsh-pleading-draft](https://github.com/PerryLink/dsh-pleading-draft)** |  |
-| **[dsh-plugin-doctor](https://github.com/PerryLink/dsh-plugin-doctor)** |  |
+| **[dsh-plugin-doctor](https://github.com/PerryLink/dsh-plugin-doctor)** | 🚫 已退役（仓库已归档） |
 | **[dsh-plugin-guide](https://github.com/PerryLink/dsh-plugin-guide)** |  |
-| **[dsh-plugin-kit](https://github.com/PerryLink/dsh-plugin-kit)** |  |
-| **[dsh-plugin-upgrade](https://github.com/PerryLink/dsh-plugin-upgrade)** |  |
+| **[dsh-plugin-kit](https://github.com/PerryLink/dsh-plugin-kit)** | 🚫 已退役（仓库已归档） |
+| **[dsh-plugin-upgrade](https://github.com/PerryLink/dsh-plugin-upgrade)** | 🚫 已退役（仓库已归档） |
 | **[dsh-policy-brief-draft](https://github.com/PerryLink/dsh-policy-brief-draft)** |  |
 | **[dsh-power-loss-split](https://github.com/PerryLink/dsh-power-loss-split)** |  |
 | **[dsh-power-ticket-check](https://github.com/PerryLink/dsh-power-ticket-check)** |  |
@@ -489,7 +523,7 @@ This project is part of the DeepSeek Harness plugin family from [PerryLink](http
 | **[dsh-review-reply-check](https://github.com/PerryLink/dsh-review-reply-check)** |  |
 | **[dsh-rulefile-check](https://github.com/PerryLink/dsh-rulefile-check)** |  |
 | **[dsh-safety-brief-check](https://github.com/PerryLink/dsh-safety-brief-check)** |  |
-| **[dsh-score](https://github.com/PerryLink/dsh-score)** |  |
+| **[dsh-score](https://github.com/PerryLink/dsh-score)** | 🧊 已冻结 — 见仓库 README |
 | **[dsh-session-sync](https://github.com/PerryLink/dsh-session-sync)** |  |
 | **[dsh-site-log-check](https://github.com/PerryLink/dsh-site-log-check)** |  |
 | **[dsh-skill-pack-security](https://github.com/PerryLink/dsh-skill-pack-security)** |  |
@@ -501,20 +535,22 @@ This project is part of the DeepSeek Harness plugin family from [PerryLink](http
 | **[dsh-tender-extract](https://github.com/PerryLink/dsh-tender-extract)** |  |
 | **[dsh-tender-matrix](https://github.com/PerryLink/dsh-tender-matrix)** |  |
 | **[dsh-test-drive](https://github.com/PerryLink/dsh-test-drive)** |  |
-| **[dsh-ticktick](https://github.com/PerryLink/dsh-ticktick)** |  |
+| **[dsh-ticktick](https://github.com/PerryLink/dsh-ticktick)** | 🚫 已退役（仓库已归档） |
 | **[dsh-translate](https://github.com/PerryLink/dsh-translate)** |  |
 | **[dsh-warranty-calc](https://github.com/PerryLink/dsh-warranty-calc)** |  |
-| **[dsh-budget](https://github.com/PerryLink/dsh-budget)** | 🧊 FROZEN — see the repo README |
-| **[dsh-claude-move](https://github.com/PerryLink/dsh-claude-move)** | 🧊 FROZEN — see the repo README |
-| **[dsh-defend](https://github.com/PerryLink/dsh-defend)** | 🧊 FROZEN — see the repo README |
-| **[dsh-draw](https://github.com/PerryLink/dsh-draw)** | 🧊 FROZEN — see the repo README |
-| **[dsh-reach](https://github.com/PerryLink/dsh-reach)** | 🧊 FROZEN — see the repo README |
-| **[dsh-background-agents](https://github.com/PerryLink/dsh-background-agents)** | 🚫 RETIRED — see the repo README |
-| **[dsh-session-pin](https://github.com/PerryLink/dsh-session-pin)** | 🚫 RETIRED — see the repo README |
-| **[dsh-team-rooms](https://github.com/PerryLink/dsh-team-rooms)** | 🚫 RETIRED — see the repo README |
+| **[dsh-budget](https://github.com/PerryLink/dsh-budget)** | 🧊 已冻结 — 见仓库 README |
+| **[dsh-claude-move](https://github.com/PerryLink/dsh-claude-move)** | 🧊 已冻结 — 见仓库 README |
+| **[dsh-defend](https://github.com/PerryLink/dsh-defend)** | 🧊 已冻结 — 见仓库 README |
+| **[dsh-draw](https://github.com/PerryLink/dsh-draw)** | 🧊 已冻结 — 见仓库 README |
+| **[dsh-reach](https://github.com/PerryLink/dsh-reach)** | 🧊 已冻结 — 见仓库 README |
+| **[dsh-background-agents](https://github.com/PerryLink/dsh-background-agents)** | 🚫 已退役（仓库已归档） |
+| **[dsh-session-pin](https://github.com/PerryLink/dsh-session-pin)** | 🚫 已退役（仓库已归档） |
+| **[dsh-team-rooms](https://github.com/PerryLink/dsh-team-rooms)** | 🚫 已退役（仓库已归档） |
 
 </details>
 
 ## License
 
 [Apache License 2.0](LICENSE) © 2026 dsh-checkpoint-rewind contributors
+
+<p align="center"><sub>Apache-2.0 · 社区插件，与 DeepSeek 无关。</sub></p>
