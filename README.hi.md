@@ -1,8 +1,8 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/dsh-checkpoint-rewind-flow-dark.svg">
-  <img src="docs/assets/dsh-checkpoint-rewind-flow-light.svg" width="100%" alt="dsh-checkpoint-rewind प्रवाह: fs/write-intent और tools/pre-execute कैप्चर ट्रिगर करते हैं → git/copy provider → checkpoints डोमेन; /rewind → स्वीकृति → गार्ड चेकपॉइंट → वर्कस्पेस / कॉन्फ़िग / SessionStore.fork">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/dsh-checkpoint-rewind-hero-en-dark.webp">
+  <img src="docs/assets/dsh-checkpoint-rewind-hero-en-light.webp" width="100%" alt="dsh-checkpoint-rewind बैनर: किसी भी चरण पर वापस — वर्कस्पेस, कॉन्फ़िग और सत्र एक तीन-अवस्था चेकपॉइंट के रूप में; दाईं ओर सेटिंग्स का चेकपॉइंट टाइमलाइन: गार्ड / ऑटो / मैन्युअल पंक्तियाँ, तीन-अवस्था diff और /rewind कॉपी करने की क्रिया">
 </picture>
 
 # dsh-checkpoint-rewind
@@ -37,6 +37,11 @@ dsh plugin --profile <name> add dsh-checkpoint-rewind
 ## यह क्या है
 
 `dsh-checkpoint-rewind` एक **तीन-अवस्था एकीकृत चेकपॉइंट** कैप्चर करता है — वर्कस्पेस, सत्र कर्सर और प्लगइन कॉन्फ़िग — और एक स्वीकृत कमांड से इनमें से एक या तीनों बहाल करता है। वर्कस्पेस स्नैपशॉट पहले बिना दुष्प्रभाव वाले git primitives (`stash create` / `commit-tree`) पर जाते हैं; गैर-git डायरेक्टरी (और जिन रेपो में HEAD पैदा नहीं हुआ) hardlink पुन:उपयोग वाले इंक्रीमेंटल `copy` स्नैपशॉट पर उतर आते हैं। सत्र वापसी मूल सत्र को कभी नहीं काटती: यह चेकपॉइंट सीमा पर एक नया चाइल्ड सत्र fork करती है, और मूल इतिहास ज्यों का त्यों रहता है। हर बदलाव वाली टूल से पहले, स्वचालित अंतराल पर, मैन्युअल `/checkpoint` से, और हर rewind से पहले गार्ड के रूप में कैप्चर होता है; सेटिंग्स पेज में pairwise line-level diff वाली चेकपॉइंट टाइमलाइन भी है।
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/dsh-checkpoint-rewind-flow-v5-dark.svg">
+  <img src="docs/assets/dsh-checkpoint-rewind-flow-v5-light.svg" width="100%" alt="संरचना: हर बदलाव से पहले कैप्चर → प्रति-चरण डिडुप → git / copy प्रोवाइडर एक checkpoints रिकॉर्ड में मिलते हैं → /rewind → पुष्टि → गार्ड चेकपॉइंट → वर्कस्पेस, कॉन्फ़िग और सत्र की बहाली (सत्र अंत में fork)">
+</picture>
 
 ## तीन चरणों में शुरुआत
 
@@ -426,7 +431,7 @@ npm run lint               # oxlint
 | `client/` | सेटिंग्स पेज टाइमलाइन (ब्राउज़र आधा) |
 | `cordis.patch.yml` | bundle घोषणा: checkpoint-rewind पंक्ति `insert` |
 | `test/` | यूनिट परीक्षण + `test/integration/` assembled-headless सत्यापन |
-| `docs/assets/` | README चित्र (light/dark SVG जोड़ी) |
+| `docs/assets/` | README चित्र (hero बैनर + light/dark संरचना आरेख) |
 | `scripts/` | यांत्रिक गेट + README asset जनरेटर |
 | `ARCHITECTURE.md` | तीन-भूमिका seam आर्किटेक्चर और पूरा निर्णय रिकॉर्ड |
 

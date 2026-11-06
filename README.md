@@ -1,8 +1,8 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/dsh-checkpoint-rewind-flow-dark.svg">
-  <img src="docs/assets/dsh-checkpoint-rewind-flow-light.svg" width="100%" alt="dsh-checkpoint-rewind 流程：fs/write-intent、tools/pre-execute 触发捕获 → git/copy provider → checkpoints 存储域；/rewind → 确认门 → 守护检查点 → 工作区 / 配置 / SessionStore.fork">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/dsh-checkpoint-rewind-hero-zh-dark.webp">
+  <img src="docs/assets/dsh-checkpoint-rewind-hero-zh-light.webp" width="100%" alt="dsh-checkpoint-rewind 横幅：回到任意一步——工作区、配置、会话三态检查点，一条经批准的命令回退；右侧是设置页的检查点时间线：保护 / 自动 / 手动三行、三态对比与复制 /rewind 入口">
 </picture>
 
 # dsh-checkpoint-rewind
@@ -37,6 +37,11 @@ dsh plugin --profile <name> add dsh-checkpoint-rewind
 ## 它是什么
 
 `dsh-checkpoint-rewind` 捕获一个**三态统一检查点**——工作区、会话游标与插件配置——并用一条经批准的命令恢复其中一个或全部。工作区快照优先走无副作用的 git 原语（`stash create` / `commit-tree`），非 git 目录（以及尚无 HEAD 的仓库）自动降级为带硬链接复用的增量 `copy` 快照。会话回退不截断原会话：它从检查点边界 fork 出一个新的子会话，原会话保留完整历史。变更工具执行前、自动间隔、手动 `/checkpoint` 以及每次回退前都会自动捕获；设置页还提供一条带逐行 diff 的检查点时间线。
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/dsh-checkpoint-rewind-flow-v5-dark.svg">
+  <img src="docs/assets/dsh-checkpoint-rewind-flow-v5-light.svg" width="100%" alt="结构图：变更前触发 → 单步去重 → git / copy 双 provider 汇入一条 checkpoints 记录 → /rewind → 确认门 → 守护检查点 → 工作区、配置、会话三段恢复（末尾 fork 子会话）">
+</picture>
 
 ## 三步上手
 
@@ -426,7 +431,7 @@ npm run lint               # oxlint
 | `client/` | 设置页时间线（浏览器半） |
 | `cordis.patch.yml` | bundle 声明：`insert` checkpoint-rewind 行 |
 | `test/` | 单测 + `test/integration/` 组装式集成验证 |
-| `docs/assets/` | README 配图（深浅双版 SVG） |
+| `docs/assets/` | README 配图（hero 横幅 + 深浅双版结构图） |
 | `scripts/` | 机械门禁 + README 配图生成脚本 |
 | `ARCHITECTURE.md` | 三角色 seam 架构图与全部设计决策 |
 

@@ -1,8 +1,8 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/dsh-checkpoint-rewind-flow-dark.svg">
-  <img src="docs/assets/dsh-checkpoint-rewind-flow-light.svg" width="100%" alt="dsh-checkpoint-rewind flow: fs/write-intent and tools/pre-execute trigger capture → git/copy provider → checkpoints domain; /rewind → approval → guard checkpoint → workspace / config / SessionStore.fork">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/dsh-checkpoint-rewind-hero-en-dark.webp">
+  <img src="docs/assets/dsh-checkpoint-rewind-hero-en-light.webp" width="100%" alt="dsh-checkpoint-rewind banner: rewind a step — workspace, config, and session as one three-state checkpoint; on the right, the Settings checkpoint timeline with guard / auto / manual rows, a three-state diff, and the copy /rewind action">
 </picture>
 
 # dsh-checkpoint-rewind
@@ -37,6 +37,11 @@ dsh plugin --profile <name> add dsh-checkpoint-rewind
 ## What it is
 
 `dsh-checkpoint-rewind` captures a **three-state unified checkpoint** — workspace, session cursor, and plugin config — and restores one or all three with a single approved command. Workspace snapshots prefer side-effect-free git primitives (`stash create` / `commit-tree`); non-git directories (and repos with an unborn HEAD) degrade to incremental `copy` snapshots with hardlink reuse. Session rollback never truncates the original session: it forks a new child session at the checkpoint boundary, leaving the original history intact. Checkpoints are captured before mutating tools, on an automatic interval, manually via `/checkpoint`, and as a guard before every rewind; the Settings page adds a checkpoint timeline with pairwise line-level diffs.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/dsh-checkpoint-rewind-flow-v5-dark.svg">
+  <img src="docs/assets/dsh-checkpoint-rewind-flow-v5-light.svg" width="100%" alt="Structure: capture before each mutation → per-step dedup → git / copy providers converge into one checkpoints record → /rewind → confirm → guard checkpoint → workspace, config, and session restore (session forked last)">
+</picture>
 
 ## Three-step setup
 
@@ -426,7 +431,7 @@ No build step: pure ESM — `index.mjs`/`lib/` are the published artifacts. The 
 | `client/` | Settings-page timeline (browser half) |
 | `cordis.patch.yml` | Bundle declaration: `insert` the checkpoint-rewind row |
 | `test/` | Unit tests + `test/integration/` assembled-headless verification |
-| `docs/assets/` | README images (light/dark SVG pair) |
+| `docs/assets/` | README images (hero banner + light/dark structure diagram) |
 | `scripts/` | Mechanical gates + the README asset generator |
 | `ARCHITECTURE.md` | Three-role seam architecture and the full decision record |
 

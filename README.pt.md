@@ -1,8 +1,8 @@
 <div align="center">
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/dsh-checkpoint-rewind-flow-dark.svg">
-  <img src="docs/assets/dsh-checkpoint-rewind-flow-light.svg" width="100%" alt="Fluxo do dsh-checkpoint-rewind: fs/write-intent e tools/pre-execute disparam a captura → provedor git/copy → domínio checkpoints; /rewind → aprovação → checkpoint guardião → espaço de trabalho / configuração / SessionStore.fork">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/dsh-checkpoint-rewind-hero-en-dark.webp">
+  <img src="docs/assets/dsh-checkpoint-rewind-hero-en-light.webp" width="100%" alt="Banner do dsh-checkpoint-rewind: voltar a qualquer passo — espaço de trabalho, configuração e sessão como um checkpoint de três estados; à direita, a linha do tempo de Checkpoints com linhas guardião / automático / manual, um diff de três estados e a ação copiar /rewind">
 </picture>
 
 # dsh-checkpoint-rewind
@@ -37,6 +37,11 @@ dsh plugin --profile <name> add dsh-checkpoint-rewind
 ## O que é
 
 O `dsh-checkpoint-rewind` captura um **checkpoint unificado de três estados** — espaço de trabalho, cursor de sessão e configuração do plugin — e restaura um ou os três com um único comando aprovado. As instantâneas do espaço de trabalho preferem primitivas git sem efeitos colaterais (`stash create` / `commit-tree`); diretórios que não são repositórios git (e repositórios com HEAD não nascido) degradam para instantâneas `copy` incrementais com reutilização por hardlinks. A reversão de sessão nunca trunca a sessão original: ela bifurca uma sessão filha nova no limite do checkpoint, deixando o histórico original intacto. A captura acontece antes das ferramentas mutantes, em intervalo automático, manualmente via `/checkpoint` e como guardião antes de cada reversão; a página de configuração adiciona uma linha do tempo de checkpoints com diffs linha a linha aos pares.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/dsh-checkpoint-rewind-flow-v5-dark.svg">
+  <img src="docs/assets/dsh-checkpoint-rewind-flow-v5-light.svg" width="100%" alt="Estrutura: captura antes de cada mutação → deduplicação por passo → os provedores git / copy convergem em um único registro checkpoints → /rewind → confirmação → checkpoint guardião → restauração de espaço de trabalho, configuração e sessão (sessão bifurcada por último)">
+</picture>
 
 ## Instalação em três passos
 
@@ -426,7 +431,7 @@ Sem etapa de build: ESM puro — `index.mjs`/`lib/` são os artefatos publicados
 | `client/` | Linha do tempo da página de configuração (metade do navegador) |
 | `cordis.patch.yml` | Declaração do bundle: `insert` da linha checkpoint-rewind |
 | `test/` | Testes unitários + verificação headless montada em `test/integration/` |
-| `docs/assets/` | Imagens do README (par de SVG claro/escuro) |
+| `docs/assets/` | Imagens do README (banner hero + diagrama de estrutura claro/escuro) |
 | `scripts/` | Portas mecânicas + o gerador de assets do README |
 | `ARCHITECTURE.md` | Arquitetura de costuras de três papéis e o registro completo de decisões |
 

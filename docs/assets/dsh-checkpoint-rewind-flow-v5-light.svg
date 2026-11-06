@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="660" viewBox="0 0 1100 660" role="img" aria-label="dsh-checkpoint-rewind pipeline: git and copy snapshot channels converge into one checkpoints record, then a confirmed, guarded three-step restore">
+<title>dsh-checkpoint-rewind — two snapshot channels, one record, a guarded three-step restore</title>
+<defs>
+<linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f9f6fd"/><stop offset="1" stop-color="#e4eaf8"/></linearGradient>
+<filter id="soft" x="-25%" y="-25%" width="150%" height="150%"><feDropShadow dx="0" dy="5" stdDeviation="8" flood-color="#202a48" flood-opacity="0.10"/></filter>
+</defs>
+<rect width="1100" height="660" rx="18" fill="url(#bg)"/>
+<text x="44" y="58" font-family="Segoe UI, Microsoft YaHei, Noto Sans, sans-serif" font-size="27" font-weight="700" fill="#1c2338" text-anchor="start">dsh-checkpoint-rewind</text>
+<text x="44" y="85" font-family="Consolas, ui-monospace, SFMono-Regular, monospace" font-size="15" fill="#5b6684" text-anchor="start">two snapshot channels → one checkpoint record → guarded three-state restore</text>
+<line x1="44" y1="102" x2="1056" y2="102" stroke="#d7dcec" stroke-width="1"/>
+<text x="44" y="128" font-family="Segoe UI, Microsoft YaHei, Noto Sans, sans-serif" font-size="14" font-weight="700" letter-spacing="1.8" fill="#4B67B4" text-anchor="start">CAPTURE</text>
+<text x="128" y="128" font-family="Segoe UI, Microsoft YaHei, Noto Sans, sans-serif" font-size="14" fill="#5b6684" text-anchor="start">before every mutation · prepend → next() · resolve(auto)</text>
+<rect x="44" y="142" width="216" height="190" rx="14" fill="#ffffff" stroke="#d7dcec" stroke-width="1.2" filter="url(#soft)"/>
+<rect x="58" y="148" width="188" height="30" rx="15.0" fill="#f1f4fc" stroke="#dbe1f0" stroke-width="1"/>
+<text x="72" y="168" font-family="Consolas, ui-monospace, SFMono-Regular, monospace" font-size="14" fill="#1c2338" text-anchor="start">fs/write-intent</text>
+<rect x="58" y="185" width="188" height="30" rx="15.0" fill="#f1f4fc" stroke="#dbe1f0" stroke-width="1"/>
+<text x="72" y="205" font-family="Consolas, ui-monospace, SFMono-Regular, monospace" font-size="14" fill="#1c2338" text-anchor="start">fs/edit-intent</text>
+<rect x="58" y="222" width="188" height="30" rx="15.0" fill="#f1f4fc" stroke="#dbe1f0" stroke-width="1"/>
+<text x="72" y="242" font-family="Consolas, ui-monospace, SFMono-Regular, monospace" font-size="14" fill="#1c2338" text-anchor="start">tools/pre-execute</text>
+<rect x="58" y="259" width="188" height="30" rx="15.0" fill="#f1f4fc" stroke="#dbe1f0" stroke-width="1"/>
+<text x="72" y="279" font-family="Consolas, ui-monospace, SFMono-Regular, monospace" font-size="14" fill="#1c2338" text-anchor="start">step/start (auto)</text>
+<rect x="58" y="296" width="188" height="30" rx="15.0" fill="#f1f4fc" stroke="#dbe1f0" stroke-width="1"/>
+<text x="72" y="316" font-family="Consolas, ui-monospace, SFMono-Regular, monospace" font-size="14" fill="#1c2338" text-anchor="start">/checkpoint · tool</text>
+<path d="M246 163H266V311" stroke="#7a849f" stroke-width="1.6" fill="none"/>
+<path d="M246 200H266M246 237H266M246 274H266M246 311H266" stroke="#7a849f" stroke-width="1.6"/>
+<path d="M266 237L275.5 237.0" stroke="#4B67B4" stroke-width="1.8" stroke-linecap="round" fill="none"/>
+<path d="M284.0 237.0L275.9 240.8L275.9 233.2Z" fill="#4B67B4"/>
+<rect x="284" y="142" width="232" height="190" rx="14" fill="#ffffff" stroke="#d7dcec" stroke-width="1.2" filter="url(#soft)"/>
+<text x="300" y="173" font-family="Segoe UI, Microsoft YaHei, Noto Sans, sans-serif" font-size="18" font-weight="700" fill="#1c2338" text-anchor="start">capture @ step</text>
+<text x="300" y="205" font-family="Segoe UI, Microsoft YaHei, Noto Sans, sans-serif" font-size="14" fill="#5b6684" text-anchor="start">one per (session, turn, step)</text>
+<text x="300" y="229" font-family="Segoe UI, Microsoft YaHei, Noto Sans, sans-serif" font-size="14" fill="#5b6684" text-anchor="start">shared in-flight promise</text>
+<text x="300" y="253" font-family="Segoe UI, Microsoft YaHei, Noto Sans, sans-serif" font-size="14" fill="#5b6684" text-anchor="start">content dedup → null</text>
+<line x1="300" y1="269" x2="500" y2="269" stroke="#e1e6f3" stroke-width="1"/>
+<text x="300" y="293" font-family="Consolas, ui-monospace, SFMono-Regular, monospace" font-size="14" fill="#7a849f" text-anchor="start">prepend → next()</text>
+<text x="300" y="317" font-family="Consolas, ui-monospace, SFMono-Regular, monospace" font-size="14" fill="#7a849f" text-anchor="start">provider owns dedup</text>
+<rect x="540" y="142" width="272" height="90" rx="14" fill="#ffffff" stroke="#d7dcec" stroke-width="1.2" filter="url(#soft)"/>
+<rect x="540" y="242" width="272" height="90" rx="14" fill="#ffffff" stroke="#d7dcec" stroke-width="1.2" filter="url(#soft)"/>
+<text x="556" y="169" font-family="Segoe UI, Microsoft YaHei, Noto Sans, sans-serif" font-size="17" font-weight="700" fill="#1c2338" text-anchor="start">git provider</text>
+<text x="556" y="193" font-family="Consolas, ui-monospace, SFMono-Regular, monospace" font-size="14" fill="#5b6684" text-anchor="start">stash create · commit-tree</text>
+<text x="556" y="215" font-family="Consolas, ui-monospace, SFMono-Regular, monospace" font-size="14" fill="#5b6684" text-anchor="start">restore · explicit paths</text>
+<text x="556" y="269" font-family="Segoe UI, Microsoft YaHei, Noto Sans, sans-serif" font-size="17" font-weight="700" fill="#1c2338" text-anchor="start">copy provider</text>
+<text x="556" y="293" font-family="Consolas, ui-monospace, SFMono-Regular, monospace" font-size="14" fill="#5b6684" text-anchor="start">incremental dir + hardlinks</text>
+<text x="556" y="315" font-family="Consolas, ui-monospace, SFMono-Regular, monospace" font-size="14" fill="#5b6684" text-anchor="start">hash verify · lstat guard</text>
+<path d="M516 237H526V187H538" stroke="#4B67B4" stroke-width="1.8" fill="none"/>
+<path d="M526 287H538" stroke="#4B67B4" stroke-width="1.8" fill="none"/>
+<path d="M540.0 187.0L532.9 190.4L532.9 183.6Z" fill="#4B67B4"/>
+<path d="M540.0 287.0L532.9 290.4L532.9 283.6Z" fill="#4B67B4"/>
+<path d="M812 187H818Q826 187 826 195V228Q826 237 834 237" stroke="#4B67B4" stroke-width="1.8" fill="none"/>
+<path d="M812 287H818Q826 287 826 279V246Q826 237 834 237" stroke="#4B67B4" stroke-width="1.8" fill="none"/>
+<path d="M836.0 237.0L827.9 240.8L827.9 233.2Z" fill="#4B67B4"/>
+<rect x="836" y="142" width="216" height="190" rx="14" fill="#ffffff" stroke="#4b67b459" stroke-width="1.2" filter="url(#soft)"/>
+<text x="852" y="173" font-family="Segoe UI, Microsoft YaHei, Noto Sans, sans-serif" font-size="18" font-weight="700" fill="#1c2338" text-anchor="start">checkpoints</text>
+<text x="1036" y="172" font-family="Consolas, ui-monospace, SFMono-Regular, monospace" font-size="14" font-weight="700" fill="#4B67B4" text-anchor="end">v2</text>
+<text x="852" y="201" font-family="Consolas, ui-monospace, SFMono-Regular, monospace" font-size="14" fill="#5b6684" text-anchor="start">domain · SQLite / JSON</text>
+<text x="852" y="223" font-family="Consolas, ui-monospace, SFMono-Regular, monospace" font-size="14" fill="#5b6684" text-anchor="start">id · #short · turn</text>
+<text x="852" y="245" font-family="Consolas, ui-monospace, SFMono-Regular, monospace" font-size="14" fill="#5b6684" text-anchor="start">step · seq · boundary</text>
+<text x="852" y="267" font-family="Consolas, ui-monospace, SFMono-Regular, monospace" font-size="14" fill="#5b6684" text-anchor="start">provider · ref · tree</text>
+<text x="852" y="289" font-family="Consolas, ui-monospace, SFMono-Regular, monospace" font-size="14" fill="#5b6684" text-anchor="start">global · shortCounters</text>
+<line x1="852" y1="300" x2="1036" y2="300" stroke="#e1e6f3" stroke-width="1"/>
+<text x="852" y="320" font-family="Consolas, ui-monospace, SFMono-Regular, monospace" font-size="14" fill="#7a849f" text-anchor="start">checkpoint/* · gate</text>
+<text x="44" y="366" font-family="Segoe UI, Microsoft YaHei, Noto Sans, sans-serif" font-size="14" font-weight="700" letter-spacing="1.8" fill="#4B67B4" text-anchor="start">REWIND</text>
+<text x="128" y="366" font-family="Segoe UI, Microsoft YaHei, Noto Sans, sans-serif" font-size="14" fill="#5b6684" text-anchor="start">approved · guarded · ordered 1→2→3</text>
+<rect x="44" y="380" width="216" height="74" rx="14" fill="#ffffff" stroke="#d7dcec" stroke-width="1.2" filter="url(#soft)"/>
+<text x="60" y="410" font-family="Consolas, ui-monospace, SFMono-Regular, monospace" font-size="16" font-weight="700" fill="#1c2338" text-anchor="start">/rewind &lt;target&gt;</text>
+<text x="60" y="436" font-family="Segoe UI, Microsoft YaHei, Noto Sans, sans-serif" font-size="14" fill="#7a849f" text-anchor="start">list · diff · preview</text>
+<path d="M260 416L275.5 416.0" stroke="#4B67B4" stroke-width="1.8" stroke-linecap="round" fill="none"/>
+<path d="M284.0 416.0L275.9 419.8L275.9 412.2Z" fill="#4B67B4"/>
+<rect x="284" y="380" width="224" height="74" rx="14" fill="#ffffff" stroke="#d7dcec" stroke-width="1.2" filter="url(#soft)"/>
+<text x="300" y="406" font-family="Segoe UI, Microsoft YaHei, Noto Sans, sans-serif" font-size="17" font-weight="700" fill="#1c2338" text-anchor="start">confirm</text>
+<text x="300" y="430" font-family="Consolas, ui-monospace, SFMono-Regular, monospace" font-size="14" fill="#5b6684" text-anchor="start">userQuestions/approval</text>
+<text x="300" y="450" font-family="Segoe UI, Microsoft YaHei, Noto Sans, sans-serif" font-size="14" fill="#7a849f" text-anchor="start">missing / throw → deny</text>
+<path d="M508 416L523.5 416.0" stroke="#4B67B4" stroke-width="1.8" stroke-linecap="round" fill="none"/>
+<path d="M532.0 416.0L523.9 419.8L523.9 412.2Z" fill="#4B67B4"/>
+<rect x="532" y="380" width="192" height="74" rx="14" fill="#17845c14" stroke="#17845c66" stroke-width="1.2" filter="url(#soft)"/>
+<text x="548" y="406" font-family="Segoe UI, Microsoft YaHei, Noto Sans, sans-serif" font-size="17" font-weight="700" fill="#17845c" text-anchor="start">guard</text>
+<text x="548" y="430" font-family="Segoe UI, Microsoft YaHei, Noto Sans, sans-serif" font-size="14" fill="#5b6684" text-anchor="start">pre-rewind checkpoint</text>
+<text x="548" y="450" font-family="Segoe UI, Microsoft YaHei, Noto Sans, sans-serif" font-size="14" fill="#7a849f" text-anchor="start">id printed → undoable</text>
+<path d="M628 454L628.0 462.5" stroke="#17845c" stroke-width="1.8" stroke-linecap="round" fill="none"/>
+<path d="M628.0 470.0L624.6 462.9L631.4 462.9Z" fill="#17845c"/>
+<rect x="284" y="470" width="760" height="46" rx="13" fill="#ffffff" stroke="#d7dcec" stroke-width="1.2" filter="url(#soft)"/>
+<circle cx="310" cy="493" r="13" fill="#4b67b41a" stroke="#4b67b459" stroke-width="1"/>
+<text x="310" y="498" font-family="Segoe UI, Microsoft YaHei, Noto Sans, sans-serif" font-size="14" font-weight="700" fill="#4B67B4" text-anchor="middle">1</text>
+<text x="334" y="499" font-family="Segoe UI, Microsoft YaHei, Noto Sans, sans-serif" font-size="17" font-weight="700" fill="#1c2338" text-anchor="start">workspace</text>
+<text x="442" y="498" font-family="Consolas, ui-monospace, SFMono-Regular, monospace" font-size="14" fill="#5b6684" text-anchor="start">provider.restore(ref)</text>
+<text x="1028" y="498" font-family="Segoe UI, Microsoft YaHei, Noto Sans, sans-serif" font-size="14" fill="#7a849f" text-anchor="end">restore | reset-hard · explicit paths · no deletion</text>
+<rect x="332" y="526" width="712" height="46" rx="13" fill="#ffffff" stroke="#d7dcec" stroke-width="1.2" filter="url(#soft)"/>
+<circle cx="358" cy="549" r="13" fill="#4b67b41a" stroke="#4b67b459" stroke-width="1"/>
+<text x="358" y="554" font-family="Segoe UI, Microsoft YaHei, Noto Sans, sans-serif" font-size="14" font-weight="700" fill="#4B67B4" text-anchor="middle">2</text>
+<text x="382" y="555" font-family="Segoe UI, Microsoft YaHei, Noto Sans, sans-serif" font-size="17" font-weight="700" fill="#1c2338" text-anchor="start">config</text>
+<text x="490" y="554" font-family="Consolas, ui-monospace, SFMono-Regular, monospace" font-size="14" fill="#5b6684" text-anchor="start">settings write-back</text>
+<text x="1028" y="554" font-family="Segoe UI, Microsoft YaHei, Noto Sans, sans-serif" font-size="14" fill="#7a849f" text-anchor="end">profile patch · scope.replace / SettingsForms</text>
+<rect x="380" y="582" width="664" height="46" rx="13" fill="#ffffff" stroke="#d7dcec" stroke-width="1.2" filter="url(#soft)"/>
+<circle cx="406" cy="605" r="13" fill="#4b67b41a" stroke="#4b67b459" stroke-width="1"/>
+<text x="406" y="610" font-family="Segoe UI, Microsoft YaHei, Noto Sans, sans-serif" font-size="14" font-weight="700" fill="#4B67B4" text-anchor="middle">3</text>
+<text x="430" y="611" font-family="Segoe UI, Microsoft YaHei, Noto Sans, sans-serif" font-size="17" font-weight="700" fill="#1c2338" text-anchor="start">session</text>
+<text x="538" y="610" font-family="Consolas, ui-monospace, SFMono-Regular, monospace" font-size="14" fill="#5b6684" text-anchor="start">SessionStore.fork(src, boundary)</text>
+<text x="1028" y="610" font-family="Segoe UI, Microsoft YaHei, Noto Sans, sans-serif" font-size="14" fill="#7a849f" text-anchor="end">turn-end fork · original kept</text>
+<path d="M300 516L325.3 523.9" stroke="#4B67B4" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+<path d="M332.0 526.0L324.7 527.0L326.6 521.0Z" fill="#4B67B4"/>
+<path d="M348 572L373.3 579.9" stroke="#4B67B4" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+<path d="M380.0 582.0L372.7 583.0L374.6 577.0Z" fill="#4B67B4"/>
+<path d="M900 336V460" stroke="#4B67B4" stroke-width="1.4" stroke-dasharray="5 5" fill="none" opacity="0.7"/>
+<path d="M900.0 470.0L896.6 462.9L903.4 462.9Z" fill="#4B67B4"/>
+<text x="912" y="404" font-family="Segoe UI, Microsoft YaHei, Noto Sans, sans-serif" font-size="14" fill="#7a849f" text-anchor="start">restore ref</text>
+<text x="44" y="648" font-family="Consolas, ui-monospace, SFMono-Regular, monospace" font-size="14" fill="#7a849f" text-anchor="start">preview is read-only · diff a b · clear [--all] · prune: newest kept per session</text>
+<text x="1056" y="648" font-family="Segoe UI, Microsoft YaHei, Noto Sans, sans-serif" font-size="14" fill="#7a849f" text-anchor="end">restore failure → no fork · checkpoint kept</text>
+</svg>
