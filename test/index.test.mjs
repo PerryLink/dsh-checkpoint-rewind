@@ -484,7 +484,14 @@ describe('/rewind 命令', () => {
     assert.ok(childId, '命令结果携带新 sessionId')
     const child = app.root.sessions.get(SessionId(childId))
     assert.ok(child, '重放子会话在 store 中存活')
-    assert.equal(child.header.parentSession, app.session.id)
+    // 0.2.2-rc.3 起官方 fork 是 ordinary fork，按 SessionHeader 契约省略来源关系
+    // （"Ordinary forks omit this field"）；旧宿主仍可能把源 id 留在 parentSession。
+    // 两代形状都接受，但绝不接受指错来源。
+    assert.ok(
+      child.header.parentSession === undefined || child.header.parentSession === app.session.id,
+      'parentSession 省略（rc.3 ordinary fork）或等于源会话（旧宿主）',
+    )
+    assert.equal(child.header.isSeeded, true, 'fork 子会话标记为 seeded')
     assert.equal(child.header.cwd, cwd)
     // 0.1.7-alpha.1 起 fork 种子自带 child-owned 标记事件，firstLiveSeq 因此比边界
     // 大 2（rc.2 是 +1）。插件消费的是持久割点 inheritedEventCount（= 边界前缀

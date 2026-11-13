@@ -186,7 +186,13 @@ async function mainCopyFlow() {
   assert.ok(childId, '结果携带新 sessionId')
   const child = root.sessions.get(SessionId(childId))
   assert.ok(child, 'fork 子会话存活')
-  assert.equal(child.header.parentSession, session.id)
+  // 0.2.2-rc.3 起 ordinary fork 省略 parentSession（SessionHeader 契约）；
+  // 旧宿主若仍写入则必须是源会话。
+  assert.ok(
+    child.header.parentSession === undefined || child.header.parentSession === session.id,
+    'parentSession 省略（rc.3 ordinary fork）或等于源会话（旧宿主）',
+  )
+  assert.equal(child.header.isSeeded, true, 'fork 子会话标记为 seeded')
   assert.equal(child.header.cwd, workspace)
   assert.equal(child.snapshotEvents().length, forkSeq1 + 3, '种子 = 边界前缀 + session/end-seed + 回退通知')
   const lastEvent = child.snapshotEvents().at(-1)
@@ -196,7 +202,7 @@ async function mainCopyFlow() {
   for (let seq = 0; seq <= forkSeq1; seq += 1) {
     assert.deepEqual(child.snapshotEvents()[seq], session.snapshotEvents()[seq], `child seed seq ${seq} 与源一致`)
   }
-  log('  fork ok: child', childId, 'seedLength', child.snapshotEvents().length - 2, 'parent', child.header.parentSession)
+  log('  fork ok: child', childId, 'seedLength', child.snapshotEvents().length - 2, 'parent', child.header.parentSession ?? '(omitted)')
 
   await dispose()
   log('copy flow: PASS')

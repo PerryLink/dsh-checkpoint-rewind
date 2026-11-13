@@ -1450,10 +1450,11 @@ export async function apply(ctx, config = {}) {
   /**
    * 会话回退：官方重放 —— 以检查点边界为界 seed 出全新子会话。优先走
    * SessionStore.fork（边界前缀深拷贝，fork 自行设定 isSeeded /
-   * inheritedEventCount / cwd / parentSession）；宿主无 fork 时手搓回退：
-   * create + 显式 `inheritedEventCount: seed.length` + `meta.isSeeded: true`
-   * （两者必须同批——宿主对 seeded 构造校验三条）。原会话完整保留
-   * （非破坏，CC 差异化）。
+   * inheritedEventCount / cwd；0.2.2-rc.3 起 ordinary fork 不再记录
+   * parentSession，该字段留给 subagent 的直接创建者）。宿主无 fork 时手搓
+   * 回退：create + 显式 `inheritedEventCount: seed.length` + `meta.isSeeded:
+   * true`（两者必须同批——宿主对 seeded 构造校验三条），并由本插件显式写入
+   * parentSession。原会话完整保留（非破坏，CC 差异化）。
    * @param {import('@deepseek-ai/dsh-session').Session} source - 源会话。
    * @param {import('./types.d.ts').CheckpointRecord} record - 目标检查点。
    * @returns {import('@deepseek-ai/dsh-session').Session} 子会话。
@@ -1462,8 +1463,8 @@ export async function apply(ctx, config = {}) {
     const boundary = typeof record.sessionBoundary === 'number' ? record.sessionBoundary : undefined
     if (boundary !== undefined && typeof ctx.sessions.fork === 'function') {
       // 官方 fork：边界前缀深拷贝进子会话（fork 自行设定 isSeeded /
-      // inheritedEventCount / cwd / parentSession）。boundary 是现有事件 seq，
-      // 按 SessionSeq 品牌构造（运行时即原数字）。
+      // inheritedEventCount / cwd；rc.3 起不再记录 parentSession）。
+      // boundary 是现有事件 seq，按 SessionSeq 品牌构造（运行时即原数字）。
       return ctx.sessions.fork(source, SessionSeq(boundary))
     }
     // 手搓回退：无闭合边界（空种子全新子会话）或宿主无 fork 时 —— create +
