@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.6.36] - 2026-11-18
+
 ### Changed
 
 - **Align the dependency pins and declared host range with the 0.2.2-rc.4 line.** @deepseek-ai/dsh-* devDependencies move to 0.2.2-rc.4 (npm next), every @deepseek-ai/dsh-* peer range gains the append-only `>=0.2.2-0 <0.3.0` clause, and engines.dsh gains the same clause. No runtime behaviour changed.

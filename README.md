@@ -194,7 +194,7 @@ capture ── fs/write-intent · fs/edit-intent · tools/pre-execute (prepend, 
 
 ### 会话事件（rc.2 说明）
 
-该插件将 `checkpoint/snapshot`、`checkpoint/bound`、`checkpoint/prune` 与 `checkpoint/rewind` 声明为仅日志的 `SessionEventMap` 成员。Harness rc.2 **没有插件事件注册面**，且 `Session.append` 不会盖章 `ignorable` 信封（其第三个参数是 surface intent 而非选项），因此追加未知类型会让会话在重新加载时无法读取。该插件因此通过**自适应门**追加：运行时探测（在一个分离的、永不持久化的会话存储上）检测宿主的 `append` 是否会盖章 `ignorable` 信封——在 rc.2 上门保持关闭；在支持它的宿主上，`checkpoint/*` 事件会自动以 `ignorable: true` 追加。在那之前，权威审计链是 `command/run` + `command/done`（宿主已知）加上持久化的 `checkpoints` 存储领域。
+该插件将 `dsh-v0.2.2-rc.4`（2026-11-18）；`checkpoint/snapshot`、`checkpoint/bound`、`checkpoint/prune` 与 `checkpoint/rewind` 声明为仅日志的 `SessionEventMap` 成员。Harness rc.2 **没有插件事件注册面**，且 `Session.append` 不会盖章 `ignorable` 信封（其第三个参数是 surface intent 而非选项），因此追加未知类型会让会话在重新加载时无法读取。该插件因此通过**自适应门**追加：运行时探测（在一个分离的、永不持久化的会话存储上）检测宿主的 `append` 是否会盖章 `ignorable` 信封——在 rc.2 上门保持关闭；在支持它的宿主上，`checkpoint/*` 事件会自动以 `ignorable: true` 追加。在那之前，权威审计链是 `command/run` + `command/done`（宿主已知）加上持久化的 `checkpoints` 存储领域。
 
 ### Web UI 锚点
 
@@ -290,7 +290,7 @@ git-provider 快照不持有任何 ref。它们在设计上是未引用的 `stas
 <details>
 <summary>我可以回滚到回合中间的某一步吗？</summary>
 
-文件恢复是精确到单步的（`/rewind step <N>` = ≤ N 的最近快照）。但是，会话重放遵循 Harness 的重放粒度：子会话将从检查点所在的回合边界开始重放。
+文件恢复是精确到单步的（`dsh-v0.2.2-rc.4`（2026-11-18）；`/rewind step <N>` = ≤ N 的最近快照）。但是，会话重放遵循 Harness 的重放粒度：子会话将从检查点所在的回合边界开始重放。
 
 </details>
 
@@ -392,7 +392,7 @@ git-provider 快照不持有任何 ref。它们在设计上是未引用的 `stas
 
 | 维度 | 状态 |
 |---|---|
-| Harness | DeepSeek Harness `dsh-v0.2.1-alpha.1`（GitHub tag，2026-09-25 已核验；npm 钉号 `0.1.7-rc.2`，peer 依赖范围 `>=0.1.6-0 <0.2.0 \|\| >=0.1.7-0 <0.2.0`）（2026-10-04 已适配）：宿主删除了 `@deepseek-ai/dsh-settings-file`，并把 `ctx.settings` 的命名空间注册面换成 `SettingsForms` —— 它把每个 Loader 条目的 `Config` 投影成设置页表单、编辑落到 profile patch；插件配置字段因此标为 `volatile()` 并按当前值读取，typert strict codec 只保留 `create()` 工厂，回退通知改用自己的消息来源 `kind`。`0.1.5-rc.2`/`0.1.6-alpha.2` 宿主仍走旧的 `settings.register` 路径。2026-09-22 已针对 `dsh-v0.1.7-alpha.1` 检出版核验（alpha.1 类型面 typecheck + 全量单测 + 组装式 headless 集成）。 |
+| Harness | DeepSeek Harness `dsh-v0.2.2-rc.4`（GitHub tag，2026-11-18 已核验；npm 钉号 `0.1.7-rc.2`，peer 依赖范围 `>=0.1.6-0 <0.2.0 \|\| >=0.1.7-0 <0.2.0 \|\| >=0.2.2-0 <0.3.0`）（2026-11-18 已适配）：宿主删除了 `@deepseek-ai/dsh-settings-file`，并把 `ctx.settings` 的命名空间注册面换成 `SettingsForms` —— 它把每个 Loader 条目的 `Config` 投影成设置页表单、编辑落到 profile patch；插件配置字段因此标为 `volatile()` 并按当前值读取，typert strict codec 只保留 `create()` 工厂，回退通知改用自己的消息来源 `kind`。`0.1.5-rc.2`/`0.1.6-alpha.2` 宿主仍走旧的 `settings.register` 路径。2026-11-18 已针对 `dsh-v0.1.7-alpha.1` 检出版核验（alpha.1 类型面 typecheck + 全量单测 + 组装式 headless 集成）。 |
 | Node | `^22.19.0 \|\| >=24.0.0` |
 | 平台 | 全部（宿主命令 + 监听器；通过 settings 能力提供可选设置页时间线） |
 | 模型 | 任意（不调用模型 —— 快照与恢复是确定性的） |
