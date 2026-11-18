@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **Align the dependency pins and declared host range with the 0.2.2-rc.4 line.** @deepseek-ai/dsh-* devDependencies move to 0.2.2-rc.4 (npm next), every @deepseek-ai/dsh-* peer range gains the append-only `>=0.2.2-0 <0.3.0` clause, and engines.dsh gains the same clause. No runtime behaviour changed.
+- Gates: `check`, `typecheck:ci`, `test`, `test:integration`, `coverage`, `lint`, `check:readmes`, `verify:self-contained`, `check:lockfile`, `verify:artifacts` and `prepack` all exit 0 (Node 24.22.1). `pnpm-lock.yaml` was regenerated with `pnpm install --lockfile-only`, which also appended `0.2.2-rc.4` to the `minimumReleaseAgeExclude` list in `pnpm-workspace.yaml`. `@perrylink/dsh-plugin-doctor@0.4.4 --only R,K`: 14 pass, 4 warn, 0 fail.
+
 ## [0.6.34] - 2026-10-24
 
 ### Fixed
