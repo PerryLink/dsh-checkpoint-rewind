@@ -46,6 +46,7 @@
     "LICENSE",
     "THIRD_PARTY_NOTICES.md",
     "PRIVACY.md",
+    "docs/assets/*",
     "icon.svg"
   ],
   "dsh": {
