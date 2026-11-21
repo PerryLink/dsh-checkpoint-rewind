@@ -43,6 +43,11 @@ dsh plugin --profile <name> add dsh-checkpoint-rewind
   <img src="docs/assets/dsh-checkpoint-rewind-flow-v5-light.svg" width="100%" alt="Estructura: captura antes de cada mutación → deduplicación por paso → los proveedores git / copy convergen en un único registro checkpoints → /rewind → confirmación → checkpoint guardián → restauración de espacio de trabajo, configuración y sesión (sesión bifurcada al final)">
 </picture>
 
+![dsh-checkpoint-rewind: ejecución real de terminal](docs/assets/dsh-checkpoint-rewind-demo.gif)
+
+*Repetición animada de una ejecución real registrada en este repositorio.*
+
+
 ## Instalación en tres pasos
 
 1. **Instala** (elige un canal):

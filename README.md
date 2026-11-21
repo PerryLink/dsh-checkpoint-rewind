@@ -36,6 +36,10 @@ dsh plugin --profile <name> add dsh-checkpoint-rewind
 
 ## 它是什么
 
+![dsh-checkpoint-rewind 真实终端运行](docs/assets/dsh-checkpoint-rewind-demo.gif)
+
+*本仓库一次真实运行的动图回放。*
+
 `dsh-checkpoint-rewind` 捕获一个**三态统一检查点**——工作区、会话游标与插件配置——并用一条经批准的命令恢复其中一个或全部。工作区快照优先走无副作用的 git 原语（`stash create` / `commit-tree`），非 git 目录（以及尚无 HEAD 的仓库）自动降级为带硬链接复用的增量 `copy` 快照。会话回退不截断原会话：它从检查点边界 fork 出一个新的子会话，原会话保留完整历史。变更工具执行前、自动间隔、手动 `/checkpoint` 以及每次回退前都会自动捕获；设置页还提供一条带逐行 diff 的检查点时间线。
 
 <picture>

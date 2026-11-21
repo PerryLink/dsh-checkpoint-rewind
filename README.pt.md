@@ -43,6 +43,11 @@ O `dsh-checkpoint-rewind` captura um **checkpoint unificado de três estados** �
   <img src="docs/assets/dsh-checkpoint-rewind-flow-v5-light.svg" width="100%" alt="Estrutura: captura antes de cada mutação → deduplicação por passo → os provedores git / copy convergem em um único registro checkpoints → /rewind → confirmação → checkpoint guardião → restauração de espaço de trabalho, configuração e sessão (sessão bifurcada por último)">
 </picture>
 
+![dsh-checkpoint-rewind: execução real de terminal](docs/assets/dsh-checkpoint-rewind-demo.gif)
+
+*Repetição animada de uma execução real registrada neste repositório.*
+
+
 ## Instalação em três passos
 
 1. **Instale** (escolha um canal):

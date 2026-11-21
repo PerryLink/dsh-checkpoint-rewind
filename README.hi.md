@@ -43,6 +43,11 @@ dsh plugin --profile <name> add dsh-checkpoint-rewind
   <img src="docs/assets/dsh-checkpoint-rewind-flow-v5-light.svg" width="100%" alt="संरचना: हर बदलाव से पहले कैप्चर → प्रति-चरण डिडुप → git / copy प्रोवाइडर एक checkpoints रिकॉर्ड में मिलते हैं → /rewind → पुष्टि → गार्ड चेकपॉइंट → वर्कस्पेस, कॉन्फ़िग और सत्र की बहाली (सत्र अंत में fork)">
 </picture>
 
+![dsh-checkpoint-rewind का असली टर्मिनल रन](docs/assets/dsh-checkpoint-rewind-demo.gif)
+
+*इस रिपॉज़िटरी में दर्ज असली रन का एनिमेटेड रीप्ले।*
+
+
 ## तीन चरणों में शुरुआत
 
 1. **इंस्टॉल करें** (एक चैनल चुनें):
