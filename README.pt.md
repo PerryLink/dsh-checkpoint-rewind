@@ -11,6 +11,8 @@
 
 Um plugin de costura de capacidade (capability-seam) para o DeepSeek Harness: captura o espaço de trabalho com primitivas git sem efeitos colaterais antes de cada mutação e, ao rebobinar, primeiro guarda, depois restaura arquivos, depois a configuração e por fim bifurca a sessão — o histórico da sessão original nunca é truncado.
 
+Última verificação: DeepSeek Harness `dsh-v0.2.3-alpha.1` (2026-11-22).
+
 [Instalar](#instalação-em-três-passos) · [Configuração](#configuração) · [FAQ](#faq) · [简体中文](README.md) · [English](README.en.md) · [Español](README.es.md) · [Português](README.pt.md) · [हिन्दी](README.hi.md)
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-3366CC?style=flat-square&labelColor=2B3245)](LICENSE)
@@ -46,7 +48,6 @@ O `dsh-checkpoint-rewind` captura um **checkpoint unificado de três estados** �
 ![dsh-checkpoint-rewind: execução real de terminal](docs/assets/dsh-checkpoint-rewind-demo.gif)
 
 *Repetição animada de uma execução real registrada neste repositório.*
-
 
 ## Instalação em três passos
 

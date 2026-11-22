@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- Fix: register the checkpoints settings page into `settings.section` instead of the removed `settings.plugins.tab` slot, so the panel mounts on 0.2.3-alpha.1 while keeping the bundle on earlier lines.
+- Compatibility: declare DeepSeek Harness 0.2.3-alpha.1 support (>=0.2.3-0 <0.3.0-0 in engines.dsh and every @deepseek-ai/dsh-* peer range) and refresh README verification stamps.
+
 ## [0.6.36] - 2026-11-18
 
 ### Changed

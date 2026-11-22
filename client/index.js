@@ -787,9 +787,9 @@ window.__ModuleLoader__.load({
         var timeline = function (args) { return Promise.resolve(scope.remote.checkpointPanel.timeline(args && args.limit)).then(unwrap) }
         var diff = function (from, to) { return Promise.resolve(scope.remote.checkpointPanel.diff(from, to)).then(unwrap) }
         var restorePreview = function (id) { return Promise.resolve(scope.remote.checkpointPanel.restorePreview(id)).then(unwrap) }
-        scope.slots.inject('settings.plugins.tab', function () {
+        scope.slots.inject('settings.section', function () {
           return scope.slots.register({
-            name: 'settings.plugins.tab',
+            name: 'settings.section',
             id: 'checkpoints',
             order: 20,
             label: function () { return t('tab') },
