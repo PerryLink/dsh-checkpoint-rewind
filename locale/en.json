@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Checkpoint Rewind",
+    "description": "Turn “back to step N” into one command — three-state workspace, config, and session checkpoints, rolled back in one approved transaction."
+  }
+}

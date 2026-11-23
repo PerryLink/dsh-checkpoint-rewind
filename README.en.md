@@ -7,6 +7,8 @@
 
 # dsh-checkpoint-rewind
 
+Current version `0.6.38`.
+
 **Turn “back to step N” into one command — three-state workspace, config, and session checkpoints, rolled back in one approved transaction.**
 
 A rewind capability-seam plugin for DeepSeek Harness: capture the workspace with side-effect-free git primitives before every mutation, then guard, restore files, restore config, and fork the session — the original session history is never truncated.
